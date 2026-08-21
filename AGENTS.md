@@ -44,9 +44,13 @@ and the decisions that need Jeff before some of it can be finalized.
    three groups: (A) mechanical, doable on the dev machine right now, (B) blocked
    on the real dashboard URLs, (C) needs the Windows show PC and the real wall.
    Group A is the highest-value next action; group C is where the real risk is.
-2. Re-run `npm run probe` and re-check overlay transparency **on the Windows show
-   PC**. macOS passing does not settle the target platform, and the overlay
-   compositing assumption is what the whole architecture rests on.
+2. Re-check **overlay transparency on the Windows show PC**. This is the one
+   thing CI cannot answer, and the whole architecture rests on it. The Electron
+   API questions are settled: the **Probe Windows** workflow confirmed the view
+   APIs behave exactly as on macOS and that every fullscreen path covers the
+   display on Windows, so the macOS simple-fullscreen workaround stays scoped to
+   darwin. That was on a 1024x768 virtual display though, so re-run the probes on
+   the real hardware too.
 3. Scope `allowedOrigins` (per view, in config) to the real Honeywell IdP and app
    domains once the URLs are known. The enforcement code is already in place for
    both `will-navigate` and `setWindowOpenHandler`; this is now a config edit.

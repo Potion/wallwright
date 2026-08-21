@@ -124,6 +124,48 @@ the bottom of the z-order across the whole window. Reproduced and fixed: the
 band was wall x 622..901, exactly the strip a panel vacated when narrowed from
 900 to 619.
 
+### Windows: view APIs match macOS, and every fullscreen path covers the display
+
+Answered by the **Probe Windows** workflow (`windows-latest`, Electron 43.4.1,
+1024x768 virtual display), not by assumption.
+
+View APIs are identical to macOS, so nothing platform-specific is needed there:
+
+```
+initialOrder      abc
+addChildView(a)   bca     <- reorders in place, same as macOS
+addChildView(b,2) cab
+hasSetVisible     true
+hasGetVisible     true
+animatedSetBounds ok
+```
+
+That means `bringToTop()`'s remove + add fallback is dead code on Windows too.
+It can go, but it costs nothing and no real Windows hardware has run it yet.
+
+Fullscreen is where the platforms differ, and Windows is the easy one. **All five
+variants covered the whole display** (`content: {x:0, y:0, 1024x768}`,
+`coversDisplay: true`), including the constructor options that fall 39px short on
+macOS. So `applyFullscreen()`'s non-darwin branch is correct: Windows needs no
+special case, and the macOS simple-fullscreen workaround stays scoped to darwin.
+
+**Caveat: a CI runner is not the show PC.** The display is a 1024x768 virtual
+one with no real GPU. This settles the API questions, which are
+platform-behaviour questions. It does **not** settle overlay alpha compositing,
+which still has to be judged by eye on the real wall, and it says nothing about
+4K performance.
+
+### The Windows build produces installable artifacts
+
+`build-windows.yml` on `windows-latest` produced, after lint and tests passed:
+
+| artifact                               | size   |
+| -------------------------------------- | ------ |
+| `Forge-0.1.0-x64.exe` (NSIS installer) | 103 MB |
+| `Forge-0.1.0-x64.zip`                  | 145 MB |
+
+Neither has been run on Windows yet; see the checklist. Both are unsigned.
+
 ### Packaging works, and it is what fixes the app name
 
 `npm run build:mac` produces `Forge.app` with `CFBundleName = Forge`, which is
@@ -313,11 +355,6 @@ behave differently from a mock.
 
 macOS passing does not settle the target platform. This group is the real risk.
 
-- [ ] **`npm run probe:fs` on Windows.** Decides whether the normal fullscreen
-      path actually covers the display there, or whether Windows needs its own
-      special case the way macOS did. `applyFullscreen()` currently assumes it
-      behaves. Run the **Probe Windows** workflow for an early signal, then
-      confirm on the show PC.
 - [ ] **Install the built artifact on the show PC.** The installer and zip build
       in CI but have never been run on Windows. Check the NSIS install, that the
       config seeds to `%APPDATA%\\Forge\\wall.json`, and that the layout editor
@@ -327,13 +364,13 @@ macOS passing does not settle the target platform. This group is the real risk.
       approve. Needs a certificate first.
 - [ ] **Auto-launch on boot and crash restart.** Not built. Required for
       unattended operation.
-- [ ] **Overlay alpha compositing on Windows.** The single most important item
-      here. The whole architecture was chosen over capture-based approaches on
-      the assumption this works. It works on macOS; if it renders opaque on
+- [ ] **Overlay alpha compositing on Windows.** Now the single most important
+      open item, and the one CI cannot answer because it needs eyes on real
+      hardware. The whole architecture was chosen over capture-based approaches
+      on the assumption this works. It works on macOS; if it renders opaque on
       Windows, implement one of the `SPEC.md` fallbacks.
-- [ ] **Re-run `npm run probe`.** It answers the z-order and view-API questions
-      empirically. The recorded answers are macOS answers. `bringToTop()` keeps a
-      remove + add fallback specifically because this has not been re-run.
+- [ ] **Re-run the probes on the real show PC.** CI answered them on a 1024x768
+      virtual display. Confirm on the actual hardware and wall resolution.
 - [ ] **Display targeting.** Set `wall.displayLabel` or `wall.displayId` to the
       real LED wall output and confirm the window lands there rather than on the
       operator's monitor. Only the primary-display fallback path has ever run.
