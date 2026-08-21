@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: lint + test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is the deployment target, so the tests run there too. It also
+        # catches the class of bug where a script or path only works on POSIX.
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # --ignore-scripts skips Electron's ~100MB binary download. The linters
+      # and the unit tests never touch Electron: they cover src/config.js and
+      # src/layout.js, which are deliberately electron-free. The build workflow
+      # does a full install.
+      - run: npm ci --ignore-scripts
+
+      - run: npm run lint
+
+      - run: npm test

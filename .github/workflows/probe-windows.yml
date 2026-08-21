@@ -1,0 +1,42 @@
+name: Probe Windows
+
+# Answers the open Windows questions in docs/validation.md without needing the
+# show PC: which fullscreen path actually covers the display, and whether the
+# view APIs behave the way they do on macOS.
+#
+# A CI runner is not the show PC. Treat the output as an early signal, not as
+# sign-off: the runner's display is virtual and small, and overlay alpha
+# compositing still has to be judged by eye on the real hardware.
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\electron\Cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          restore-keys: ${{ runner.os }}-electron-
+
+      - run: npm ci
+
+      # continue-on-error: a probe that cannot run is itself a result worth
+      # seeing in the log, and the second probe should still get its turn.
+      - name: View API semantics (z-order, setVisible, animated setBounds)
+        run: npm run probe
+        continue-on-error: true
+
+      - name: Which fullscreen path covers the display
+        run: npm run probe:fs
+        continue-on-error: true

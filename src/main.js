@@ -23,6 +23,7 @@ const {
   globalShortcut,
 } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { loadConfig, saveLayout } = require('./config');
 const { clampGrid, snapGrid } = require('./layout');
 
@@ -37,8 +38,29 @@ const { clampGrid, snapGrid } = require('./layout');
 // hidden under kiosk anyway.
 app.setName('Forge');
 
-const CONFIG_PATH =
-  process.env.FORGE_CONFIG || path.join(__dirname, '..', 'config', 'wall.json');
+const BUNDLED_CONFIG = path.join(__dirname, '..', 'config', 'wall.json');
+
+// Resolved at startup rather than at module load, because it depends on
+// app.isPackaged and on userData, and because it can create a file.
+let configPath = BUNDLED_CONFIG;
+
+// In a packaged app the bundled config lives inside app.asar, which is
+// read-only: the layout editor's save would fail and the show PC could not be
+// tuned in place. So the live config is a copy under userData, seeded from the
+// bundle on first run. That also means a reinstall does not overwrite a layout
+// someone spent time getting right.
+function resolveConfigPath() {
+  if (process.env.FORGE_CONFIG) return process.env.FORGE_CONFIG;
+  if (!app.isPackaged) return BUNDLED_CONFIG;
+
+  const live = path.join(app.getPath('userData'), 'wall.json');
+  if (!fs.existsSync(live)) {
+    fs.mkdirSync(path.dirname(live), { recursive: true });
+    fs.copyFileSync(BUNDLED_CONFIG, live);
+    log(`seeded ${live} from the bundled default`);
+  }
+  return live;
+}
 const DEV = process.env.FORGE_DEV === '1';
 
 // Smallest panel the layout editor will produce, in wall units.
@@ -252,27 +274,40 @@ function publicView(v, i) {
 function createWall() {
   const display = pickWallDisplay();
 
+  // Start at the display's size when the wall is going fullscreen anyway.
+  // Creating a 3840x2160 window on a smaller display and then fullscreening it
+  // makes macOS animate the shrink over dozens of frames, and every frame is a
+  // resize event.
+  const goingFullscreen = !!(config.wall.fullscreen || config.wall.kiosk);
   win = new BaseWindow({
     x: display.bounds.x,
     y: display.bounds.y,
-    width: config.wall.width,
-    height: config.wall.height,
+    width: goingFullscreen ? display.bounds.width : config.wall.width,
+    height: goingFullscreen ? display.bounds.height : config.wall.height,
     frame: false,
     backgroundColor: config.wall.backgroundColor,
   });
 
   // Applied after construction, not as constructor options. See
   // applyFullscreen() for why the obvious options are the wrong ones on macOS.
-  if (config.wall.fullscreen || config.wall.kiosk) applyFullscreen(true);
+  if (goingFullscreen) applyFullscreen(true);
 
   // Fullscreen/kiosk means the real content size is the display's, not whatever
   // was passed above, and it only settles after the transition. Compute the
   // layout from the window itself and recompute whenever it changes.
   layout = computeLayout();
+  let resizeTimer = null;
   const onResize = () => {
-    refreshLayout();
-    if (state.mode === 'active') activate(state.activeIndex, { force: true });
-    else if (overlay) dockGrid({ animate: false });
+    // A fullscreen transition emits a resize per animation frame. Relaying out
+    // on each one means dozens of setBounds + setZoomFactor passes over four
+    // live web views, so wait for the size to settle instead.
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      resizeTimer = null;
+      refreshLayout();
+      if (state.mode === 'active') activate(state.activeIndex, { force: true });
+      else if (overlay) dockGrid({ animate: false });
+    }, 120);
   };
   win.on('resize', onResize);
   win.on('enter-full-screen', onResize);
@@ -533,8 +568,8 @@ function exitEdit({ save = true } = {}) {
   editDrag = null;
   if (save) {
     try {
-      saveLayout(CONFIG_PATH, config.views);
-      log(`layout saved to ${CONFIG_PATH}`);
+      saveLayout(configPath, config.views);
+      log(`layout saved to ${configPath}`);
     } catch (e) {
       warn('could not save layout:', e.message);
     }
@@ -913,7 +948,7 @@ function showFatal(message) {
     font:14px/1.5 ui-monospace,Menlo,monospace">
     <h1 style="font:600 20px sans-serif;color:#f04e23;margin:0 0 16px">Forge cannot start</h1>
     <pre style="white-space:pre-wrap">${escapeHtml(message)}</pre>
-    <p style="color:#8b949e">Config: ${escapeHtml(CONFIG_PATH)}</p></body>`;
+    <p style="color:#8b949e">Config: ${escapeHtml(configPath)}</p></body>`;
   v.webContents.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
   console.error('[forge] fatal:', message);
 }
@@ -937,12 +972,13 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
     try {
-      config = loadConfig(CONFIG_PATH);
+      configPath = resolveConfigPath();
+      config = loadConfig(configPath);
     } catch (e) {
       return showFatal(e.message);
     }
     log(
-      `config ${CONFIG_PATH}: ${config.views.length} views on a ` +
+      `config ${configPath}: ${config.views.length} views on a ` +
         `${config.wall.width}x${config.wall.height} wall`
     );
     createWall();
@@ -953,15 +989,34 @@ if (!app.requestSingleInstanceLock()) {
     const retarget = () => {
       if (!win) return;
       const d = pickWallDisplay();
-      win.setBounds({
-        x: d.bounds.x,
-        y: d.bounds.y,
-        width: config.wall.width,
-        height: config.wall.height,
-      });
-      layout = computeLayout();
-      if (state.mode === 'active') activate(state.activeIndex, { force: true });
-      else dockGrid({ animate: false });
+
+      if (isFullscreenNow()) {
+        // Already owning a display, so do not force the window to wall size:
+        // that fights the fullscreen state, and entering fullscreen itself
+        // fires display-metrics-changed. Only act when it is on the wrong
+        // output, which means dropping out, relocating, and going back in.
+        const b = win.getBounds();
+        if (b.x !== d.bounds.x || b.y !== d.bounds.y) {
+          log(`moving the wall to display "${d.label}" (id ${d.id})`);
+          applyFullscreen(false);
+          win.setBounds({
+            x: d.bounds.x,
+            y: d.bounds.y,
+            width: d.bounds.width,
+            height: d.bounds.height,
+          });
+          applyFullscreen(true);
+        }
+      } else {
+        win.setBounds({
+          x: d.bounds.x,
+          y: d.bounds.y,
+          width: config.wall.width,
+          height: config.wall.height,
+        });
+      }
+      // The relayout is left to the debounced resize handler, so a burst of
+      // display events collapses into one pass.
     };
     screen.on('display-added', retarget);
     screen.on('display-removed', retarget);

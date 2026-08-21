@@ -1,0 +1,51 @@
+appId: com.potion.forge
+productName: Forge
+copyright: Potion
+
+directories:
+  output: dist
+  buildResources: build
+
+# Explicit rather than relying on defaults, so the dev harness (mock server,
+# probes, icon generator) and the tests never end up in a shipped exhibit.
+# config/wall.json must ship: it is the default the app copies into userData on
+# first run. Local configs are gitignored and deliberately not matched here.
+files:
+  - package.json
+  - src/**/*
+  - '!src/dev/**'
+  - config/wall.json
+
+asar: true
+
+win:
+  target:
+    # nsis for a normal managed install; zip for the case where Honeywell IT
+    # will not allow an installer to run on the show PC. See AGENTS.md.
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  # Assisted rather than one-click, so IT can see and choose what it does.
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Forge
+
+# Signing is unconfigured because there is no certificate yet. Once there is,
+# set CSC_LINK and CSC_KEY_PASSWORD in the CI secrets and electron-builder picks
+# them up with no change to this file. A signed build is easier for Honeywell IT
+# to approve, which is an open question in AGENTS.md.
+
+mac:
+  target:
+    - target: dir
+      arch: [arm64]
+  category: public.app-category.utilities
+
+publish: null

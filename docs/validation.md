@@ -124,6 +124,42 @@ the bottom of the z-order across the whole window. Reproduced and fixed: the
 band was wall x 622..901, exactly the strip a panel vacated when narrowed from
 900 to 619.
 
+### Packaging works, and it is what fixes the app name
+
+`npm run build:mac` produces `Forge.app` with `CFBundleName = Forge`, which is
+the only thing that changes the macOS menu-bar title: `app.setName()` does not
+touch it. Verified on the packaged build:
+
+- The asar contains exactly the runtime files. `src/dev/**` and `test/**` are
+  excluded, so no mock server or probe ships in an exhibit.
+- First run seeds the writable config and reads it:
+  `seeded ~/Library/Application Support/Forge/wall.json from the bundled default`.
+  Without this the layout editor could not save in a packaged app, because the
+  bundled config sits read-only inside `app.asar`.
+
+Builds are unsigned; there is no certificate yet.
+
+### Fixed: a relayout storm during the fullscreen transition
+
+The packaged run logged **45 relayouts** at startup, each one re-bounding and
+re-zooming all four live web views. Two causes, both fixed:
+
+- The window was created at wall size (3840x2160) on a 1800x1169 display, so
+  macOS animated the shrink, emitting a resize per frame. It now starts at the
+  display's size when it is going fullscreen anyway.
+- Resize events were handled individually. They are now coalesced on a 120ms
+  timer, so a transition produces one relayout.
+
+Startup went from 45 relayouts to 1.
+
+### Fixed: display retargeting fought fullscreen
+
+The `display-metrics-changed` handler forced the window to `wall.width` x
+`wall.height` unconditionally. Entering fullscreen fires that event, so the
+window was yanked to 3840x2160 mid-transition and then back. It now only moves
+the window when it is on the wrong output, and relocates by leaving fullscreen,
+moving, and re-entering.
+
 ### Display fit: WORKS
 
 `wall.fitToDisplay` (default on) scales and centres the authored layout to
@@ -280,7 +316,17 @@ macOS passing does not settle the target platform. This group is the real risk.
 - [ ] **`npm run probe:fs` on Windows.** Decides whether the normal fullscreen
       path actually covers the display there, or whether Windows needs its own
       special case the way macOS did. `applyFullscreen()` currently assumes it
-      behaves.
+      behaves. Run the **Probe Windows** workflow for an early signal, then
+      confirm on the show PC.
+- [ ] **Install the built artifact on the show PC.** The installer and zip build
+      in CI but have never been run on Windows. Check the NSIS install, that the
+      config seeds to `%APPDATA%\\Forge\\wall.json`, and that the layout editor
+      can save there without admin rights.
+- [ ] **Code signing.** Unsigned builds may be blocked or warned about by
+      Windows SmartScreen, and a signed build is easier for Honeywell IT to
+      approve. Needs a certificate first.
+- [ ] **Auto-launch on boot and crash restart.** Not built. Required for
+      unattended operation.
 - [ ] **Overlay alpha compositing on Windows.** The single most important item
       here. The whole architecture was chosen over capture-based approaches on
       the assumption this works. It works on macOS; if it renders opaque on
@@ -311,6 +357,22 @@ macOS passing does not settle the target platform. This group is the real risk.
 - [ ] **Sustained run.** Leave it up for a working day against the real
       dashboards and watch for leaks, session expiry behaviour, and whether the
       watchdog fires more than expected.
+
+### What CI covers
+
+- `ci.yml` runs lint and the 34 tests on Ubuntu **and Windows** for every push
+  to `main` and every PR. Windows is in the matrix because it is the deployment
+  target and because it catches POSIX-only scripts and paths.
+- `build-windows.yml` builds the installer and zip on `windows-latest`, on a
+  `v*` tag or manual dispatch. It runs lint and tests first, so a failing build
+  cannot ship.
+- `probe-windows.yml` is manual, and is the cheapest way to answer several
+  group C items below without the show PC.
+
+Verified before pushing by simulating the CI job in a clean checkout: this is
+how the gitignored-dev-config test failure was caught, since `config/local*.json`
+does not exist outside a dev machine. That test now skips when the file is
+absent.
 
 ### Gaps in the automated tests
 

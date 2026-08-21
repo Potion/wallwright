@@ -11,6 +11,7 @@ const globals = {
     URL: 'readonly',
     Set: 'readonly',
     Map: 'readonly',
+    Buffer: 'readonly',
   },
   browser: {
     window: 'readonly',

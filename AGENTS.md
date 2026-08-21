@@ -34,6 +34,9 @@ and the decisions that need Jeff before some of it can be finalized.
   proportions it will have on the wall.
 - Dev harness: `npm run dev` serves four local mock dashboards that exercise
   login/session persistence, Esc handling, an SSO popup flow, and per-panel zoom.
+- Packaging with electron-builder, and three CI workflows: lint/test on Ubuntu
+  and Windows, a Windows installer build, and a manual Windows probe job that
+  answers the open platform questions without the show PC.
 
 ## Build / harden next (TODO)
 
@@ -57,8 +60,13 @@ and the decisions that need Jeff before some of it can be finalized.
    is there to measure this.
 7. Optional polish: a subtle idle-countdown indicator before auto-return; a
    manual "reset panel" action that reloads a view to its configured URL.
-8. Packaging: sign and package for Windows (electron-builder or similar),
-   auto-launch on boot, and a crash-restart wrapper for unattended operation.
+8. Packaging: **partly done.** electron-builder is configured
+   (`electron-builder.yml`), the Windows installer and zip build in CI on
+   `windows-latest`, and a packaged app copies its config to userData so the
+   layout editor can write to it. Still to do: **code signing** (needs a
+   certificate; then set `CSC_LINK` and `CSC_KEY_PASSWORD` as repo secrets),
+   **auto-launch on boot**, and a **crash-restart wrapper** for unattended
+   operation.
 
 ## Open decisions (need Jeff)
 
@@ -86,4 +94,8 @@ and the decisions that need Jeff before some of it can be finalized.
   regardless of focus and consumes the key before the page sees it, which kills
   Esc-to-close inside the dashboards. Handle it per view in `hardenView()`.
 - Anything asserted about an Electron API should be verified, not assumed. Add a
-  case to `src/dev/probe.js` and record the answer in `docs/validation.md`.
+  case to `src/dev/probe.js` or `src/dev/fsprobe.js` and record the answer in
+  `docs/validation.md`.
+- npm scripts must run on Windows too, so no `FOO=1 cmd` prefixes and no shell
+  loops. Put the environment setup inside the node script instead.
+- Nothing under `src/dev/` ships: `electron-builder.yml` excludes it.

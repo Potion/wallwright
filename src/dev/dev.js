@@ -5,6 +5,12 @@ const { spawn } = require('node:child_process');
 const http = require('node:http');
 const path = require('node:path');
 
+// Set here rather than as a shell prefix in the npm script: `FOO=1 node ...` is
+// not valid on Windows cmd or PowerShell, and Windows is the target platform.
+process.env.FORGE_DEV = process.env.FORGE_DEV || '1';
+process.env.FORGE_CONFIG =
+  process.env.FORGE_CONFIG || path.join(__dirname, '..', '..', 'config', 'local-dev.json');
+
 const PORT = Number(process.env.FORGE_MOCK_PORT || 8787);
 const ROOT = path.join(__dirname, '..', '..');
 

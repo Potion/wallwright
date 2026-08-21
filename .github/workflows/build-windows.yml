@@ -1,0 +1,55 @@
+name: Build Windows
+
+# Not on every push: Windows runners bill at 2x on a private repo, and a build
+# downloads the Electron binary. Tag a release or run it by hand.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache Electron and builder downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          restore-keys: ${{ runner.os }}-electron-
+
+      - run: npm ci
+
+      # Do not ship something that does not pass its own checks.
+      - run: npm run lint
+      - run: npm test
+
+      - name: Build installer and zip
+        run: npm run build:win
+
+      # Unsigned for now: there is no certificate yet. Once there is one, add
+      # CSC_LINK and CSC_KEY_PASSWORD as repository secrets and pass them as env
+      # here; electron-builder picks them up with no config change. A signed
+      # build is easier for Honeywell IT to approve.
+      - name: List what was produced
+        run: Get-ChildItem dist -File | Select-Object Name, Length
+        shell: pwsh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: forge-windows-x64
+          path: |
+            dist/*.exe
+            dist/*.zip
+          if-no-files-found: error
+          retention-days: 30
