@@ -148,49 +148,136 @@ fall outside the wall, duplicate view ids, two views sharing a session
 partition, missing wall dimensions, and bad `escToGrid` values. A malformed
 config now shows a readable error page on the wall instead of a stack trace.
 
-## Not yet validated (needs a human at the machine)
+## Still to verify
 
-Run `npm run dev` and walk these. They are all mechanical, they just need eyes
-and hands.
+Grouped by where each item can actually be done. Nothing here is known broken;
+these are the things the automated tests and the dev harness cannot settle.
+
+### A. On the dev machine, now
+
+All mechanical, all just need hands and eyes. Run `npm run dev`.
 
 - [ ] **Session persistence across restart.** Sign in on mock 1, quit
-      (`Cmd+Shift+Q`), relaunch. Still signed in? Proves the `persist:` partition.
+      (`Cmd/Ctrl+Shift+Q`), relaunch. Still signed in? Proves the `persist:`
+      partition actually persists.
 - [ ] **Page state survives dock/undock.** Sign in on mock 1, type into the
-      scratch field, promote, Back, promote again. The "Loaded at" timestamp must
-      not change and the typed text must still be there. If the timestamp
-      changes the view was reloaded, which `SPEC.md` forbids.
+      scratch field, promote, Esc, promote again. The "Loaded at" timestamp must
+      not change and the typed text must still be there. A changed timestamp
+      means the view reloaded, which `SPEC.md` forbids.
 - [ ] **Esc docks the wall.** With `escToGrid: "single"`, promote a panel and
       press Esc once: it should return to the grid. On mock 2, confirm the
       consequence too, that the page's own Esc-to-close modal no longer fires.
       That is the accepted tradeoff, not a bug.
 - [ ] **Keyboard focus.** Type into mock 2's input while it is promoted. If
       nothing appears, the `webContents.focus()` call in `activate()` is not
-      taking effect.
+      taking effect and the wireless keyboard will have no target at the wall.
 - [ ] **SSO popup.** On mock 3, click "Sign in with SSO". The popup must appear
-      centered on the wall (not off-wall or behind the panels), and clicking
-      Continue must report "signed in as operator" back in the panel.
-- [ ] **Per-panel zoom.** Mock 4 is configured at `zoom: 0.75` while its
-      neighbours are at 1.0. Its text should be visibly smaller, and promoting it
-      then returning must not leak zoom onto any other panel.
+      centred on the wall, not off-wall or behind the panels, and Continue must
+      report back into the panel.
+- [ ] **Popup activity keeps the wall awake.** With `idleReturnMs: 15000`, open
+      the mock 3 popup and keep typing in it for over 15 seconds. The wall must
+      not dock and close the popup underneath you. This is why the content
+      preload is injected into popups.
+- [ ] **Per-panel zoom.** Mock 4 is at `zoom: 0.75` while its neighbours are at
+      1.0. Its text should be visibly smaller, and promoting it then returning
+      must not leak zoom onto any other panel.
 - [ ] **Background liveness.** Mock 4's tick counter must keep counting while
       another panel is promoted fullscreen.
-- [ ] **Idle auto-return.** The dev config uses `idleReturnMs: 15000`. Promote a
-      panel, stop touching it, and confirm it docks after ~15s and is still
-      signed in afterwards.
-- [ ] **Watchdog.** Kill a renderer from Activity Monitor and confirm the log
-      shows a backoff reload. Then kill the renderer of the _promoted_ panel and
-      confirm the log says `deferring reload ... until it is no longer active`
-      and that it only reloads after docking.
-- [ ] **`hideInactiveWhenActive`.** Default `false`. Flip it to `true` and check
-      whether the three hidden panels keep running (mock 4's ticker) or get
-      throttled. That answer decides whether it is safe to use for GPU headroom
-      on a 4K wall.
+- [ ] **Idle auto-return.** Promote a panel, stop touching it, confirm it docks
+      after ~15s and is still signed in afterwards.
+- [ ] **Watchdog, both paths.** Kill a background panel's renderer from Activity
+      Monitor and confirm a backoff reload in the log. Then kill the _promoted_
+      panel's renderer and confirm the log says `deferring reload ... until it is
+no longer active`, and that it only reloads after docking. The second path
+      is the one that protects an operator's login.
 - [ ] **Discarding a layout edit.** Esc-to-save is confirmed. Confirm the other
-      half: edit, press Shift+Esc, and the change should be dropped rather than
+      half: edit, press Shift+Esc, and the change must be dropped rather than
       written to config.
-- [ ] **Fullscreen kiosk.** Both configs now default to `kiosk: true` and
-      `fullscreen: true` (no menu bar, no dock). Confirm the wall comes up clean
+- [ ] **Editing the production config.** Layout edit mode writes to whatever
+      `FORGE_CONFIG` points at. Run once against `config/wall.json`, edit, save,
+      and check `git diff` is a clean readable change to `grid` and `zoom` only,
+      with no defaults injected and no key reordering.
+- [ ] **Fullscreen kiosk.** Both configs default to `kiosk: true` and
+      `fullscreen: true`. Confirm the wall comes up with no menu bar and no dock,
       and that `Cmd/Ctrl+Shift+Q` still exits.
+- [ ] **The fatal-config path.** Point `FORGE_CONFIG` at a deliberately broken
+      file. A readable error page should appear instead of a stack trace. The
+      code path exists and is unit tested, but the rendered page has never
+      actually been looked at.
+- [ ] **Single-instance lock.** Launch twice. The second should refuse and exit
+      rather than fighting over the wall. Never exercised.
+- [ ] **Promote/return animation.** `transitionMs` is 220. Animated `setBounds`
+      is confirmed not to throw, but the animation itself has not been watched.
+- [ ] **`hideInactiveWhenActive`.** Default `false`. Flip it to `true` and check
+      whether the hidden panels keep running (mock 4's ticker) or get throttled.
+      That decides whether it is safe to use for GPU headroom on a 4K wall.
+
+### B. Needs the real dashboards
+
+Blocked on the real URLs, and each one is a place a real enterprise app may
+behave differently from a mock.
+
+- [ ] **Do any dashboards need Esc?** If one uses Esc for its own modals,
+      `escToGrid` should move to `"double"` or `"off"`. See the decision below.
+- [ ] **Per-panel `zoom` values.** Set them against the real dashboards at the
+      real wall resolution. `SPEC.md` flags that enterprise apps often do not
+      reflow to arbitrary sizes, which is the whole reason zoom exists here.
+- [ ] **`allowedOrigins`.** The enforcement code is written for both
+      `will-navigate` and `setWindowOpenHandler` but has never run against a
+      populated list. Scope it to the real IdP and app domains, then confirm a
+      legitimate cross-subdomain navigation is not blocked by accident.
+- [ ] **Popup preload against a real IdP.** `content-preload.js` is now injected
+      into SSO popups so their activity resets the idle timer. Confirm it does
+      not trip a real identity provider's CSP or break its flow.
+- [ ] **Whether the real SSO flow uses a popup at all.** Some redirect in place,
+      which exercises `will-navigate` instead.
+
+### C. Needs the Windows show PC and the real wall
+
+macOS passing does not settle the target platform. This group is the real risk.
+
+- [ ] **Overlay alpha compositing on Windows.** The single most important item
+      here. The whole architecture was chosen over capture-based approaches on
+      the assumption this works. It works on macOS; if it renders opaque on
+      Windows, implement one of the `SPEC.md` fallbacks.
+- [ ] **Re-run `npm run probe`.** It answers the z-order and view-API questions
+      empirically. The recorded answers are macOS answers. `bringToTop()` keeps a
+      remove + add fallback specifically because this has not been re-run.
+- [ ] **Display targeting.** Set `wall.displayLabel` or `wall.displayId` to the
+      real LED wall output and confirm the window lands there rather than on the
+      operator's monitor. Only the primary-display fallback path has ever run.
+      Note that `pickWallDisplay()` was accidentally deleted and restored during
+      the layout-geometry extraction, and it has no automated test, so read it
+      before trusting it.
+- [ ] **Display hotplug.** `display-added` / `display-removed` /
+      `display-metrics-changed` all re-target the window. Written, never
+      exercised. An LED controller enumerating late at boot is the case this
+      exists for.
+- [ ] **Snapping at scale 1.** All snapping so far was verified at scale 0.469
+      while previewing. At 1:1 the main-process re-snap becomes a near no-op and
+      the tolerance collapses to its 2-unit floor. Confirm it still snaps
+      cleanly and does not over-snap.
+- [ ] **Live drag feel at 4K.** Bounds and zoom update every animation frame
+      during a drag, with four live dashboards behind it. If it degrades, draw
+      only the overlay outline while dragging and commit on mouse-up.
+- [ ] **Cursor auto-hide when idle.** Not built. Needs a native Windows
+      approach; there is no cross-platform Electron API. The pointer should not
+      sit on the wall between interactions.
+- [ ] **Sustained run.** Leave it up for a working day against the real
+      dashboards and watch for leaks, session expiry behaviour, and whether the
+      watchdog fires more than expected.
+
+### Gaps in the automated tests
+
+Worth knowing what the 34 passing tests do and do not cover.
+
+- Covered: config validation and defaults, `saveLayout` round-tripping, and all
+  the clamp and snap geometry in `src/layout.js`.
+- Not covered: everything in `src/main.js`. It imports electron at module scope
+  and has module-level side effects, so the state machine, the Esc policy, the
+  watchdog, and `pickWallDisplay()` have no unit tests. They are only exercised
+  by running the app. If any of those grow, extracting them the way
+  `src/layout.js` was extracted is the cheap way to get them under test.
 
 ## Decided: Esc returns to the grid on a single press
 

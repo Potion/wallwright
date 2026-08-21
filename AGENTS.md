@@ -37,11 +37,13 @@ and the decisions that need Jeff before some of it can be finalized.
 
 ## Build / harden next (TODO)
 
-1. **Walk the manual checklist in `docs/validation.md`.** Nine items, all
-   mechanical, all needing a human at the machine. That is the highest-value
-   next action.
+1. **Walk the checklist in `docs/validation.md` "Still to verify".** 30 items in
+   three groups: (A) mechanical, doable on the dev machine right now, (B) blocked
+   on the real dashboard URLs, (C) needs the Windows show PC and the real wall.
+   Group A is the highest-value next action; group C is where the real risk is.
 2. Re-run `npm run probe` and re-check overlay transparency **on the Windows show
-   PC**. macOS passing does not settle the target platform.
+   PC**. macOS passing does not settle the target platform, and the overlay
+   compositing assumption is what the whole architecture rests on.
 3. Scope `allowedOrigins` (per view, in config) to the real Honeywell IdP and app
    domains once the URLs are known. The enforcement code is already in place for
    both `will-navigate` and `setWindowOpenHandler`; this is now a config edit.
