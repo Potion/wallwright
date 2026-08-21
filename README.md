@@ -41,9 +41,14 @@ Requires Node 18+ and Electron 43+ (for `BaseWindow`, `WebContentsView`,
 `View.setVisible`, and animated `View.setBounds`). Target deployment is Windows;
 development is on macOS.
 
-In dev, `Cmd/Ctrl+Shift+I` opens devtools for the active panel and
-`Cmd/Ctrl+Shift+G` forces a return to the grid. `Cmd/Ctrl+Shift+Q` quits (in dev
-and in production).
+`Cmd/Ctrl+Shift+E` enters layout edit mode: drag a panel to move it, drag a side
+handle to resize one axis (the page reflows), drag a corner to scale
+proportionally (the page zoom follows the frame). Edges snap to each other, to
+the wall edges, and to the wall centre lines; hold `Alt` to defeat snapping. Esc
+saves the layout back to the config file, `Shift`+Esc discards it.
+
+`Cmd/Ctrl+Shift+Q` quits. In dev, `Cmd/Ctrl+Shift+I` opens devtools for the
+active panel and `Cmd/Ctrl+Shift+G` forces a return to the grid.
 
 ## Configure
 
@@ -77,8 +82,10 @@ resolution and rectangles to the actual LED wall once known.
 
 - `src/main.js` - Electron main process: window, four content views, overlay,
   the grid/active state machine, session partitions, watchdog, idle return.
-- `src/config.js` - config loading, validation, and defaults. No electron import,
-  so it is testable with plain node.
+- `src/config.js` - config loading, validation, defaults, and writing an edited
+  layout back. No electron import, so it is testable with plain node.
+- `src/layout.js` - pure layout geometry: clamping a panel to the wall and
+  snapping its edges to the wall and its neighbours. Also electron-free.
 - `src/preload.js` - safe bridge for the overlay (activate a panel, go back,
   receive state).
 - `src/content-preload.js` - injected into each page only to report user
@@ -90,6 +97,7 @@ resolution and rectangles to the actual LED wall once known.
   (gitignored).
 - `src/dev/` - dev-only harness: `dev.js` launcher, `mock-server.js`, the mock
   dashboard pages under `mock/`, and `probe.js` for checking Electron view APIs.
-- `test/config.test.js` - config validation tests (`npm test`).
+- `test/config.test.js`, `test/layout.test.js` - config and geometry tests
+  (`npm test`).
 - `docs/validation.md` - what has been observed running, and what is still
   unverified.

@@ -125,9 +125,12 @@ function withDefaults(c) {
     hideInactiveWhenActive: !!c.hideInactiveWhenActive,
     transitionMs: c.transitionMs ?? 0,
     // Esc is ambiguous: the wall wants it for "back to grid", but real
-    // dashboards use it to close modals. "double" lets a single Esc reach the
-    // page and docks on a quick second press. See docs/validation.md.
-    escToGrid: c.escToGrid || 'double',
+    // dashboards also use it to close modals, and one key cannot do both.
+    // Jeff chose "single" (press Esc, return to grid) on 2026-08-21. If a real
+    // dashboard turns out to need Esc for its own modals, "double" lets the
+    // first press reach the page and docks on a quick second one. "off" leaves
+    // only the Back button and the idle timeout. See docs/validation.md.
+    escToGrid: c.escToGrid || 'single',
     escDoubleMs: c.escDoubleMs ?? 600,
     backButton: c.backButton || { x: 24, y: 24, width: 176, height: 56 },
     views: c.views.map((v, i) => ({

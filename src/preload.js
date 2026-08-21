@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('forge', {
   onState: (cb) => ipcRenderer.on('forge:state', (_e, s) => cb(s)),
   activate: (id) => ipcRenderer.send('forge:activate', id),
   back: () => ipcRenderer.send('forge:back'),
+  escape: () => ipcRenderer.send('forge:escape'),
   // The Back-button corner is part of the wall too: moving the mouse there must
   // count as activity or the idle timer would dock the panel under the operator.
   activity: () => ipcRenderer.send('forge:activity'),

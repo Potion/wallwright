@@ -23,6 +23,7 @@ const {
 } = require('electron');
 const path = require('path');
 const { loadConfig, saveLayout } = require('./config');
+const { clampGrid, snapGrid } = require('./layout');
 
 const CONFIG_PATH =
   process.env.FORGE_CONFIG || path.join(__dirname, '..', 'config', 'wall.json');
@@ -118,19 +119,6 @@ function unscaleRect(r) {
     y: Math.round((r.y - layout.offsetY) / s),
     width: Math.round(r.width / s),
     height: Math.round(r.height / s),
-  };
-}
-
-function clampGrid(g) {
-  const W = config.wall.width;
-  const H = config.wall.height;
-  const width = Math.min(Math.max(g.width, MIN_PANEL), W);
-  const height = Math.min(Math.max(g.height, MIN_PANEL), H);
-  return {
-    x: Math.min(Math.max(g.x, 0), W - width),
-    y: Math.min(Math.max(g.y, 0), H - height),
-    width,
-    height,
   };
 }
 
@@ -469,6 +457,29 @@ function isAllowed(v, url) {
 
 // ---- per-view hardening -----------------------------------------------------
 
+// The one place the Esc policy lives, so the per-view key handler and the
+// overlay cannot disagree. Returns true when the wall consumed the key, meaning
+// the page must not also see it.
+function handleEscape() {
+  if (state.mode !== 'active') return false;
+  const mode = config.escToGrid;
+  if (mode === 'off') return false;
+  if (mode === 'single') {
+    dockGrid();
+    return true;
+  }
+  // "double": let the first Esc through so the page can close its own modal,
+  // and dock on a quick second press.
+  const now = Date.now();
+  if (now - lastEscAt < config.escDoubleMs) {
+    lastEscAt = 0;
+    dockGrid();
+    return true;
+  }
+  lastEscAt = now;
+  return false;
+}
+
 function hardenView(view, v, i) {
   const wc = view.webContents;
 
@@ -476,24 +487,7 @@ function hardenView(view, v, i) {
     if (state.mode !== 'active' || state.activeIndex !== i) return;
     resetIdle();
     if (input.type !== 'keyDown' || input.key !== 'Escape') return;
-
-    const mode = config.escToGrid;
-    if (mode === 'off') return;
-    if (mode === 'single') {
-      event.preventDefault();
-      dockGrid();
-      return;
-    }
-    // "double": let the first Esc through so the page can close its own modal,
-    // dock on a quick second press.
-    const now = Date.now();
-    if (now - lastEscAt < config.escDoubleMs) {
-      lastEscAt = 0;
-      event.preventDefault();
-      dockGrid();
-    } else {
-      lastEscAt = now;
-    }
+    if (handleEscape()) event.preventDefault();
   });
 
   // Auth / SSO popups: allow them in a real, closable window so login works.
@@ -620,6 +614,7 @@ ipcMain.on('forge:activate', (_e, id) => {
 ipcMain.on('forge:back', () => {
   if (state.mode === 'active') dockGrid();
 });
+ipcMain.on('forge:escape', () => handleEscape());
 ipcMain.on('forge:activity', () => {
   if (state.mode === 'active') resetIdle();
 });
@@ -658,7 +653,44 @@ ipcMain.on('forge:layout', (_e, msg) => {
   if (i < 0) return;
   const v = config.views[i];
 
-  v.grid = clampGrid(unscaleRect(msg.rect));
+  // Only the dimensions the gesture actually drives are taken from the pointer.
+  // The rest are pinned to the drag baseline, because converting window pixels
+  // back to wall units loses a unit or two, and these numbers get written to
+  // config: a side drag that quietly shifted 1080 to 1079 would accumulate
+  // drift every time the layout was touched.
+  const g = unscaleRect(msg.rect);
+  const base = editDrag && editDrag.i === i ? editDrag.baseGrid : null;
+  if (base) {
+    if (msg.kind === 'move') {
+      g.width = base.width;
+      g.height = base.height;
+    } else if (msg.kind === 'resize' && msg.axis === 'x') {
+      g.y = base.y;
+      g.height = base.height;
+    } else if (msg.kind === 'resize' && msg.axis === 'y') {
+      g.x = base.x;
+      g.width = base.width;
+    } else if (msg.kind === 'scale') {
+      // Keep the authored aspect ratio exact rather than whatever survived the
+      // pixel round trip.
+      g.height = Math.round((g.width * base.height) / base.width);
+    }
+  }
+  const wall = { width: config.wall.width, height: config.wall.height };
+  v.grid = clampGrid(
+    snapGrid(g, {
+      views: config.views,
+      index: i,
+      wall,
+      // The residual error from pixel snapping is at most one window pixel, so
+      // the tolerance is that pixel expressed in wall units.
+      tolerance: Math.max(2, Math.ceil(2 / (layout.scale || 1))),
+      kind: msg.kind,
+      handle: msg.handle,
+    }),
+    wall,
+    MIN_PANEL
+  );
 
   // A corner drag is a scale: the page content tracks the frame, the way
   // scaling an image does. A side drag is a resize: the frame changes on one

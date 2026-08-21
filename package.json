@@ -8,7 +8,7 @@
     "start": "electron .",
     "mock": "node src/dev/mock-server.js",
     "dev": "FORGE_DEV=1 FORGE_CONFIG=./config/local-dev.json node src/dev/dev.js",
-    "test": "node --test test/config.test.js",
+    "test": "node --test test/config.test.js test/layout.test.js",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "probe": "electron src/dev/probe.js"

@@ -24,6 +24,14 @@ and the decisions that need Jeff before some of it can be finalized.
 - Hardening: SSO popups allowed and centered on the wall, an `allowedOrigins`
   navigation policy (permissive when empty), a watchdog that will not reload the
   panel someone is using, single-instance lock, no application menu.
+- Layout edit mode (`Ctrl/Cmd+Shift+E`): corners scale proportionally with the
+  page zoom following the frame, sides resize one axis and let the page reflow,
+  the body drags to move. Edges snap to each other, the wall edges, and the wall
+  centre lines, in wall units so saved layouts have no seams. Esc saves back to
+  config, Shift+Esc discards.
+- `wall.fitToDisplay` scales and centres the authored layout into whatever window
+  it gets, so a 3840x2160 wall layout is previewable on a laptop at the same
+  proportions it will have on the wall.
 - Dev harness: `npm run dev` serves four local mock dashboards that exercise
   login/session persistence, Esc handling, an SSO popup flow, and per-panel zoom.
 
@@ -53,11 +61,10 @@ and the decisions that need Jeff before some of it can be finalized.
 ## Open decisions (need Jeff)
 
 - Real dashboard URLs and the wall's true resolution and panel layout.
-- **Esc behavior.** Currently `escToGrid: "double"`: one Esc reaches the page so
-  dashboard modals still close, a quick second Esc docks to the grid. `SPEC.md`
-  asks for a single Esc, but that breaks every Esc-to-close control in the real
-  apps. Options are `"double"`, `"single"`, or `"off"` (Back button and idle
-  timeout only). See `docs/validation.md` "Open question: Esc".
+- ~~Esc behavior.~~ **Decided 2026-08-21: `escToGrid: "single"`.** A single Esc
+  returns to the grid. Revisit only if a real dashboard needs Esc for its own
+  modals, in which case `"double"` or `"off"` is a one-word config change. See
+  `docs/validation.md`.
 - Idle auto-return duration (production default 4 minutes) and whether the hover
   hint on panels is wanted in grid mode (`showHotspotHint`).
 - Whether any panel legitimately navigates across subdomains (affects

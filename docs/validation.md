@@ -46,9 +46,42 @@ view-4: 2063x1161 at 1777,998 zoom 0.806 (wall units)
 `0.75 * (2063 / 1920)`, so the page zoom tracked the frame proportionally. That
 is the corner-drag contract: **corners scale**, content follows the frame.
 
-Still to confirm by hand: side handles change one axis only and leave zoom
-untouched (the page should reflow, not scale), body drag moves, and Esc saves
-back to the config file while Shift+Esc discards.
+Side handles, body drag, snapping, and save-on-Esc are all confirmed too. See
+"Edge snapping" below for the numbers. Still unconfirmed: that Shift+Esc
+discards rather than saves.
+
+### Edge snapping: WORKS
+
+Panel edges snap to each other, to the wall edges, and to the wall centre lines,
+with cyan guide lines drawn while a drag is live. Hold Alt to defeat it.
+
+Snapping happens twice on purpose. The overlay snaps in window pixels so the
+drag feels right under the hand, then the main process re-snaps the driven edge
+in wall units before anything is saved. Without the second pass, an edge that
+looked snapped while previewing a 4K layout on a laptop could save as 1919
+against a neighbour's 1920, which is a visible seam at wall resolution.
+
+Confirmed from a live session:
+
+```
+view-3: 1498x1080 at 0,1080     zoom 1
+view-4: 2342x1080 at 1498,1080  zoom 0.75
+view-4: 2342x1308 at 1498,851   zoom 0.75
+view-4: 2784x1555 at 1056,605   zoom 0.892
+layout saved to .../smoke.json
+```
+
+- view-3's right edge is `0 + 1498`, view-4's left edge is `1498`. **Exact, no
+  seam.** view-4's right edge is `1498 + 2342 = 3840`, the wall edge, also exact.
+- Heights stayed at exactly 1080 through the horizontal drags, and widths at
+  exactly 2342 through the vertical one. A side drag touches one axis only, and
+  the untouched axis no longer drifts a unit from the pixel round trip.
+- Zoom held at 1 and 0.75 through every side drag, then moved to 0.892 on the
+  corner drag: `0.75 * (2784 / 2342)`. Aspect went 2342/1308 = 1.7905 to
+  2784/1555 = 1.790, preserved.
+
+34 tests cover this geometry (`test/layout.test.js`), including a case asserting
+that snapped neighbours share an exact edge.
 
 ### Display fit: WORKS
 
@@ -126,9 +159,10 @@ and hands.
       scratch field, promote, Back, promote again. The "Loaded at" timestamp must
       not change and the typed text must still be there. If the timestamp
       changes the view was reloaded, which `SPEC.md` forbids.
-- [ ] **Esc reaches the page.** On mock 2, open the modal and press Esc once: the
-      modal should close and the wall should stay fullscreen. Press Esc twice
-      quickly with no modal: the wall should dock. See "Open question: Esc" below.
+- [ ] **Esc docks the wall.** With `escToGrid: "single"`, promote a panel and
+      press Esc once: it should return to the grid. On mock 2, confirm the
+      consequence too, that the page's own Esc-to-close modal no longer fires.
+      That is the accepted tradeoff, not a bug.
 - [ ] **Keyboard focus.** Type into mock 2's input while it is promoted. If
       nothing appears, the `webContents.focus()` call in `activate()` is not
       taking effect.
@@ -151,35 +185,45 @@ and hands.
       whether the three hidden panels keep running (mock 4's ticker) or get
       throttled. That answer decides whether it is safe to use for GPU headroom
       on a 4K wall.
-- [ ] **Side handles resize without scaling.** Drag a side handle: only that axis
-      should change, the zoom readout should not move, and the page should reflow
-      into the new width/height rather than scaling.
-- [ ] **Layout persistence.** Edit, press Esc, quit, relaunch. The layout should
-      come back. Then edit and press Shift+Esc: the change should be discarded.
-- [ ] **Live drag feel.** Panel bounds and zoom update on every animation frame
-      during a drag. If that feels janky on the real 4K wall with four live
-      dashboards, switch to committing on mouse-up instead.
+- [ ] **Discarding a layout edit.** Esc-to-save is confirmed. Confirm the other
+      half: edit, press Shift+Esc, and the change should be dropped rather than
+      written to config.
 - [ ] **Fullscreen kiosk.** Both configs now default to `kiosk: true` and
       `fullscreen: true` (no menu bar, no dock). Confirm the wall comes up clean
       and that `Cmd/Ctrl+Shift+Q` still exits.
 
-## Open question: Esc
+## Decided: Esc returns to the grid on a single press
 
-`SPEC.md` says Esc returns to the grid. Real dashboards use Esc to close modals
-and dropdowns. A single key cannot unambiguously do both, and the scaffold's
-approach was worse than ambiguous: it registered Esc as a `globalShortcut`, an
-OS-level accelerator that fires regardless of focus and consumes the key before
-the page ever sees it. Every Esc-to-close control in the real dashboards would
-have been dead.
+`escToGrid: "single"` (Jeff, 2026-08-21). Pressing Esc while a panel is
+fullscreen returns to the grid, which is what `SPEC.md` asks for and what anyone
+walking up to the wall will expect.
 
-Current behavior is `escToGrid: "double"`: the first Esc passes through to the
-page, and a second Esc within `escDoubleMs` (600ms) docks to the grid. Also
-configurable as `"single"` (spec-literal, breaks page modals) or `"off"`
-(Back button and idle timeout only).
+The tradeoff to keep in mind once the real dashboards are wired up: a single Esc
+is consumed by the wall, so a dashboard that uses Esc to close its own modals or
+dropdowns will not see the key. If that turns out to matter, it is a one-word
+config change:
 
-**Needs Jeff:** is double-Esc acceptable, or should Esc be dropped entirely in
-favour of the Back button plus idle timeout? Mock 2 exists to make the tradeoff
-concrete.
+- `"double"` - the first Esc reaches the page, a second press within
+  `escDoubleMs` (600ms) docks the wall. Mock 2 in the dev harness exists to make
+  this tradeoff concrete.
+- `"off"` - Esc does nothing; the Back button and the idle timeout are the only
+  ways back.
+
+The policy lives in one place (`handleEscape()` in `src/main.js`), shared by the
+per-view key handler and the overlay, so the two cannot drift apart.
+
+What must never come back is the scaffold's original approach: Esc registered as
+a `globalShortcut`. That is an OS-level accelerator that fires regardless of
+focus and consumes the key before any page sees it, so every Esc-driven control
+in the dashboards would have been dead with no way to opt out.
+
+## Decided: live drag updates stay
+
+Panel bounds and page zoom update on every animation frame during a layout drag.
+Confirmed to feel fine on the dev machine (Jeff, 2026-08-21). Worth re-checking
+on the real 4K wall with four live dashboards behind it; if it degrades there,
+the fix is to draw only the overlay outline during the drag and commit the real
+bounds on mouse-up.
 
 ## Deliberately out of scope for this pass
 

@@ -13,7 +13,7 @@
   "showHotspotHint": true,
   "hideInactiveWhenActive": false,
   "transitionMs": 220,
-  "escToGrid": "double",
+  "escToGrid": "single",
   "escDoubleMs": 600,
   "backButton": {
     "x": 24,

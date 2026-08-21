@@ -78,6 +78,25 @@
         margin: 0 1px;
       }
 
+      /* Snap guides: drawn across the whole wall so it is obvious which edge a
+         panel locked onto. */
+      .guides {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 9;
+      }
+      .guide {
+        position: absolute;
+        background: #00e5ff;
+      }
+      .guide-v {
+        width: 1px;
+      }
+      .guide-h {
+        height: 1px;
+      }
+
       .epanel {
         position: absolute;
         box-sizing: border-box;
