@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('forge', {
   activate: (id) => ipcRenderer.send('forge:activate', id),
   back: () => ipcRenderer.send('forge:back'),
   escape: () => ipcRenderer.send('forge:escape'),
+  toggleFullscreen: () => ipcRenderer.send('forge:toggleFullscreen'),
   // The Back-button corner is part of the wall too: moving the mouse there must
   // count as activity or the idle timer would dock the panel under the operator.
   activity: () => ipcRenderer.send('forge:activity'),

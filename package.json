@@ -1,5 +1,6 @@
 {
   "name": "hon-forge",
+  "productName": "Forge",
   "version": "0.1.0",
   "private": true,
   "description": "Forge LED wall: four live, interactive Honeywell web dashboards laid out on one large LED wall, with click-to-activate fullscreen. Electron + WebContentsView.",
@@ -11,7 +12,8 @@
     "test": "node --test test/config.test.js test/layout.test.js",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
-    "probe": "electron src/dev/probe.js"
+    "probe": "electron src/dev/probe.js",
+    "probe:fs": "for v in ctor_both ctor_kiosk ctor_fs set_kiosk set_simple; do electron src/dev/fsprobe.js $v; done"
   },
   "engines": {
     "node": ">=18"

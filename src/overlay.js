@@ -407,6 +407,13 @@ function place(el, rect) {
 );
 
 window.addEventListener('keydown', (e) => {
+  // The overlay holds focus in grid and edit modes, so the fullscreen toggle
+  // has to be handled here too, not just in the content views.
+  if (e.key.toLowerCase() === 'f' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+    e.preventDefault();
+    window.forge.toggleFullscreen();
+    return;
+  }
   if (e.key !== 'Escape') return;
   if (current.mode === 'edit') window.forge.editExit({ discard: e.shiftKey });
   // Not back(): the single/double/off policy lives in the main process, so the

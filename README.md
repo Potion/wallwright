@@ -47,8 +47,15 @@ proportionally (the page zoom follows the frame). Edges snap to each other, to
 the wall edges, and to the wall centre lines; hold `Alt` to defeat snapping. Esc
 saves the layout back to the config file, `Shift`+Esc discards it.
 
+`Cmd/Ctrl+F` toggles between owning the whole display and an 85% window, so the
+app can be driven on a dev machine without taking over the screen.
 `Cmd/Ctrl+Shift+Q` quits. In dev, `Cmd/Ctrl+Shift+I` opens devtools for the
 active panel and `Cmd/Ctrl+Shift+G` forces a return to the grid.
+
+On macOS the wall uses simple fullscreen rather than kiosk: every native
+fullscreen and kiosk path leaves the menu-bar strip uncovered, which reads as a
+black gap across the top of the wall. See `docs/validation.md` and
+`npm run probe:fs`.
 
 ## Configure
 
@@ -96,7 +103,8 @@ resolution and rectangles to the actual LED wall once known.
 - `config/local-dev.json` - dev config pointing at the mock dashboards
   (gitignored).
 - `src/dev/` - dev-only harness: `dev.js` launcher, `mock-server.js`, the mock
-  dashboard pages under `mock/`, and `probe.js` for checking Electron view APIs.
+  dashboard pages under `mock/`, `probe.js` for checking Electron view APIs, and
+  `fsprobe.js` for checking which fullscreen path covers the display.
 - `test/config.test.js`, `test/layout.test.js` - config and geometry tests
   (`npm test`).
 - `docs/validation.md` - what has been observed running, and what is still

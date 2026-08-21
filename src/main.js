@@ -15,6 +15,7 @@
 const {
   app,
   BaseWindow,
+  View,
   WebContentsView,
   Menu,
   screen,
@@ -24,6 +25,17 @@ const {
 const path = require('path');
 const { loadConfig, saveLayout } = require('./config');
 const { clampGrid, snapGrid } = require('./layout');
+
+// Set before anything reads userData, because this decides where the `persist:`
+// session partitions live. Left at the default they would sit under an
+// "Electron" folder, which is both wrong for a shipped exhibit and a surprise
+// when someone goes looking for the logins.
+//
+// Note this does NOT change the macOS menu-bar title: that comes from the app
+// bundle's CFBundleName, so in development it reads "Electron" until the app is
+// packaged. Moot on the Windows target, which is frameless with no menu bar, and
+// hidden under kiosk anyway.
+app.setName('Forge');
 
 const CONFIG_PATH =
   process.env.FORGE_CONFIG || path.join(__dirname, '..', 'config', 'wall.json');
@@ -36,6 +48,9 @@ let config = null;
 let win = null; // BaseWindow: the wall
 const contentViews = []; // WebContentsView per configured page (index-aligned with config.views)
 let overlay = null; // WebContentsView: transparent hotspot layer / corner Back button
+let backdrop = null; // View: opaque wall background behind every panel
+let lastDisplayId = null; // so display selection is logged on change, not per resize
+let lastScaleLogged = null; // ditto for the layout scale
 let state = { mode: 'grid', activeIndex: -1 };
 let idleTimer = null;
 let lastEscAt = 0;
@@ -68,6 +83,19 @@ function computeLayout() {
   const w = config.wall.width;
   const h = config.wall.height;
   const scale = config.wall.fitToDisplay === false ? 1 : Math.min(W / w, H / h);
+
+  // Report against the window, which is what the layout is actually scaled
+  // into. Reporting against the display would claim 1:1 while the app sits in
+  // an 85% window. Only on change, since this is called on every resize.
+  if (scale !== lastScaleLogged) {
+    lastScaleLogged = scale;
+    if (Math.abs(scale - 1) < 0.0005) {
+      log(`layout ${w}x${h} in a ${W}x${H} window, 1:1`);
+    } else {
+      log(`layout ${w}x${h} in a ${W}x${H} window, scaled to ${scale.toFixed(3)}`);
+    }
+  }
+
   return {
     scale,
     offsetX: Math.round((W - w * scale) / 2),
@@ -129,22 +157,31 @@ function pickWallDisplay() {
   const displays = screen.getAllDisplays();
   const { displayLabel, displayId, width, height } = config.wall;
 
+  // This runs on every resize and every display-metrics change, so notes are
+  // collected and only emitted when the chosen display actually changes.
+  // Otherwise an unattended run buries its real messages under hundreds of
+  // identical warnings.
+  const notes = [];
   let hit = null;
+
   if (displayId != null) {
     hit = displays.find((d) => String(d.id) === String(displayId));
-    if (!hit)
-      warn(
+    if (!hit) {
+      notes.push([
+        warn,
         `no display with id ${displayId}; known ids:`,
-        displays.map((d) => d.id)
-      );
+        displays.map((d) => d.id),
+      ]);
+    }
   }
   if (!hit && displayLabel) {
     hit = displays.find((d) => d.label === displayLabel);
     if (!hit) {
-      warn(
+      notes.push([
+        warn,
         `no display labelled "${displayLabel}"; known labels:`,
-        displays.map((d) => d.label)
-      );
+        displays.map((d) => d.label),
+      ]);
     }
   }
   if (!hit) {
@@ -154,32 +191,36 @@ function pickWallDisplay() {
     );
     if (exact.length === 1) {
       hit = exact[0];
-      log(`matched display by ${width}x${height} resolution: "${hit.label}" (id ${hit.id})`);
+      notes.push([log, `matched display by ${width}x${height}: "${hit.label}" (id ${hit.id})`]);
     }
   }
   if (!hit) {
     hit = screen.getPrimaryDisplay();
-    warn(
+    notes.push([
+      warn,
       `falling back to the PRIMARY display "${hit.label}" (id ${hit.id}). ` +
-        'Set wall.displayLabel or wall.displayId to target the LED wall output.'
-    );
+        'Set wall.displayLabel or wall.displayId to target the LED wall output.',
+    ]);
   }
 
-  if (hit.bounds.width !== width || hit.bounds.height !== height) {
-    const s = Math.min(hit.bounds.width / width, hit.bounds.height / height);
-    if (config.wall.fitToDisplay === false) {
-      warn(
-        `wall config is ${width}x${height} but display "${hit.label}" is ` +
-          `${hit.bounds.width}x${hit.bounds.height}, and wall.fitToDisplay is off. ` +
-          'Panel rectangles will not land where you expect until these agree.'
-      );
-    } else {
-      log(
-        `previewing the ${width}x${height} layout on a ` +
-          `${hit.bounds.width}x${hit.bounds.height} display, scaled to ${s.toFixed(3)}. ` +
-          'Set wall.width/height to the real wall resolution for a 1:1 run.'
-      );
-    }
+  // Only a real problem when the layout is not being fitted: then the authored
+  // rectangles genuinely land in the wrong place. With fitToDisplay on, the
+  // scale is reported by computeLayout() against the window instead.
+  if (
+    config.wall.fitToDisplay === false &&
+    (hit.bounds.width !== width || hit.bounds.height !== height)
+  ) {
+    notes.push([
+      warn,
+      `wall config is ${width}x${height} but display "${hit.label}" is ` +
+        `${hit.bounds.width}x${hit.bounds.height}, and wall.fitToDisplay is off. ` +
+        'Panel rectangles will not land where you expect until these agree.',
+    ]);
+  }
+
+  if (hit.id !== lastDisplayId) {
+    lastDisplayId = hit.id;
+    notes.forEach(([fn, msg, extra]) => (extra === undefined ? fn(msg) : fn(msg, extra)));
   }
   return hit;
 }
@@ -217,23 +258,35 @@ function createWall() {
     width: config.wall.width,
     height: config.wall.height,
     frame: false,
-    fullscreen: !!config.wall.fullscreen,
-    kiosk: !!config.wall.kiosk,
     backgroundColor: config.wall.backgroundColor,
   });
+
+  // Applied after construction, not as constructor options. See
+  // applyFullscreen() for why the obvious options are the wrong ones on macOS.
+  if (config.wall.fullscreen || config.wall.kiosk) applyFullscreen(true);
 
   // Fullscreen/kiosk means the real content size is the display's, not whatever
   // was passed above, and it only settles after the transition. Compute the
   // layout from the window itself and recompute whenever it changes.
   layout = computeLayout();
   const onResize = () => {
-    layout = computeLayout();
+    refreshLayout();
     if (state.mode === 'active') activate(state.activeIndex, { force: true });
     else if (overlay) dockGrid({ animate: false });
   };
   win.on('resize', onResize);
   win.on('enter-full-screen', onResize);
   win.on('leave-full-screen', onResize);
+
+  // An opaque backdrop behind everything. Without it, a region no panel covers
+  // keeps whatever pixels were last drawn there: shrink a panel in the layout
+  // editor and the strip it vacates holds a stale copy of the page instead of
+  // clearing to the wall colour. The window's own backgroundColor does not
+  // repaint that area, so something has to occupy it.
+  backdrop = new View();
+  backdrop.setBackgroundColor(config.wall.backgroundColor);
+  win.contentView.addChildView(backdrop);
+  backdrop.setBounds(wallBounds());
 
   config.views.forEach((v, i) => {
     const view = new WebContentsView({
@@ -283,7 +336,19 @@ function setBounds(view, bounds, animate) {
   }
 }
 
+// The window does not necessarily have its final size when createWall() runs:
+// entering fullscreen/kiosk settles asynchronously, and if no resize event
+// follows, the layout stays computed against the smaller pre-fullscreen bounds.
+// That letterboxes the wall and scales every panel slightly, so every state
+// transition re-reads the window rather than trusting the last value.
+function refreshLayout() {
+  if (!win) return;
+  layout = computeLayout();
+  if (backdrop) backdrop.setBounds(wallBounds());
+}
+
 function dockGrid({ animate = true } = {}) {
+  refreshLayout();
   const wasActive = state.activeIndex;
   state = { mode: 'grid', activeIndex: -1 };
   clearIdle();
@@ -342,6 +407,102 @@ function round3(n) {
   return Math.round(n * 1000) / 1000;
 }
 
+// ---- fullscreen toggle ------------------------------------------------------
+
+// Cmd/Ctrl+F flips between the wall's fullscreen kiosk state and a window, so
+// the app can be driven on a dev machine without taking over the display.
+//
+// Deliberately NOT a globalShortcut: those are OS-level accelerators that fire
+// regardless of focus, so registering Cmd+F there would steal find-in-page from
+// every other app on the machine. It is handled per view instead, the same way
+// Esc is. The tradeoff is that the panels themselves lose Cmd+F find-in-page,
+// which is the right call for a kiosk wall.
+function isFullscreenToggle(input) {
+  return (
+    input.type === 'keyDown' &&
+    String(input.key).toLowerCase() === 'f' &&
+    (input.meta || input.control) &&
+    !input.shift &&
+    !input.alt
+  );
+}
+
+// macOS is the awkward one. Measured on Electron 43.4.1 with a 1800x1169
+// display (`/tmp/fsprobe1.js`, see docs/validation.md):
+//
+//   constructor fullscreen+kiosk  ->  content y:39 height:1130   isFullScreen:true
+//   constructor kiosk only        ->  content y:39 height:1130   isFullScreen:true
+//   constructor fullscreen only   ->  content y:39 height:1130   isFullScreen:true
+//   setKiosk(true) after          ->  content y:39 height:1130   isFullScreen:true
+//   setSimpleFullScreen(true)     ->  content y:0  height:1169   isSimple:true
+//
+// Every native fullscreen and kiosk path reports isFullScreen true while
+// stopping 39px short of the top, leaving the menu-bar strip uncovered: a black
+// gap across the top of the wall, and a layout scaled to fit 1130 instead of
+// 1169. Simple fullscreen is the only one that actually owns the display, which
+// is what an exhibit needs.
+//
+// Windows is expected to behave with the normal fullscreen path; that has not
+// been verified yet.
+function isFullscreenNow() {
+  if (!win) return false;
+  if (process.platform === 'darwin') return win.isSimpleFullScreen();
+  return win.isFullScreen() || win.isKiosk();
+}
+
+function applyFullscreen(on) {
+  if (!win) return;
+  if (process.platform === 'darwin') {
+    win.setSimpleFullScreen(on);
+    return;
+  }
+  if (on) {
+    win.setFullScreen(true);
+    if (config.wall.kiosk) win.setKiosk(true);
+  } else {
+    if (win.isKiosk()) win.setKiosk(false);
+    win.setFullScreen(false);
+  }
+}
+
+// Cmd/Ctrl+F flips between owning the display and sitting in a window, so the
+// app can be driven on a dev machine without taking over the screen.
+//
+// Deliberately NOT a globalShortcut: those are OS-level accelerators that fire
+// regardless of focus, so registering Cmd+F there would steal find-in-page from
+// every other app on the machine. It is handled per view instead, the same way
+// Esc is. The tradeoff is that the panels lose Cmd+F find-in-page, which is the
+// right call for a kiosk wall.
+function toggleFullscreen() {
+  if (!win) return;
+
+  if (isFullscreenNow()) {
+    applyFullscreen(false);
+    // frame:false leaves no titlebar to drag, so place the window rather than
+    // letting it land wherever. Inset from the display so it reads as windowed.
+    const d = pickWallDisplay();
+    const fit = Math.min(
+      (d.bounds.width * 0.85) / config.wall.width,
+      (d.bounds.height * 0.85) / config.wall.height
+    );
+    const w = Math.round(config.wall.width * fit);
+    const h = Math.round(config.wall.height * fit);
+    win.setBounds({
+      x: d.bounds.x + Math.round((d.bounds.width - w) / 2),
+      y: d.bounds.y + Math.round((d.bounds.height - h) / 2),
+      width: w,
+      height: h,
+    });
+    log(`windowed at ${w}x${h}`);
+  } else {
+    applyFullscreen(true);
+    log('fullscreen');
+  }
+  refreshLayout();
+  if (state.mode === 'active') activate(state.activeIndex, { force: true });
+  else if (overlay) dockGrid({ animate: false });
+}
+
 // ---- layout edit mode -------------------------------------------------------
 //
 // Deliberately a mode rather than always-on handles: in grid mode a click
@@ -352,6 +513,7 @@ function enterEdit() {
   if (state.mode === 'edit') return;
   if (state.mode === 'active') dockGrid({ animate: false });
   state = { mode: 'edit', activeIndex: -1 };
+  refreshLayout();
   clearIdle(); // never dock the wall out from under someone editing it
   editDrag = null;
   config.views.forEach((v, i) => {
@@ -391,6 +553,7 @@ function activate(index, { force = false } = {}) {
   // force is used by relayout, which must re-apply bounds for the mode we are
   // already in.
   if (!force && state.mode === 'active' && state.activeIndex === index) return;
+  refreshLayout();
   state = { mode: 'active', activeIndex: index };
   lastEscAt = 0;
 
@@ -484,6 +647,11 @@ function hardenView(view, v, i) {
   const wc = view.webContents;
 
   wc.on('before-input-event', (event, input) => {
+    if (isFullscreenToggle(input)) {
+      event.preventDefault();
+      toggleFullscreen();
+      return;
+    }
     if (state.mode !== 'active' || state.activeIndex !== i) return;
     resetIdle();
     if (input.type !== 'keyDown' || input.key !== 'Escape') return;
@@ -615,6 +783,7 @@ ipcMain.on('forge:back', () => {
   if (state.mode === 'active') dockGrid();
 });
 ipcMain.on('forge:escape', () => handleEscape());
+ipcMain.on('forge:toggleFullscreen', () => toggleFullscreen());
 ipcMain.on('forge:activity', () => {
   if (state.mode === 'active') resetIdle();
 });

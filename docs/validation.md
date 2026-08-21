@@ -83,6 +83,47 @@ layout saved to .../smoke.json
 34 tests cover this geometry (`test/layout.test.js`), including a case asserting
 that snapped neighbours share an exact edge.
 
+### Fullscreen on macOS needs simple fullscreen, not kiosk
+
+Every native fullscreen and kiosk path reports `isFullScreen: true` while
+stopping 39px short of the top of the display, leaving the menu-bar strip
+uncovered. On the wall that is a black gap across the top, and the layout gets
+scaled to fit 1130px instead of 1169px. Measured with `npm run probe:fs` on
+Electron 43.4.1, 1800x1169 display:
+
+| variant                            | content bounds | covers display |
+| ---------------------------------- | -------------- | -------------- |
+| constructor `fullscreen` + `kiosk` | y:39 h:1130    | no             |
+| constructor `kiosk` only           | y:39 h:1130    | no             |
+| constructor `fullscreen` only      | y:39 h:1130    | no             |
+| `setKiosk(true)` after creation    | y:39 h:1130    | no             |
+| `setSimpleFullScreen(true)`        | **y:0 h:1169** | **yes**        |
+
+So on darwin the app uses `setSimpleFullScreen`, applied after construction
+rather than as a constructor option. Confirmed fixed: the log now reads
+`layout 1800x1169 in a 1800x1169 window, 1:1`.
+
+**Windows is unverified.** It is expected to behave with the normal fullscreen
+path, and `applyFullscreen()` branches on platform on that assumption. Run
+`npm run probe:fs` on the show PC to confirm before trusting it.
+
+### Layout must be recomputed after the window settles
+
+Entering fullscreen is asynchronous, so the layout computed during
+`createWall()` can be against the smaller pre-fullscreen bounds. If no resize
+event follows, it stays wrong: the wall letterboxes and every panel is scaled
+slightly. `refreshLayout()` now re-reads the window on every state transition
+rather than trusting the last value.
+
+### Uncovered wall area needs a real backdrop
+
+Shrink a panel in the layout editor and the strip it vacates kept a stale copy
+of the page instead of clearing to the wall colour. The window's own
+`backgroundColor` does not repaint that region, so an opaque `View` now sits at
+the bottom of the z-order across the whole window. Reproduced and fixed: the
+band was wall x 622..901, exactly the strip a panel vacated when narrowed from
+900 to 619.
+
 ### Display fit: WORKS
 
 `wall.fitToDisplay` (default on) scales and centres the authored layout to
@@ -197,9 +238,9 @@ no longer active`, and that it only reloads after docking. The second path
       `FORGE_CONFIG` points at. Run once against `config/wall.json`, edit, save,
       and check `git diff` is a clean readable change to `grid` and `zoom` only,
       with no defaults injected and no key reordering.
-- [ ] **Fullscreen kiosk.** Both configs default to `kiosk: true` and
-      `fullscreen: true`. Confirm the wall comes up with no menu bar and no dock,
-      and that `Cmd/Ctrl+Shift+Q` still exits.
+- [ ] **Cmd/Ctrl+F toggle.** Flips between owning the display and an 85% window.
+      Confirmed working on macOS; confirm the windowed layout is still correct
+      and that toggling back restores 1:1.
 - [ ] **The fatal-config path.** Point `FORGE_CONFIG` at a deliberately broken
       file. A readable error page should appear instead of a stack trace. The
       code path exists and is unit tested, but the rendered page has never
@@ -236,6 +277,10 @@ behave differently from a mock.
 
 macOS passing does not settle the target platform. This group is the real risk.
 
+- [ ] **`npm run probe:fs` on Windows.** Decides whether the normal fullscreen
+      path actually covers the display there, or whether Windows needs its own
+      special case the way macOS did. `applyFullscreen()` currently assumes it
+      behaves.
 - [ ] **Overlay alpha compositing on Windows.** The single most important item
       here. The whole architecture was chosen over capture-based approaches on
       the assumption this works. It works on macOS; if it renders opaque on
