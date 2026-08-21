@@ -1,0 +1,8 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+
+# Local, site-specific config overrides (keep the committed config generic)
+config/local*.json

@@ -1,0 +1,95 @@
+# hon-forge
+
+Forge is the "Next Gen Control Room" LED wall exhibit. It shows four live
+Honeywell web dashboards laid out on one large LED wall. Each panel is a real,
+interactive browser view (real logins, real sessions), positioned and scaled
+independently, with no browser chrome. A single wireless keyboard and mouse is
+used at the wall: click a panel and it goes fullscreen and interactive; Esc, a
+corner Back button, or an idle timeout returns to the four-up grid.
+
+Read `SPEC.md` for the full design and the reasoning behind it,
+`docs/validation.md` for what has actually been observed running, and
+`AGENTS.md` for the remaining checklist and the open decisions that still need
+Jeff's input.
+
+## Stack
+
+Electron, using one `BaseWindow` (the wall) with four `WebContentsView`
+content panels plus a transparent `WebContentsView` overlay for the click
+targets and the Back button. No compositor, no video capture; the pages stay
+live and interactive.
+
+## Run
+
+```sh
+npm install
+
+# Development: serves four local mock dashboards and opens a windowed 1600x900
+# wall. This is how you exercise the app without the real Honeywell URLs.
+npm run dev
+
+# Production-shaped run against config/wall.json (kiosk, fullscreen).
+npm start
+FORGE_CONFIG=./config/wall.json npm start
+
+npm test      # config validation
+npm run lint
+npm run probe # empirically check the Electron view APIs on this platform
+```
+
+Requires Node 18+ and Electron 43+ (for `BaseWindow`, `WebContentsView`,
+`View.setVisible`, and animated `View.setBounds`). Target deployment is Windows;
+development is on macOS.
+
+In dev, `Cmd/Ctrl+Shift+I` opens devtools for the active panel and
+`Cmd/Ctrl+Shift+G` forces a return to the grid. `Cmd/Ctrl+Shift+Q` quits (in dev
+and in production).
+
+## Configure
+
+Everything layout- and content-related lives in `config/wall.json` so the URLs,
+rectangles, and per-panel zoom can change without touching code:
+
+```jsonc
+{
+  "wall": { "width": 3840, "height": 2160, "backgroundColor": "#000000" },
+  "idleReturnMs": 240000, // auto-return to grid after inactivity (0 = never)
+  "showHotspotHint": true, // subtle hover highlight on the four panels in grid mode
+  "backButton": { "x": 24, "y": 24, "width": 176, "height": 56 },
+  "views": [
+    {
+      "id": "view-1",
+      "url": "https://.../dashboard-1",
+      "grid": { "x": 0, "y": 0, "width": 1920, "height": 1080 },
+      "zoom": 1.0, // per-panel scale, independent of the others
+      "partition": "persist:forge-1", // persistent session so logins survive restarts
+    },
+    // ...four total
+  ],
+}
+```
+
+The committed config uses placeholder `example.com` URLs and a 3840x2160 2x2
+grid. Replace the URLs with the real Honeywell dashboards and set the wall
+resolution and rectangles to the actual LED wall once known.
+
+## Files
+
+- `src/main.js` - Electron main process: window, four content views, overlay,
+  the grid/active state machine, session partitions, watchdog, idle return.
+- `src/config.js` - config loading, validation, and defaults. No electron import,
+  so it is testable with plain node.
+- `src/preload.js` - safe bridge for the overlay (activate a panel, go back,
+  receive state).
+- `src/content-preload.js` - injected into each page only to report user
+  activity so the idle timer resets during use. Exposes nothing to the page.
+- `src/overlay.html` / `src/overlay.js` - the transparent hotspot layer and the
+  Back button.
+- `config/wall.json` - layout and content config.
+- `config/local-dev.json` - dev config pointing at the mock dashboards
+  (gitignored).
+- `src/dev/` - dev-only harness: `dev.js` launcher, `mock-server.js`, the mock
+  dashboard pages under `mock/`, and `probe.js` for checking Electron view APIs.
+- `test/config.test.js` - config validation tests (`npm test`).
+- `docs/validation.md` - what has been observed running, and what is still
+  unverified.

@@ -1,0 +1,73 @@
+/* Shared styling for the dev mock dashboards. Loosely evokes a control-room
+   dashboard so panel scale and legibility can be judged at wall size. */
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  min-height: 100vh;
+  font:
+    15px/1.45 'Helvetica Neue',
+    Helvetica,
+    Arial,
+    sans-serif;
+  background: #0d1117;
+  color: #e6edf3;
+}
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 20px;
+  background: #161b22;
+  border-bottom: 2px solid #f04e23;
+}
+header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+header .id {
+  color: #f04e23;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+main {
+  padding: 20px;
+}
+.card {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+  max-width: 720px;
+}
+h2 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+button,
+input {
+  font: inherit;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid #30363d;
+  background: #21262d;
+  color: inherit;
+}
+button {
+  cursor: pointer;
+  border-color: #f04e23;
+}
+button:hover {
+  background: #f04e23;
+}
+.status {
+  font-family: ui-monospace, Menlo, monospace;
+  color: #7ee787;
+}
+.hint {
+  color: #8b949e;
+  font-size: 13px;
+}

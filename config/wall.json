@@ -1,0 +1,82 @@
+{
+  "wall": {
+    "width": 3840,
+    "height": 2160,
+    "backgroundColor": "#000000",
+    "displayLabel": null,
+    "displayId": null,
+    "kiosk": true,
+    "fullscreen": true,
+    "fitToDisplay": true
+  },
+  "idleReturnMs": 240000,
+  "showHotspotHint": true,
+  "hideInactiveWhenActive": false,
+  "transitionMs": 220,
+  "escToGrid": "double",
+  "escDoubleMs": 600,
+  "backButton": {
+    "x": 24,
+    "y": 24,
+    "width": 176,
+    "height": 56
+  },
+  "views": [
+    {
+      "id": "view-1",
+      "label": "Panel 1 (replace with real Honeywell URL)",
+      "url": "https://example.com/dashboard-1",
+      "grid": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      },
+      "zoom": 1.0,
+      "partition": "persist:forge-1",
+      "allowedOrigins": []
+    },
+    {
+      "id": "view-2",
+      "label": "Panel 2 (replace with real Honeywell URL)",
+      "url": "https://example.com/dashboard-2",
+      "grid": {
+        "x": 1920,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      },
+      "zoom": 1.0,
+      "partition": "persist:forge-2",
+      "allowedOrigins": []
+    },
+    {
+      "id": "view-3",
+      "label": "Panel 3 (replace with real Honeywell URL)",
+      "url": "https://example.com/dashboard-3",
+      "grid": {
+        "x": 0,
+        "y": 1080,
+        "width": 1920,
+        "height": 1080
+      },
+      "zoom": 1.0,
+      "partition": "persist:forge-3",
+      "allowedOrigins": []
+    },
+    {
+      "id": "view-4",
+      "label": "Panel 4 (replace with real Honeywell URL)",
+      "url": "https://example.com/dashboard-4",
+      "grid": {
+        "x": 1920,
+        "y": 1080,
+        "width": 1920,
+        "height": 1080
+      },
+      "zoom": 1.0,
+      "partition": "persist:forge-4",
+      "allowedOrigins": []
+    }
+  ]
+}

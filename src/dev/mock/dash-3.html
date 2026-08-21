@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock 3 - SSO popup</title>
+    <link rel="stylesheet" href="mock.css" />
+  </head>
+  <body>
+    <header>
+      <span class="id">PANEL 3</span>
+      <h1>SSO popup flow</h1>
+    </header>
+    <main>
+      <div class="card">
+        <h2>Federated sign-in</h2>
+        <p><button id="sso">Sign in with SSO</button></p>
+        <p>Result: <span class="status" id="result">not started</span></p>
+        <p class="hint">
+          Validates: setWindowOpenHandler lets an IdP popup open, the popup lands on the wall
+          where it can be seen and used, and it posts back into the same session partition.
+        </p>
+      </div>
+    </main>
+    <script>
+      document.getElementById('sso').onclick = () => {
+        document.getElementById('result').textContent = 'popup opened, waiting...';
+        window.open('/idp.html', 'forge-idp', 'width=520,height=640');
+      };
+      // The popup posts back here, mirroring a real IdP redirect handshake.
+      window.addEventListener('message', (e) => {
+        if (e.data && e.data.forgeIdp) {
+          document.getElementById('result').textContent = 'signed in as ' + e.data.forgeIdp;
+        }
+      });
+    </script>
+  </body>
+</html>

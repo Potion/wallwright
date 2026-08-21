@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock 1 - Login / session persistence</title>
+    <link rel="stylesheet" href="mock.css" />
+  </head>
+  <body>
+    <header>
+      <span class="id">PANEL 1</span>
+      <h1>Login &amp; session persistence</h1>
+    </header>
+    <main>
+      <div class="card">
+        <h2>Session</h2>
+        <p>Status: <span class="status" id="who">checking...</span></p>
+        <p id="controls"></p>
+        <p class="hint">
+          Validates: cookie survives an app restart (persist: partition) and survives promote /
+          dock-to-grid without the page reloading.
+        </p>
+      </div>
+      <div class="card">
+        <h2>Page state (must survive dock/undock)</h2>
+        <p>Scratch input, type something then dock and promote again:</p>
+        <p><input id="scratch" size="34" placeholder="unsaved text" /></p>
+        <p class="hint">Loaded at: <span class="status" id="loadedAt"></span></p>
+        <p class="hint">
+          If that timestamp changes after returning from the grid, the view was reloaded, which
+          is the bug SPEC.md forbids.
+        </p>
+      </div>
+    </main>
+    <script>
+      document.getElementById('loadedAt').textContent = new Date().toLocaleTimeString();
+
+      async function refresh() {
+        const r = await fetch('/whoami');
+        const { user } = await r.json();
+        document.getElementById('who').textContent = user
+          ? 'logged in as ' + user
+          : 'signed out';
+        document.getElementById('controls').innerHTML = user
+          ? '<button id="out">Sign out</button>'
+          : '<button id="in">Sign in as operator</button>';
+        const inBtn = document.getElementById('in');
+        const outBtn = document.getElementById('out');
+        if (inBtn)
+          inBtn.onclick = () => (location.href = '/login?user=operator&next=/dash-1.html');
+        if (outBtn) outBtn.onclick = () => (location.href = '/logout');
+      }
+      refresh();
+    </script>
+  </body>
+</html>

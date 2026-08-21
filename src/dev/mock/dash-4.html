@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock 4 - Zoom &amp; background rendering</title>
+    <link rel="stylesheet" href="mock.css" />
+  </head>
+  <body>
+    <header>
+      <span class="id">PANEL 4</span>
+      <h1>Zoom &amp; background rendering</h1>
+    </header>
+    <main>
+      <div class="card">
+        <h2>Legibility ladder</h2>
+        <p style="font-size: 10px">10px: alarm summary, unacknowledged events, tag detail</p>
+        <p style="font-size: 12px">12px: alarm summary, unacknowledged events, tag detail</p>
+        <p style="font-size: 14px">14px: alarm summary, unacknowledged events, tag detail</p>
+        <p style="font-size: 18px">18px: alarm summary, unacknowledged events, tag detail</p>
+        <p class="hint">Validates: per-panel zoomFactor scales this panel and no other.</p>
+      </div>
+      <div class="card">
+        <h2>Liveness</h2>
+        <p>Ticks since load: <span class="status" id="tick">0</span></p>
+        <p class="hint">
+          Validates: a panel keeps running while another is promoted fullscreen. If this
+          freezes, hideInactiveWhenActive is throttling the page.
+        </p>
+      </div>
+    </main>
+    <script>
+      let n = 0;
+      setInterval(() => {
+        document.getElementById('tick').textContent = ++n;
+      }, 1000);
+    </script>
+  </body>
+</html>

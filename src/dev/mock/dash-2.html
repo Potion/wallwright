@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock 2 - Esc handling</title>
+    <link rel="stylesheet" href="mock.css" />
+  </head>
+  <body>
+    <header>
+      <span class="id">PANEL 2</span>
+      <h1>Esc reaches the page</h1>
+    </header>
+    <main>
+      <div class="card">
+        <h2>Modal that closes on Esc</h2>
+        <p><button id="open">Open modal</button></p>
+        <p>Modal state: <span class="status" id="modalState">closed</span></p>
+        <p>Esc keydowns seen by this page: <span class="status" id="escCount">0</span></p>
+        <p class="hint">
+          Validates: a real dashboard's Esc-to-close still works. Open the modal, press Esc: the
+          modal must close and the wall must stay in active mode. Press Esc with no modal open:
+          the wall docks to grid.
+        </p>
+      </div>
+      <div class="card">
+        <h2>Typing target</h2>
+        <p><input id="typing" size="34" placeholder="keyboard focus check" /></p>
+        <p class="hint">Validates: the wireless keyboard reaches the promoted panel.</p>
+      </div>
+    </main>
+    <script>
+      let open = false;
+      let escs = 0;
+      const state = document.getElementById('modalState');
+      document.getElementById('open').onclick = () => {
+        open = true;
+        state.textContent = 'OPEN';
+      };
+      window.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        escs++;
+        document.getElementById('escCount').textContent = escs;
+        if (open) {
+          open = false;
+          state.textContent = 'closed (by Esc)';
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      });
+    </script>
+  </body>
+</html>

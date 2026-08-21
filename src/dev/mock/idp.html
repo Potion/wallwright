@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock IdP</title>
+    <link rel="stylesheet" href="mock.css" />
+  </head>
+  <body>
+    <header>
+      <span class="id">IDP</span>
+      <h1>Mock identity provider</h1>
+    </header>
+    <main>
+      <div class="card">
+        <h2>Sign in</h2>
+        <p><input id="user" value="operator" size="24" /></p>
+        <p><button id="go">Continue</button></p>
+        <p class="hint">Stands in for the Honeywell IdP popup. Posts back and closes.</p>
+      </div>
+    </main>
+    <script>
+      document.getElementById('go').onclick = () => {
+        const user = document.getElementById('user').value || 'operator';
+        // Set the session cookie too, so the popup proves partition sharing.
+        fetch('/login?user=' + encodeURIComponent(user) + '&next=/idp.html', {
+          redirect: 'manual',
+        })
+          .catch(() => {})
+          .finally(() => {
+            if (window.opener) window.opener.postMessage({ forgeIdp: user }, '*');
+            window.close();
+          });
+      };
+    </script>
+  </body>
+</html>
