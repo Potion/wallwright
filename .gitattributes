@@ -1,0 +1,11 @@
+# Always check out with LF, on every platform.
+#
+# Git for Windows defaults to converting LF to CRLF on checkout, which makes
+# `prettier --check` fail on every file in the repo on a Windows runner. This
+# repo targets Windows, so that path has to work.
+* text=auto eol=lf
+
+# Never touch these.
+*.png binary
+*.ico binary
+*.icns binary
