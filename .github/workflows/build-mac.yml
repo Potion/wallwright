@@ -1,0 +1,57 @@
+name: Build macOS
+
+# Not on every push. macOS runners bill at 10x on a private repo, which is five
+# times the Windows rate, so this is tag-or-by-hand only.
+#
+# The exhibit itself runs on Windows. A macOS build exists for development and
+# for showing the thing to people on their own machines.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Cache Electron and builder downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          restore-keys: ${{ runner.os }}-electron-
+
+      - run: npm ci
+
+      # Do not ship something that does not pass its own checks.
+      - run: npm run lint
+      - run: npm test
+
+      # Builds both arm64 and x64 dmgs. Unsigned: there is no Developer ID
+      # certificate, so Gatekeeper will quarantine these on any machine that
+      # downloads them. To sign and notarize later, add CSC_LINK,
+      # CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID
+      # as secrets, drop `identity: null` from electron-builder.yml, and pass
+      # them as env here.
+      - name: Build dmgs
+        run: npm run build:mac
+
+      - name: List what was produced
+        run: ls -lh dist/*.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: forge-macos
+          path: dist/*.dmg
+          if-no-files-found: error
+          retention-days: 30

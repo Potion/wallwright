@@ -60,23 +60,41 @@ black gap across the top of the wall. See `docs/validation.md` and
 ## Build
 
 ```sh
-npm run build:win   # Windows installer + zip, into dist/
-npm run build:mac   # unpacked .app, for checking packaging locally
-npm run icon        # regenerate build/icon.png
+npm run build:win      # Windows: NSIS installer + zip, into dist/
+npm run build:mac      # macOS: arm64 and x64 dmgs
+npm run build:mac:dir  # macOS: unpacked .app only, faster, for a quick check
+npm run icon           # regenerate build/icon.png
 ```
 
-Packaging is electron-builder, configured in `electron-builder.yml`. The Windows
-build produces both an NSIS installer and a zip, because whether Honeywell IT
-will allow an installer to run on the show PC is still open: the zip covers the
-case where it will not.
+Packaging is electron-builder, configured in `electron-builder.yml`.
 
-Builds are **unsigned** for now. Once there is a certificate, set `CSC_LINK` and
-`CSC_KEY_PASSWORD` as repository secrets and electron-builder picks them up with
-no config change.
+The exhibit runs on Windows; the macOS build exists for development and for
+showing the thing to people on their own machines. The Windows build produces
+both an NSIS installer and a zip, because whether Honeywell IT will allow an
+installer to run on the show PC is still open and the zip covers the case where
+it will not.
 
-Windows builds run in CI on `windows-latest`, which is also the only place they
-are known to work: building a Windows installer from macOS is not part of this
-setup.
+Windows builds run in CI on `windows-latest`, which is the only place they are
+known to work: building a Windows installer from macOS is not part of this setup.
+macOS dmgs build locally and on `macos-latest`.
+
+### Signing
+
+Every build is currently **unsigned**, because there is no certificate for
+either platform.
+
+- **Windows:** set `CSC_LINK` and `CSC_KEY_PASSWORD` as repository secrets;
+  electron-builder picks them up with no config change. Unsigned installers may
+  be warned about or blocked by SmartScreen.
+- **macOS:** `identity: null` in `electron-builder.yml` currently disables
+  signing outright. To sign and notarize, remove that line and add `CSC_LINK`,
+  `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and
+  `APPLE_TEAM_ID`. Until then Gatekeeper quarantines the app on any machine that
+  downloads it, and it has to be opened once with right-click then Open, or
+  cleared with `xattr -dr com.apple.quarantine /Applications/Forge.app`.
+
+A signed build is easier for Honeywell IT to approve, which is an open question
+in `AGENTS.md`.
 
 ### Where the config lives once installed
 
@@ -101,6 +119,8 @@ Three GitHub Actions workflows:
   binary download, which the tests do not need.
 - **Build Windows** (`build-windows.yml`) - on a `v*` tag or manual dispatch.
   Not on every push: Windows runners bill at 2x on a private repo.
+- **Build macOS** (`build-mac.yml`) - same triggers. macOS runners bill at 10x,
+  so this one especially is not on every push.
 - **Probe Windows** (`probe-windows.yml`) - manual. Runs the two Electron probes
   on a Windows runner to answer the open platform questions in
   `docs/validation.md`. A runner is not the show PC, so treat it as a signal

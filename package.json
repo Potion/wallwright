@@ -16,7 +16,8 @@
     "probe:fs": "node src/dev/fsprobe-all.js",
     "icon": "node src/dev/make-icon.js",
     "build:win": "electron-builder --win --publish never",
-    "build:mac": "electron-builder --mac --dir --publish never"
+    "build:mac": "electron-builder --mac --publish never",
+    "build:mac:dir": "electron-builder --mac --dir --publish never"
   },
   "engines": {
     "node": ">=18"

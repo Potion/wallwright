@@ -65,12 +65,12 @@ and the decisions that need Jeff before some of it can be finalized.
 7. Optional polish: a subtle idle-countdown indicator before auto-return; a
    manual "reset panel" action that reloads a view to its configured URL.
 8. Packaging: **partly done.** electron-builder is configured
-   (`electron-builder.yml`), the Windows installer and zip build in CI on
-   `windows-latest`, and a packaged app copies its config to userData so the
-   layout editor can write to it. Still to do: **code signing** (needs a
-   certificate; then set `CSC_LINK` and `CSC_KEY_PASSWORD` as repo secrets),
-   **auto-launch on boot**, and a **crash-restart wrapper** for unattended
-   operation.
+   (`electron-builder.yml`). The Windows installer and zip build in CI on
+   `windows-latest`, macOS arm64 and x64 dmgs build on `macos-latest`, and a
+   packaged app copies its config to userData so the layout editor can write to
+   it. Still to do: **code signing** on both platforms (no certificate yet; see
+   README "Signing" for exactly which secrets each needs), **auto-launch on
+   boot**, and a **crash-restart wrapper** for unattended operation.
 
 ## Open decisions (need Jeff)
 

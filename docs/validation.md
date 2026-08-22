@@ -155,6 +155,25 @@ platform-behaviour questions. It does **not** settle overlay alpha compositing,
 which still has to be judged by eye on the real wall, and it says nothing about
 4K performance.
 
+### The macOS build produces working dmgs
+
+`npm run build:mac` produced both, verified by mounting the arm64 one:
+
+| artifact                | size   |
+| ----------------------- | ------ |
+| `Forge-0.1.0-arm64.dmg` | 114 MB |
+| `Forge-0.1.0-x64.dmg`   | 116 MB |
+
+Inside: `Forge.app` with the drag-to-Applications layout,
+`CFBundleName = Forge`, `CFBundleIdentifier = com.potion.forge`, thin arm64.
+
+Unsigned, and `identity: null` in `electron-builder.yml` now says so explicitly
+rather than letting electron-builder hunt the keychain and report unrelated Jamf
+certificates, which read like a failure and was not. Consequence: Gatekeeper
+quarantines the app on any machine that downloads it. Open it once with
+right-click then Open, or clear it with
+`xattr -dr com.apple.quarantine /Applications/Forge.app`.
+
 ### The Windows build produces installable artifacts
 
 `build-windows.yml` on `windows-latest` produced, after lint and tests passed:
@@ -359,9 +378,14 @@ macOS passing does not settle the target platform. This group is the real risk.
       in CI but have never been run on Windows. Check the NSIS install, that the
       config seeds to `%APPDATA%\\Forge\\wall.json`, and that the layout editor
       can save there without admin rights.
-- [ ] **Code signing.** Unsigned builds may be blocked or warned about by
-      Windows SmartScreen, and a signed build is easier for Honeywell IT to
-      approve. Needs a certificate first.
+- [ ] **Code signing, both platforms.** Unsigned Windows builds may be blocked
+      or warned about by SmartScreen, and a signed build is easier for Honeywell
+      IT to approve. Unsigned macOS builds are quarantined by Gatekeeper on any
+      machine that downloads them. Needs certificates first; README "Signing"
+      lists the secrets each platform wants.
+- [ ] **Run a dmg on a Mac that did not build it.** The arm64 dmg was verified
+      by mounting it and reading the bundle, but never installed and launched
+      from a quarantined download, which is the path anyone else will take.
 - [ ] **Auto-launch on boot and crash restart.** Not built. Required for
       unattended operation.
 - [ ] **Overlay alpha compositing on Windows.** Now the single most important

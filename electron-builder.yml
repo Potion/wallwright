@@ -44,8 +44,15 @@ nsis:
 
 mac:
   target:
-    - target: dir
-      arch: [arm64]
+    - target: dmg
+      arch: [arm64, x64]
   category: public.app-category.utilities
+  # There is no Developer ID certificate, so do not try to sign. Without this,
+  # electron-builder hunts the keychain and reports the unrelated identities it
+  # finds, which reads like a real problem and is not.
+  identity: null
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
 
 publish: null
