@@ -8,6 +8,7 @@ const globals = {
     setTimeout: 'readonly',
     clearTimeout: 'readonly',
     setInterval: 'readonly',
+    clearInterval: 'readonly',
     URL: 'readonly',
     Set: 'readonly',
     Map: 'readonly',

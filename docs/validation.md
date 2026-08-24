@@ -283,6 +283,43 @@ after the operator stopped typing, logging them out of dashboards meant to sit
 signed in all day. It defaults to **off**, and the idle timeout returns to the
 grid without touching the pages.
 
+### Upkeep: refresh, recycle, and memory
+
+An exhibit runs for weeks, so dashboards go stale and renderers grow. Both fixes
+are timer-driven reloads, and both obey one rule: never touch a panel somebody is
+using. The self-test proves that rule rather than the happy path:
+
+```
+selftest 10: idle panel refreshed on its timer: true
+selftest 10: in-use panel left alone: true
+selftest 10: resumes once quiet: true
+selftest 10: recycle replaced the view: true
+selftest 10: views and config still aligned: true
+selftest 10: overlay still frontmost after recycling: true
+```
+
+`refreshMs` reloads a panel; `recycleMs` destroys the view and builds a new one.
+They are not interchangeable, per the session probe above: a reload keeps
+`sessionStorage`, a recycle does not. Recycling is what actually hands the
+renderer process back, which is why it exists, and why it is off unless asked
+for.
+
+Memory is reported, not acted on, by default. An exhibit that restarts itself
+unpredictably is worse than one that uses a lot of RAM, and the real numbers
+should come before any tuning. Measured with two panels and the overlay:
+
+```
+memory: 699MB total (Tab 365MB, Browser 165MB, GPU 110MB, Utility 59MB)
+```
+
+That is the case for the feature: two panels already cost most of a gigabyte, so
+a montage of eight on a wall running for a fortnight is worth watching. Setting
+`memoryLimitMb` recycles the least recently used idle panel, one per check, so a
+spike does not rebuild the whole wall at once.
+
+Still to confirm: what memory actually does over days rather than minutes, which
+only the sustained run below can answer.
+
 ### Panel CRUD works end to end
 
 `src/main.js` has no unit tests, so `FORGE_SELFTEST=1` drives the real path:

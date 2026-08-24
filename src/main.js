@@ -84,6 +84,7 @@ let state = { mode: 'grid', activeIndex: -1 };
 let idleTimer = null;
 let lastEscAt = 0;
 let activePresetId = null; // which named montage is on the wall, if any
+const startedAt = Date.now();
 const popups = new Set(); // BrowserWindows opened by SSO flows
 let editDrag = null; // { i, baseGrid, baseZoom } while a layout drag is in flight
 const watchdog = new Map(); // view id -> { attempts, pending, deferred }
@@ -392,6 +393,8 @@ function createWall() {
     }
     if (DEV && process.env.FORGE_SELFTEST === '1') selfTest();
     if (DEV && process.env.FORGE_CAPTURE_OUT) scheduleCapture(process.env.FORGE_CAPTURE_OUT);
+    startUpkeep();
+    startMemoryWatch();
   });
 }
 
@@ -530,6 +533,111 @@ function wallUnits() {
   return { width: config.wall.width, height: config.wall.height };
 }
 
+// ---- upkeep: refresh, recycle, memory ---------------------------------------
+//
+// An exhibit runs for weeks. Dashboards go stale, and long-lived renderers grow.
+// Both fixes are timer-driven reloads, so both share one safety rule: never
+// touch a panel somebody is using.
+//
+// The two are not equivalent, which src/dev/session-probe.js measured:
+//
+//   refreshMs -> webContents.reload()
+//     Cookies and sessionStorage both survive. Safe for a signed-in dashboard.
+//     Frees the document, but the renderer process itself lives on.
+//
+//   recycleMs -> destroy the view and build a new one
+//     Cookies survive, sessionStorage does NOT: it is per-tab. An app holding
+//     its access token there gets signed out. Reclaims the whole process, which
+//     is the point. Off unless asked for, for that reason.
+
+let upkeepTimer = null;
+let memoryTimer = null;
+const lastRefresh = new Map(); // view id -> ms
+const lastRecycle = new Map();
+
+function inUse(v) {
+  const promoted = state.mode === 'active' && state.activeIndex === config.views.indexOf(v);
+  return promoted || Date.now() - (touched.get(v.id) || 0) < config.recentUseMs;
+}
+
+function dueFor(map, v, everyMs) {
+  if (!everyMs) return false;
+  const since = Date.now() - (map.get(v.id) || startedAt);
+  return since >= everyMs;
+}
+
+function refreshPanel(i) {
+  const v = config.views[i];
+  lastRefresh.set(v.id, Date.now());
+  log(`refreshing ${v.id}`);
+  contentViews[i].webContents.reload();
+}
+
+// Rebuild the view, which is the only way to hand the renderer process back.
+function recyclePanel(i) {
+  const v = config.views[i];
+  lastRecycle.set(v.id, Date.now());
+  lastRefresh.set(v.id, Date.now());
+  log(`recycling ${v.id} to reclaim its renderer`);
+  const old = contentViews[i];
+  win.contentView.removeChildView(old);
+  if (!old.webContents.isDestroyed()) old.webContents.close();
+  contentViews[i] = createContentView(v);
+  bringToTop(overlay);
+}
+
+function runUpkeep() {
+  config.views.forEach((v, i) => {
+    if (inUse(v)) return; // never under someone's hands
+    if (state.mode === 'edit') return; // nor while the layout is being changed
+    if (dueFor(lastRecycle, v, v.recycleMs)) return recyclePanel(i);
+    if (dueFor(lastRefresh, v, v.refreshMs)) return refreshPanel(i);
+  });
+}
+
+function startUpkeep() {
+  if (upkeepTimer) clearInterval(upkeepTimer);
+  const wanted = config.views.some((v) => v.refreshMs || v.recycleMs);
+  if (!wanted) return;
+  // Checked once a second; each panel's own interval decides when it is due.
+  upkeepTimer = setInterval(runUpkeep, 1000);
+}
+
+// Memory. Reported rather than acted on by default: an exhibit that restarts
+// itself unpredictably is worse than one that uses a lot of RAM, and knowing the
+// real numbers has to come before tuning anything.
+function checkMemory() {
+  let total = 0;
+  const byType = new Map();
+  for (const m of app.getAppMetrics()) {
+    const mb = (m.memory && m.memory.workingSetSize ? m.memory.workingSetSize : 0) / 1024;
+    total += mb;
+    byType.set(m.type, (byType.get(m.type) || 0) + mb);
+  }
+  const parts = [...byType.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([t, mb]) => `${t} ${Math.round(mb)}MB`)
+    .join(', ');
+  log(`memory: ${Math.round(total)}MB total (${parts})`);
+
+  if (!config.memoryLimitMb || total <= config.memoryLimitMb) return;
+  warn(`memory is over the ${config.memoryLimitMb}MB limit`);
+  // Recycle the least recently used idle panel, one per check, so a spike does
+  // not rebuild the whole wall at once.
+  const candidates = config.views
+    .map((v, i) => ({ v, i }))
+    .filter(({ v }) => !inUse(v))
+    .sort((a, b) => (touched.get(a.v.id) || 0) - (touched.get(b.v.id) || 0));
+  if (!candidates.length) return log('every panel is in use; leaving them alone');
+  recyclePanel(candidates[0].i);
+}
+
+function startMemoryWatch() {
+  if (memoryTimer) clearInterval(memoryTimer);
+  if (!config.memoryCheckMs) return;
+  memoryTimer = setInterval(checkMemory, config.memoryCheckMs);
+}
+
 // ---- presets ----------------------------------------------------------------
 //
 // A preset is a named snapshot of a montage. config.views is what is on the wall
@@ -593,6 +701,7 @@ function applyPreset(id) {
 
   activePresetId = id;
   state = { mode: state.mode === 'edit' ? 'edit' : 'grid', activeIndex: -1 };
+  startUpkeep(); // the new montage may want different intervals
   const reused = keptViews.filter(Boolean).length;
   log(`preset "${preset.name || id}": ${wanted.length} panels, ${reused} reused`);
   dockGridOrKeepEditing();
@@ -1454,6 +1563,47 @@ function selfTest() {
     step(9, `after delete: ${config.presets.length} presets`);
     exitEdit({ save: false });
     await soon(300);
+
+    // Upkeep. The safety rule is the whole point: a timer must never reload a
+    // panel under someone's hands.
+    dockGrid({ animate: false });
+    await soon(300);
+    const upkeepPanel = config.views[0];
+    upkeepPanel.refreshMs = 1200;
+    lastRefresh.delete(upkeepPanel.id);
+    touched.delete(upkeepPanel.id);
+    startUpkeep();
+
+    await soon(2600);
+    step(10, `idle panel refreshed on its timer: ${lastRefresh.has(upkeepPanel.id)}`);
+
+    // Now claim it is being used, and confirm the timer leaves it alone.
+    const refreshedAt = lastRefresh.get(upkeepPanel.id);
+    touched.set(upkeepPanel.id, Date.now());
+    await soon(2600);
+    step(10, `in-use panel left alone: ${lastRefresh.get(upkeepPanel.id) === refreshedAt}`);
+
+    // And that it resumes once the panel goes quiet again.
+    touched.set(upkeepPanel.id, Date.now() - config.recentUseMs - 1000);
+    await soon(2600);
+    step(10, `resumes once quiet: ${lastRefresh.get(upkeepPanel.id) !== refreshedAt}`);
+
+    // Recycling swaps the view for a new one, which is how the renderer process
+    // is actually handed back.
+    const viewBeforeRecycle = contentViews[0];
+    upkeepPanel.refreshMs = 0;
+    upkeepPanel.recycleMs = 1200;
+    lastRecycle.delete(upkeepPanel.id);
+    touched.delete(upkeepPanel.id);
+    await soon(2600);
+    step(10, `recycle replaced the view: ${contentViews[0] !== viewBeforeRecycle}`);
+    step(10, `views and config still aligned: ${contentViews.length === config.views.length}`);
+    const kids2 = win.contentView.children;
+    step(10, `overlay still frontmost after recycling: ${kids2[kids2.length - 1] === overlay}`);
+
+    upkeepPanel.recycleMs = 0;
+    startUpkeep();
+    checkMemory();
 
     log('selftest done');
   })().catch((e) => warn('selftest failed:', e.message));

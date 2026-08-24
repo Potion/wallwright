@@ -245,6 +245,8 @@ writes this file.
   "escToGrid": "single", // "single" | "double" | "off"  (see AGENTS.md)
   "idleResetUrls": false, // on idle, also put panels back to their configured URLs
   "recentUseMs": 60000, // how long a touched panel is protected from a watchdog reload
+  "memoryCheckMs": 60000, // how often to log process memory (0 = never)
+  "memoryLimitMb": 0, // past this, recycle the least recently used idle panel (0 = off)
   "backButton": { "x": 24, "y": 24, "width": 176, "height": 56 },
   "views": [
     // May be empty: a montage can be built from a blank wall in the editor.
@@ -256,6 +258,8 @@ writes this file.
       "zoom": 1.0, // per-panel scale, independent of the others
       "partition": "persist:forge-1", // persistent session; may be shared with another panel
       "allowedOrigins": [], // empty = permissive; populate to lock navigation down
+      "refreshMs": 0, // reload this panel on a timer, so a dashboard cannot go stale
+      "recycleMs": 0, // rebuild its renderer on a timer, to hand back memory
     },
   ],
 }

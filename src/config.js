@@ -86,6 +86,12 @@ function validateConfig(c) {
     if (v.zoom !== undefined && !(Number.isFinite(v.zoom) && v.zoom > 0)) {
       p.push(`${at}.zoom must be a positive number`);
     }
+    if (v.refreshMs !== undefined && !(Number.isFinite(v.refreshMs) && v.refreshMs >= 0)) {
+      p.push(`${at}.refreshMs must be a number >= 0 (0 = never)`);
+    }
+    if (v.recycleMs !== undefined && !(Number.isFinite(v.recycleMs) && v.recycleMs >= 0)) {
+      p.push(`${at}.recycleMs must be a number >= 0 (0 = never)`);
+    }
     if (v.allowedOrigins !== undefined && !Array.isArray(v.allowedOrigins)) {
       p.push(`${at}.allowedOrigins must be an array of origins`);
     }
@@ -102,6 +108,12 @@ function validateConfig(c) {
   }
   if (c.recentUseMs !== undefined && !(Number.isFinite(c.recentUseMs) && c.recentUseMs >= 0)) {
     p.push('recentUseMs must be a number >= 0');
+  }
+  if (
+    c.memoryLimitMb !== undefined &&
+    !(Number.isFinite(c.memoryLimitMb) && c.memoryLimitMb >= 0)
+  ) {
+    p.push('memoryLimitMb must be a number >= 0 (0 = no limit)');
   }
 
   // Presets are named snapshots of a montage. Each holds the same shape as the
@@ -184,6 +196,10 @@ function withDefaults(c) {
     // How long after someone touches a panel it still counts as in use, and so
     // must not be reloaded under them by the watchdog.
     recentUseMs: c.recentUseMs ?? 60000,
+    // How often to log process memory, and the point past which a panel is
+    // considered to have ballooned. 0 disables the check entirely.
+    memoryCheckMs: c.memoryCheckMs ?? 60000,
+    memoryLimitMb: c.memoryLimitMb ?? 0,
     presets: Array.isArray(c.presets)
       ? c.presets.map((preset) => ({
           ...preset,
@@ -238,6 +254,8 @@ function serializeView(v) {
   };
   out.zoom = Math.round((v.zoom ?? 1) * 1000) / 1000;
   out.partition = v.partition;
+  if (v.refreshMs) out.refreshMs = v.refreshMs;
+  if (v.recycleMs) out.recycleMs = v.recycleMs;
   if (Array.isArray(v.allowedOrigins) && v.allowedOrigins.length) {
     out.allowedOrigins = v.allowedOrigins;
   }
