@@ -99,8 +99,12 @@ and the decisions that need Jeff before some of it can be finalized.
 - Target is Windows; development is macOS. Use project-relative paths, never
   absolute machine paths.
 - Do not reload a view on return-to-grid, and never reload a panel that is in
-  use: the promoted one, or any touched within `recentUseMs`. It drops the
-  operator's login. `scheduleReload()` defers instead.
+  use: the promoted one, or any touched within `recentUseMs`. `scheduleReload()`
+  defers instead. Note the reason: a reload does **not** log anyone out, since
+  cookies live in the `persist:` partition (`npm run probe:session` measures
+  this). It throws away the interaction in progress, which is the thing worth
+  protecting. Recycling a whole view is different again: it also clears
+  `sessionStorage`, so an app keeping its token there would be signed out.
 - Only administrators have input, so the wall is idle nearly all the time.
   Anything hung off the idle timer fires constantly in normal operation. That is
   why `idleResetUrls` defaults to off: reloading on idle would log every

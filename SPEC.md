@@ -36,8 +36,10 @@ the time, so anything triggered by idleness is triggered constantly, and
   mid-session. The timeout returns to the grid but does **not** reload the
   pages: since idle is the wall's normal state, reloading on idle would be a
   scheduled logout for every dashboard meant to sit there signed in.
-- On return, the panel is re-docked, NOT reloaded, so the operator's login and
-  page state survive.
+- On return, the panel is re-docked, NOT reloaded, so the operator's page state
+  survives. The login would survive a reload anyway, since cookies live in the
+  session partition rather than the renderer; what a reload costs is the
+  interaction in progress. See `docs/validation.md`.
 
 ## Why this architecture
 

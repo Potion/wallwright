@@ -203,6 +203,38 @@ housing. Two separate problems, handled differently:
 Set to `"auto"` in the local dev configs. The committed `config/wall.json` leaves
 it off, so deployment behaviour is unchanged.
 
+### What a reload actually costs, measured
+
+"Never reload a panel, it drops the login" was the working assumption from the
+start, including in `SPEC.md`. It is wrong, and `src/dev/session-probe.js`
+measures what is actually true:
+
+| operation                          | cookie session | sessionStorage | in-page state |
+| ---------------------------------- | -------------- | -------------- | ------------- |
+| `reload()`                         | survives       | survives       | lost          |
+| `loadURL()` (watchdog, idle reset) | survives       | survives       | lost          |
+| destroy and recreate the view      | survives       | **lost**       | lost          |
+
+Cookies live in the `persist:` partition, which outlives the renderer entirely,
+so even destroying a `WebContentsView` and building a new one leaves the user
+signed in. What a reload really costs is the interaction in progress:
+credentials half typed, an SSO redirect chain mid-flight, wherever an SPA had
+been navigated to.
+
+The never-reload rules were right, then, but for the wrong reason, and the
+correct reason is narrower. Two consequences:
+
+- **Refreshing a panel on a timer is safe** for logged-in dashboards, provided
+  it skips panels somebody is using.
+- **Recycling a renderer to reclaim memory is riskier than reloading**, and only
+  in one specific way: `sessionStorage` is per-tab, so an app that keeps its
+  access token there is signed out by a recycle but not by a reload. That is why
+  recycling is opt-in.
+
+Caveat: this was measured against the mock login, which uses a plain cookie. A
+real IdP that holds an access token in JavaScript memory would need a silent
+re-auth on reload. Usually invisible, occasionally not.
+
 ### Interactive grid panels
 
 Panels are live in grid mode. No coordinate translation was needed: each panel

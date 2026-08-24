@@ -152,6 +152,7 @@ npm test      # config and layout geometry
 npm run lint
 npm run probe # check the Electron view APIs on this platform
 npm run probe:fs # check which fullscreen path covers the display
+npm run probe:session # check what a reload actually costs a logged-in panel
 ```
 
 In dev, `Cmd/Ctrl+Shift+I` opens devtools for the active panel and

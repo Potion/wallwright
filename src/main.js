@@ -796,8 +796,11 @@ function activate(index, { force = false } = {}) {
   state = { mode: 'active', activeIndex: index };
   lastEscAt = 0;
 
-  // NOTE: do NOT reload here. Reloading would drop the login the operator may
-  // have just established.
+  // NOTE: do NOT reload here. Not because it would log anyone out: cookies live
+  // in the persist: partition and survive a reload (measured, see
+  // src/dev/session-probe.js). It would throw away in-page state, which is what
+  // actually hurts: a half-typed form, an SSO redirect chain in flight, wherever
+  // an SPA had been navigated to.
   setBounds(contentViews[index], stageBounds(), !force);
   contentViews[index].webContents.setZoomFactor(panelZoom(index));
   bringToTop(contentViews[index]);
@@ -1006,10 +1009,12 @@ function scheduleReload(view, v) {
   const w = wd(v.id);
   if (w.pending) return; // one in-flight reload per view
 
-  // Never reload a panel somebody is using: it would destroy their login
-  // mid-session, which SPEC.md forbids. That used to mean only the promoted
-  // panel, but with an interactive grid someone can be logging in without
-  // promoting anything, so recent input counts too.
+  // Never reload a panel somebody is using. The session itself would survive
+  // (see src/dev/session-probe.js), but the interaction in progress would not:
+  // credentials half typed, an SSO redirect chain mid-flight, an SPA's current
+  // view. That used to mean only the promoted panel, but with an interactive
+  // grid someone can be signing in without promoting anything, so recent input
+  // counts too.
   const promoted = state.mode === 'active' && state.activeIndex === config.views.indexOf(v);
   const recent = Date.now() - (touched.get(v.id) || 0) < config.recentUseMs;
   if (promoted || recent) {
