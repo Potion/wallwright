@@ -103,6 +103,30 @@ first time:
 
 Signing needs certificates that do not exist yet; see [Signing](#signing).
 
+## Control surface
+
+Set `control.port` and the wall serves a status and control page an
+administrator can open from a laptop or phone on the same machine, rather than
+walking to the wall or opening a remote desktop session:
+
+- what mode the wall is in, its memory use and uptime
+- every panel: size, position, zoom, whether it is loading, whether its renderer
+  has gone, how many times the watchdog has reloaded it, and how long since
+  anyone touched it
+- **where a panel actually is**, flagged in red when it has drifted from its
+  configured URL
+- recall a saved montage, change a panel's URL, open one fullscreen, reload one
+  or all of them
+
+It is **unauthenticated**, and it can drive the wall. It binds to `127.0.0.1` by
+default for that reason. Setting `control.host` to anything else puts an
+unauthenticated remote control on the network, which is a decision to make on
+purpose; the app logs a warning when you do.
+
+The same routes are a small API, so a show controller could drive the wall:
+`GET /api/status`, and `POST` to `/api/preset`, `/api/panel`, `/api/promote` and
+`/api/reload`.
+
 ## Where the montage is stored
 
 Installed, the app keeps its config in the user data directory and reads and
@@ -247,6 +271,7 @@ writes this file.
   "recentUseMs": 60000, // how long a touched panel is protected from a watchdog reload
   "memoryCheckMs": 60000, // how often to log process memory (0 = never)
   "memoryLimitMb": 0, // past this, recycle the least recently used idle panel (0 = off)
+  "control": { "port": 0, "host": "127.0.0.1" }, // 0 = no control surface
   "backButton": { "x": 24, "y": 24, "width": 176, "height": 56 },
   "views": [
     // May be empty: a montage can be built from a blank wall in the editor.

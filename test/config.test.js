@@ -310,3 +310,65 @@ test('a saved preset round-trips back through validation', () => {
   const c = loadConfig(f);
   assert.strictEqual(c.presets[0].views[0].id, 'z');
 });
+
+// ---- control surface --------------------------------------------------------
+
+test('control defaults to disabled and loopback', () => {
+  const c = withDefaults(good());
+  assert.strictEqual(c.control.port, 0);
+  assert.strictEqual(c.control.host, '127.0.0.1');
+});
+
+test('a control port is accepted', () => {
+  const c = good();
+  c.control = { port: 8080 };
+  assert.deepStrictEqual(validateConfig(c), []);
+  // The host default survives a partial control block.
+  assert.strictEqual(withDefaults(c).control.host, '127.0.0.1');
+});
+
+test('a bad control port is reported', () => {
+  const c = good();
+  for (const port of [70000, -1, 'eighty', 1.5]) {
+    c.control = { port };
+    assert.match(validateConfig(c).join(), /control\.port/, `port ${port}`);
+  }
+});
+
+test('a non-object control block is reported', () => {
+  const c = good();
+  c.control = 8080;
+  assert.match(validateConfig(c).join(), /control must be an object/);
+});
+
+// ---- upkeep intervals -------------------------------------------------------
+
+test('refreshMs and recycleMs are per panel and optional', () => {
+  const c = good();
+  c.views[0].refreshMs = 300000;
+  c.views[0].recycleMs = 3600000;
+  assert.deepStrictEqual(validateConfig(c), []);
+});
+
+test('negative intervals are reported', () => {
+  const c = good();
+  c.views[0].refreshMs = -1;
+  assert.match(validateConfig(c).join(), /refreshMs/);
+  c.views[0].refreshMs = 0;
+  c.views[0].recycleMs = -5;
+  assert.match(validateConfig(c).join(), /recycleMs/);
+});
+
+test('intervals round-trip through saveViews, and zero is omitted', () => {
+  const f = tmpConfig(good());
+  saveViews(f, [view({ refreshMs: 300000, recycleMs: 0 })]);
+  const out = JSON.parse(fs.readFileSync(f, 'utf8'));
+  assert.strictEqual(out.views[0].refreshMs, 300000);
+  assert.ok(!('recycleMs' in out.views[0]));
+});
+
+test('a bad memoryLimitMb is reported', () => {
+  const c = good();
+  c.memoryLimitMb = -10;
+  assert.match(validateConfig(c).join(), /memoryLimitMb/);
+});

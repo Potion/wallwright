@@ -115,6 +115,19 @@ function validateConfig(c) {
   ) {
     p.push('memoryLimitMb must be a number >= 0 (0 = no limit)');
   }
+  if (c.control !== undefined) {
+    if (typeof c.control !== 'object' || c.control === null) {
+      p.push('control must be an object');
+    } else {
+      const port = c.control.port;
+      if (port !== undefined && !(Number.isInteger(port) && port >= 0 && port <= 65535)) {
+        p.push('control.port must be an integer 0-65535 (0 = disabled)');
+      }
+      if (c.control.host !== undefined && typeof c.control.host !== 'string') {
+        p.push('control.host must be a string');
+      }
+    }
+  }
 
   // Presets are named snapshots of a montage. Each holds the same shape as the
   // live views, so it is checked with the same rules rather than a second set
@@ -200,6 +213,14 @@ function withDefaults(c) {
     // considered to have ballooned. 0 disables the check entirely.
     memoryCheckMs: c.memoryCheckMs ?? 60000,
     memoryLimitMb: c.memoryLimitMb ?? 0,
+    // A small HTTP surface for administrators: status, and the same actions the
+    // wall keyboard can take. Off unless a port is set, and bound to loopback
+    // unless told otherwise, because it is unauthenticated.
+    control: {
+      port: 0,
+      host: '127.0.0.1',
+      ...(c.control || {}),
+    },
     presets: Array.isArray(c.presets)
       ? c.presets.map((preset) => ({
           ...preset,

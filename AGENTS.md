@@ -33,6 +33,8 @@ and the decisions that need Jeff before some of it can be finalized.
   panel list back to config, Shift+Esc discards.
 - Panels are created and destroyed at runtime, so the count is not fixed at four
   and `views` may be empty.
+- Named montages (presets), per-panel refresh and renderer recycling, memory
+  reporting, and an optional HTTP control surface with a status page.
 - `wall.fitToDisplay` scales and centres the authored layout into whatever window
   it gets, so a 3840x2160 wall layout is previewable on a laptop at the same
   proportions it will have on the wall.
@@ -129,3 +131,10 @@ and the decisions that need Jeff before some of it can be finalized.
   `config.views.indexOf(v)` at call time.
 - `src/main.js` has no unit tests, so after changing panel lifecycle behaviour
   run `FORGE_DEV=1 FORGE_SELFTEST=1 npm start` and read the log.
+- The control surface is unauthenticated by design and binds to loopback. If
+  that ever changes, it needs auth first, not a comment.
+- Anything that reloads a panel on a timer must skip panels in use. `inUse()` is
+  the single check; do not write a second one.
+- Do not build markup with inline event handlers in `src/control-page.js`. The
+  first version did and the escaping collapsed into an unparseable page. Use
+  `data-` attributes and the delegated listener.

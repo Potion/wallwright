@@ -283,6 +283,35 @@ after the operator stopped typing, logging them out of dashboards meant to sit
 signed in all day. It defaults to **off**, and the idle timeout returns to the
 grid without touching the pages.
 
+### The control surface works, and caught two things
+
+Every route exercised against a running wall: status, preset recall, URL change,
+promote, back to grid, reload one, reload all. Error paths return the right
+codes: 404 for an unknown preset or panel, 400 for a missing id or malformed
+JSON, 404 for an unknown route. Rendered in a real browser with no console
+errors, and clicking a preset chip recalled it: panel count went to one, the
+chip lit, and memory dropped from 1414MB to 730MB as the removed panel's
+renderer was reclaimed.
+
+Two bugs it surfaced:
+
+- **The first status page shipped broken.** It built `onclick="..."` into the
+  markup, which meant JavaScript quoted inside HTML inside a template literal,
+  and the escaping collapsed: the served page would not parse and would have
+  rendered blank. Rewritten with `data-` attributes and one delegated listener,
+  which removes the nesting. The page's inline script is now extracted and
+  syntax-checked as part of verifying it.
+- **`startControlServer()` would have crashed on every production config.** It
+  destructured `config.control`, which `withDefaults` was not filling in, so any
+  config without an explicit `control` block threw at startup. It only worked in
+  testing because the test config happened to set one. A test for the default
+  caught it.
+
+The drift flag earned itself immediately: a panel showed `now at
+https://sf.thijs.gg/`, having been navigated away from its configured URL during
+earlier interaction testing. That is precisely the state an unattended wall gets
+into and nobody notices.
+
 ### Upkeep: refresh, recycle, and memory
 
 An exhibit runs for weeks, so dashboards go stale and renderers grow. Both fixes

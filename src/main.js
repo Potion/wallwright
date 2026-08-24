@@ -27,6 +27,8 @@ const path = require('path');
 const fs = require('fs');
 const { loadConfig, saveViews } = require('./config');
 const { clampGrid, snapGrid } = require('./layout');
+const { createControlServer } = require('./control-server');
+const { statusPage } = require('./control-page');
 
 // Set before anything reads userData, because this decides where the `persist:`
 // session partitions live. Left at the default they would sit under an
@@ -395,6 +397,7 @@ function createWall() {
     if (DEV && process.env.FORGE_CAPTURE_OUT) scheduleCapture(process.env.FORGE_CAPTURE_OUT);
     startUpkeep();
     startMemoryWatch();
+    startControlServer();
   });
 }
 
@@ -1687,6 +1690,108 @@ function scheduleCapture(outPath) {
     });
 }
 
+// ---- control surface --------------------------------------------------------
+
+let controlServer = null;
+
+// Everything an administrator can see about the wall without standing at it.
+function wallStatus() {
+  const now = Date.now();
+  let memoryMb = 0;
+  try {
+    for (const m of app.getAppMetrics()) {
+      memoryMb += (m.memory && m.memory.workingSetSize ? m.memory.workingSetSize : 0) / 1024;
+    }
+  } catch {
+    /* metrics unavailable */
+  }
+
+  return {
+    mode: state.mode,
+    activePanel: state.activeIndex >= 0 ? config.views[state.activeIndex].id : null,
+    activePreset: activePresetId,
+    uptimeSec: Math.round((now - startedAt) / 1000),
+    memoryMb: Math.round(memoryMb),
+    wall: { width: config.wall.width, height: config.wall.height, scale: round3(layout.scale) },
+    presets: config.presets.map((p) => ({ id: p.id, name: p.name || p.id })),
+    panels: config.views.map((v, i) => {
+      const wc = contentViews[i] && contentViews[i].webContents;
+      const w = watchdog.get(v.id) || {};
+      return {
+        id: v.id,
+        label: v.label || '',
+        url: v.url || '',
+        // Where it actually is, which is the point of a status page: a panel
+        // that has been navigated away shows it here.
+        currentUrl: wc && !wc.isDestroyed() ? wc.getURL() : null,
+        grid: v.grid,
+        zoom: round3(v.zoom),
+        partition: v.partition,
+        loading: wc && !wc.isDestroyed() ? wc.isLoading() : null,
+        crashed: wc ? wc.isDestroyed() : true,
+        reloadAttempts: w.attempts || 0,
+        reloadDeferred: !!w.deferred,
+        lastUsedSecAgo: touched.has(v.id) ? Math.round((now - touched.get(v.id)) / 1000) : null,
+      };
+    }),
+  };
+}
+
+const controlActions = {
+  status: wallStatus,
+  page: () => statusPage(),
+  applyPreset: (id) => {
+    if (!findPreset(id)) return false;
+    applyPreset(id);
+    return true;
+  },
+  updatePanel: (id, patch) => {
+    if (indexOfId(id) < 0) return false;
+    updatePanel(id, patch);
+    return true;
+  },
+  promote: (id) => {
+    if (id === null) {
+      dockGrid();
+      return true;
+    }
+    const i = indexOfId(id);
+    if (i < 0) return false;
+    activate(i);
+    return true;
+  },
+  // Explicitly asked for, so it is allowed to interrupt someone: unlike the
+  // watchdog, a person pressed this.
+  reload: (id) => {
+    const targets = id === null ? config.views.map((_v, i) => i) : [indexOfId(id)];
+    if (targets.some((i) => i < 0)) return false;
+    targets.forEach((i) => {
+      const v = config.views[i];
+      log(`reload requested for ${v.id}`);
+      contentViews[i].webContents.loadURL(v.url || placeholderURL(v));
+    });
+    return true;
+  },
+};
+
+function startControlServer() {
+  const { port, host } = config.control;
+  if (!port) return;
+
+  controlServer = createControlServer(controlActions, { log: warn });
+  controlServer.on('error', (e) => warn(`control server: ${e.message}`));
+  controlServer.listen(port, host, () => {
+    const bound = controlServer.address();
+    log(`control surface on http://${host}:${bound.port}`);
+    if (host !== '127.0.0.1' && host !== 'localhost') {
+      warn(
+        `the control surface is reachable at ${host} and has no authentication. ` +
+          'Anyone who can reach it can drive the wall.'
+      );
+    }
+  });
+}
+
 // ---- lockdown + lifecycle ---------------------------------------------------
 
 function registerShortcuts() {
@@ -1808,5 +1913,8 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+  if (controlServer) controlServer.close();
+});
 app.on('window-all-closed', () => app.quit());
