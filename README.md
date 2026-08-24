@@ -167,6 +167,7 @@ With `FORGE_DEV=1`:
 | `FORGE_SELECT=<id>`     | select that panel, so the inspector is open      |
 | `FORGE_SELFTEST=1`      | run the panel CRUD smoke test, logging each step |
 | `FORGE_CAPTURE_OUT=...` | capture the wall to a PNG and exit               |
+| `FORGE_LOG_INPUT=1`     | log which panel each click and keypress reaches  |
 
 `FORGE_SELFTEST` exists because nothing in `src/main.js` has unit tests: it
 imports electron at module scope. It drives the real path instead, through the
