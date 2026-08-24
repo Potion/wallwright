@@ -100,6 +100,15 @@ function validateConfig(c) {
   if (c.escToGrid !== undefined && !['single', 'double', 'off'].includes(c.escToGrid)) {
     p.push('escToGrid must be "single", "double" or "off"');
   }
+  const sat = c.wall && c.wall.safeAreaTop;
+  if (
+    sat !== undefined &&
+    sat !== null &&
+    sat !== 'auto' &&
+    !(Number.isFinite(sat) && sat >= 0)
+  ) {
+    p.push('wall.safeAreaTop must be "auto", a number >= 0, or absent');
+  }
   return p;
 }
 

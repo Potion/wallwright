@@ -52,13 +52,17 @@
       }
 
       /* ---- layout edit mode ---- */
+      /* Bottom, not top. Centred at the top is exactly where a MacBook's camera
+         housing sits, which cut the middle out of this bar. Nothing on any Mac
+         obstructs the bottom edge, and on the wall it reads the same either
+         way. */
       .editbar {
         position: absolute;
         left: 50%;
-        top: 0;
+        bottom: 0;
         transform: translateX(-50%);
         padding: 10px 18px;
-        border-radius: 0 0 10px 10px;
+        border-radius: 10px 10px 0 0;
         background: rgba(0, 0, 0, 0.82);
         color: #e6edf3;
         font-size: 14px;
@@ -133,7 +137,7 @@
       .inspector {
         position: absolute;
         right: 24px;
-        top: 84px;
+        top: 24px;
         width: 340px;
         box-sizing: border-box;
         padding: 16px 18px;

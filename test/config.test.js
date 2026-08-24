@@ -90,6 +90,25 @@ test('a bad escToGrid value is reported', () => {
   assert.match(validateConfig(c).join(), /escToGrid/);
 });
 
+test('wall.safeAreaTop accepts "auto", a number, or nothing', () => {
+  const c = good();
+  assert.deepStrictEqual(validateConfig(c), []); // absent
+  c.wall.safeAreaTop = 'auto';
+  assert.deepStrictEqual(validateConfig(c), []);
+  c.wall.safeAreaTop = 38;
+  assert.deepStrictEqual(validateConfig(c), []);
+  c.wall.safeAreaTop = 0;
+  assert.deepStrictEqual(validateConfig(c), []);
+});
+
+test('a bad wall.safeAreaTop is reported', () => {
+  const c = good();
+  c.wall.safeAreaTop = 'notch';
+  assert.match(validateConfig(c).join(), /safeAreaTop/);
+  c.wall.safeAreaTop = -5;
+  assert.match(validateConfig(c).join(), /safeAreaTop/);
+});
+
 test('zero idleReturnMs is allowed (disables auto-return)', () => {
   const c = good();
   c.idleReturnMs = 0;

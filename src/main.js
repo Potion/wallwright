@@ -102,32 +102,56 @@ function warn(...args) {
 // laptop without editing any rectangles.
 let layout = { scale: 1, offsetX: 0, offsetY: 0, width: 0, height: 0 };
 
+// Height to keep clear at the top of the wall. On a notched MacBook, owning the
+// whole display means page content sits under the camera housing. That is a
+// laptop-only annoyance, since the show PC has no notch, so it is opt-in:
+// `wall.safeAreaTop` of "auto" measures the inset macOS reports, a number sets
+// it explicitly, and absent means no inset at all.
+//
+// Only applies while the app owns the display. In a window it already sits below
+// the menu bar, so there is nothing to avoid.
+function safeAreaTop() {
+  if (!isFullscreenNow()) return 0;
+  const setting = config.wall.safeAreaTop;
+  if (setting === 'auto') {
+    if (process.platform !== 'darwin') return 0;
+    const d = pickWallDisplay();
+    return Math.max(0, d.workArea.y - d.bounds.y);
+  }
+  return Number.isFinite(setting) && setting > 0 ? Math.round(setting) : 0;
+}
+
 function computeLayout() {
   const target = win ? win.getContentBounds() : pickWallDisplay().bounds;
   const W = target.width;
   const H = target.height;
   const w = config.wall.width;
   const h = config.wall.height;
-  const scale = config.wall.fitToDisplay === false ? 1 : Math.min(W / w, H / h);
+  const top = safeAreaTop();
+  const avail = Math.max(1, H - top);
+  const scale = config.wall.fitToDisplay === false ? 1 : Math.min(W / w, avail / h);
 
   // Report against the window, which is what the layout is actually scaled
   // into. Reporting against the display would claim 1:1 while the app sits in
   // an 85% window. Only on change, since this is called on every resize.
-  if (scale !== lastScaleLogged) {
-    lastScaleLogged = scale;
+  const stamp = `${scale}/${top}/${W}x${H}`;
+  if (stamp !== lastScaleLogged) {
+    lastScaleLogged = stamp;
+    const inset = top ? `, keeping ${top}px clear at the top` : '';
     if (Math.abs(scale - 1) < 0.0005) {
-      log(`layout ${w}x${h} in a ${W}x${H} window, 1:1`);
+      log(`layout ${w}x${h} in a ${W}x${H} window, 1:1${inset}`);
     } else {
-      log(`layout ${w}x${h} in a ${W}x${H} window, scaled to ${scale.toFixed(3)}`);
+      log(`layout ${w}x${h} in a ${W}x${H} window, scaled to ${scale.toFixed(3)}${inset}`);
     }
   }
 
   return {
     scale,
     offsetX: Math.round((W - w * scale) / 2),
-    offsetY: Math.round((H - h * scale) / 2),
+    offsetY: top + Math.round((avail - h * scale) / 2),
     width: W,
     height: H,
+    safeTop: top,
   };
 }
 

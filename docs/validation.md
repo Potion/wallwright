@@ -185,6 +185,24 @@ right-click then Open, or clear it with
 
 Neither has been run on Windows yet; see the checklist. Both are unsigned.
 
+### The MacBook notch, and what is done about it
+
+Owning the whole display on a notched MacBook puts content under the camera
+housing. Two separate problems, handled differently:
+
+- **The editor's own chrome** was centred at the top, which is exactly where the
+  notch is: it cut the middle out of the toolbar. Moved to the bottom of the
+  screen, where nothing obstructs it on any Mac. No config, no platform check,
+  and it reads the same on the wall.
+- **Page content** under the notch is opt-in to fix, because the show PC has no
+  notch and insetting the wall by default would make every macOS preview
+  geometrically unfaithful. `wall.safeAreaTop: "auto"` measures the inset macOS
+  reports and lays the wall out below it. Verified:
+  `layout 1800x1169 in a 1800x1169 window, scaled to 0.967, keeping 38px clear at the top`.
+
+Set to `"auto"` in the local dev configs. The committed `config/wall.json` leaves
+it off, so deployment behaviour is unchanged.
+
 ### Panel CRUD works end to end
 
 `src/main.js` has no unit tests, so `FORGE_SELFTEST=1` drives the real path:

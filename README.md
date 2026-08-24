@@ -74,6 +74,13 @@ fullscreen and kiosk path leaves the menu-bar strip uncovered, which reads as a
 black gap across the top of the wall. See `docs/validation.md` and
 `npm run probe:fs`.
 
+Owning the whole display also means that on a notched MacBook, page content sits
+under the camera housing. The deployment machines have no notch, so this is
+opt-in rather than automatic: set `wall.safeAreaTop` to `"auto"` in a local dev
+config and the wall is laid out below the notch instead. The editor's own
+toolbar sits at the bottom of the screen for the same reason, where nothing
+obstructs it on any Mac.
+
 ## Build
 
 ```sh
@@ -181,19 +188,34 @@ rectangles, and per-panel zoom can change without touching code:
 
 ```jsonc
 {
-  "wall": { "width": 3840, "height": 2160, "backgroundColor": "#000000" },
+  "wall": {
+    "width": 3840,
+    "height": 2160,
+    "backgroundColor": "#000000",
+    "displayLabel": null, // match screen.getAllDisplays().label to pick the wall output
+    "displayId": null, // or match by display id
+    "kiosk": true,
+    "fullscreen": true,
+    "fitToDisplay": true, // scale and centre the authored layout into the window
+    "safeAreaTop": null, // "auto" keeps the wall clear of a MacBook notch
+  },
   "idleReturnMs": 240000, // auto-return to grid after inactivity (0 = never)
-  "showHotspotHint": true, // subtle hover highlight on the four panels in grid mode
+  "showHotspotHint": true, // subtle hover highlight on the panels in grid mode
+  "hideInactiveWhenActive": false, // hide the others while one is fullscreen
+  "transitionMs": 220, // promote/return animation (0 = snap)
+  "escToGrid": "single", // "single" | "double" | "off"  (see AGENTS.md)
   "backButton": { "x": 24, "y": 24, "width": 176, "height": 56 },
   "views": [
+    // May be empty: a montage can be built from a blank wall in the editor.
     {
       "id": "view-1",
+      "label": "Dashboard 1",
       "url": "https://.../dashboard-1",
       "grid": { "x": 0, "y": 0, "width": 1920, "height": 1080 },
       "zoom": 1.0, // per-panel scale, independent of the others
-      "partition": "persist:forge-1", // persistent session so logins survive restarts
+      "partition": "persist:forge-1", // persistent session; may be shared with another panel
+      "allowedOrigins": [], // empty = permissive; populate to lock navigation down
     },
-    // ...four total
   ],
 }
 ```
