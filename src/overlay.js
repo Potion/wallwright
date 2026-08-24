@@ -18,6 +18,7 @@ let selectedId = null;
 
 window.forge.onState((s) => {
   current = s;
+  if (s.mode !== 'edit') namingPreset = false;
   render();
 });
 
@@ -124,6 +125,8 @@ function renderEdit() {
       height: h,
     });
   });
+  bar.appendChild(renderPresets());
+
   const hint = document.createElement('span');
   hint.className = 'barhint';
   hint.innerHTML =
@@ -187,6 +190,83 @@ function renderEdit() {
   });
 
   renderInspector();
+}
+
+// ---- presets ----------------------------------------------------------------
+//
+// Named montages. A chip per preset, plus a way to save the current one. No
+// window.prompt: a modal dialog blocks the whole renderer, and on a wall with no
+// window chrome there is no good way out of one.
+
+let namingPreset = false;
+
+function renderPresets() {
+  const wrap = document.createElement('span');
+  wrap.className = 'presets';
+
+  if (namingPreset) {
+    const input = document.createElement('input');
+    input.className = 'preset-name';
+    input.placeholder = 'Name this montage';
+    input.spellcheck = false;
+    const commit = () => {
+      const name = input.value.trim();
+      namingPreset = false;
+      if (name) window.forge.savePreset(name);
+      else render();
+    };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') commit();
+      if (e.key === 'Escape') {
+        namingPreset = false;
+        render();
+      }
+    });
+    input.addEventListener('blur', commit);
+    wrap.appendChild(input);
+    // Focus after it is in the document.
+    setTimeout(() => input.focus(), 0);
+    return wrap;
+  }
+
+  const label = document.createElement('span');
+  label.className = 'preset-label';
+  label.textContent = current.presets.length ? 'Montages' : 'No saved montages';
+  wrap.appendChild(label);
+
+  current.presets.forEach((p, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'preset' + (p.id === current.activePresetId ? ' active' : '');
+
+    const use = document.createElement('button');
+    use.className = 'preset-use';
+    // The number is the shortcut that recalls it without opening the editor.
+    use.textContent = i < 9 ? `${i + 1}. ${p.name}` : p.name;
+    use.title = i < 9 ? `Recall with Ctrl/Cmd+Shift+${i + 1}` : 'Recall';
+    use.addEventListener('click', () => window.forge.applyPreset(p.id));
+
+    const del = document.createElement('button');
+    del.className = 'preset-del';
+    del.textContent = '\u00d7';
+    del.title = `Delete "${p.name}"`;
+    del.addEventListener('click', () => window.forge.deletePreset(p.id));
+
+    chip.append(use, del);
+    wrap.appendChild(chip);
+  });
+
+  const save = document.createElement('button');
+  save.className = 'preset-save';
+  save.textContent = '+ Save as montage';
+  save.title = 'Save the current layout and URLs under a name';
+  save.addEventListener('click', () => {
+    namingPreset = true;
+    render();
+  });
+  wrap.appendChild(save);
+
+  return wrap;
 }
 
 // ---- inspector --------------------------------------------------------------

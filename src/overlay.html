@@ -123,6 +123,67 @@
         background: #f04e23;
       }
 
+      /* Named montages, in the edit toolbar. */
+      .presets {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .preset-label {
+        color: #8b949e;
+        margin-right: 2px;
+      }
+      .preset {
+        display: inline-flex;
+        align-items: stretch;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .preset.active {
+        border-color: #f04e23;
+      }
+      .preset-use,
+      .preset-del,
+      .preset-save {
+        font: inherit;
+        border: 0;
+        cursor: pointer;
+        background: #21262d;
+        color: #e6edf3;
+        padding: 4px 9px;
+      }
+      .preset-use:hover,
+      .preset-save:hover {
+        background: rgba(240, 78, 35, 0.9);
+      }
+      .preset.active .preset-use {
+        color: #f04e23;
+        font-weight: 600;
+      }
+      .preset-del {
+        padding: 4px 7px;
+        color: #8b949e;
+        border-left: 1px solid #30363d;
+      }
+      .preset-del:hover {
+        background: #f85149;
+        color: #ffffff;
+      }
+      .preset-save {
+        border: 1px dashed #57606a;
+        border-radius: 6px;
+      }
+      .preset-name {
+        font: inherit;
+        padding: 4px 9px;
+        border-radius: 6px;
+        border: 1px solid #f04e23;
+        background: #161b22;
+        color: #e6edf3;
+        min-width: 200px;
+      }
+
       /* Rubber band while drawing a new panel. */
       .band {
         position: absolute;

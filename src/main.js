@@ -83,6 +83,7 @@ let lastScaleLogged = null; // ditto for the layout scale
 let state = { mode: 'grid', activeIndex: -1 };
 let idleTimer = null;
 let lastEscAt = 0;
+let activePresetId = null; // which named montage is on the wall, if any
 const popups = new Set(); // BrowserWindows opened by SSO flows
 let editDrag = null; // { i, baseGrid, baseZoom } while a layout drag is in flight
 const watchdog = new Map(); // view id -> { attempts, pending, deferred }
@@ -529,6 +530,119 @@ function wallUnits() {
   return { width: config.wall.width, height: config.wall.height };
 }
 
+// ---- presets ----------------------------------------------------------------
+//
+// A preset is a named snapshot of a montage. config.views is what is on the wall
+// now; presets are copies you can recall into it. Every video wall platform in
+// this category has this, and it is what turns the layout editor from a one-shot
+// setup tool into something usable day to day.
+
+function clonePresetViews(views) {
+  return views.map((v) => ({ ...v, grid: { ...v.grid } }));
+}
+
+function findPreset(id) {
+  return config.presets.find((p) => p.id === id);
+}
+
+// Panels that are unchanged keep their existing view, so recalling a preset does
+// not throw away the pages that were already right. A reload would keep the
+// login (see src/dev/session-probe.js) but would still lose whatever the page
+// was showing, and on a control room wall that reads as the whole thing
+// flickering for no reason.
+function applyPreset(id) {
+  const preset = findPreset(id);
+  if (!preset) return warn(`no preset "${id}"`);
+
+  const wanted = clonePresetViews(preset.views);
+  const keptViews = [];
+  const spare = contentViews.slice();
+  const spareSpecs = config.views.slice();
+
+  wanted.forEach((want) => {
+    const i = spareSpecs.findIndex(
+      (have) =>
+        have.id === want.id && have.url === want.url && have.partition === want.partition
+    );
+    if (i >= 0) {
+      keptViews.push(spare[i]);
+      spare.splice(i, 1);
+      spareSpecs.splice(i, 1);
+    } else {
+      keptViews.push(null); // built below, once config.views is in place
+    }
+  });
+
+  // Anything left over is not in the preset, so it goes.
+  spare.forEach((view) => {
+    win.contentView.removeChildView(view);
+    if (!view.webContents.isDestroyed()) view.webContents.close();
+  });
+  spareSpecs.forEach((v) => {
+    const w = watchdog.get(v.id);
+    if (w && w.pending) clearTimeout(w.pending);
+    watchdog.delete(v.id);
+    touched.delete(v.id);
+  });
+
+  config.views = wanted;
+  contentViews.length = 0;
+  wanted.forEach((v, i) => {
+    contentViews.push(keptViews[i] || createContentView(v));
+  });
+
+  activePresetId = id;
+  state = { mode: state.mode === 'edit' ? 'edit' : 'grid', activeIndex: -1 };
+  const reused = keptViews.filter(Boolean).length;
+  log(`preset "${preset.name || id}": ${wanted.length} panels, ${reused} reused`);
+  dockGridOrKeepEditing();
+}
+
+// Recalling while the editor is open should leave the editor open.
+function dockGridOrKeepEditing() {
+  if (state.mode === 'edit') {
+    refreshLayout();
+    config.views.forEach((v, i) => {
+      contentViews[i].setVisible(true);
+      contentViews[i].setBounds(panelRect(i));
+      contentViews[i].webContents.setZoomFactor(panelZoom(i));
+    });
+    bringToTop(overlay);
+    sendOverlayState();
+  } else {
+    dockGrid({ animate: false });
+  }
+}
+
+function savePreset(name) {
+  const clean = String(name || '').trim();
+  if (!clean) return null;
+  const id =
+    clean
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'preset';
+  const existing = findPreset(id);
+  const preset = {
+    id,
+    name: clean,
+    views: clonePresetViews(config.views),
+  };
+  if (existing) Object.assign(existing, preset);
+  else config.presets.push(preset);
+  activePresetId = id;
+  log(`saved preset "${clean}" (${preset.views.length} panels)`);
+  return preset;
+}
+
+function deletePreset(id) {
+  const i = config.presets.findIndex((p) => p.id === id);
+  if (i < 0) return;
+  log(`deleted preset "${config.presets[i].name || id}"`);
+  config.presets.splice(i, 1);
+  if (activePresetId === id) activePresetId = null;
+}
+
 // ---- state transitions ------------------------------------------------------
 
 // Animated bounds when a transition duration is configured. Electron animates
@@ -612,6 +726,8 @@ function sendOverlayState() {
       stage: stageBounds(),
       minPx: Math.max(8, Math.round(MIN_PANEL * layout.scale)),
       wall: { width: config.wall.width, height: config.wall.height },
+      presets: config.presets.map((p) => ({ id: p.id, name: p.name || p.id })),
+      activePresetId,
       views: config.views.map((v, i) => ({
         ...publicView(v, i),
         wallGrid: v.grid,
@@ -772,7 +888,7 @@ function exitEdit({ save = true } = {}) {
   editDrag = null;
   if (save) {
     try {
-      saveViews(configPath, config.views);
+      saveViews(configPath, config.views, config.presets);
       log(`layout saved to ${configPath}`);
     } catch (e) {
       warn('could not save layout:', e.message);
@@ -1190,6 +1306,15 @@ ipcMain.on('forge:layout', (_e, msg) => {
 
 ipcMain.on('forge:editExit', (_e, opts) => exitEdit({ save: !(opts && opts.discard) }));
 
+ipcMain.on('forge:applyPreset', (_e, id) => applyPreset(id));
+ipcMain.on('forge:savePreset', (_e, name) => {
+  if (savePreset(name)) sendOverlayState();
+});
+ipcMain.on('forge:deletePreset', (_e, id) => {
+  deletePreset(id);
+  sendOverlayState();
+});
+
 ipcMain.on('forge:addPanel', (_e, rect) => {
   if (state.mode !== 'edit' || !rect) return;
   const v = addPanel(unscaleRect(rect));
@@ -1305,6 +1430,31 @@ function selfTest() {
     exitEdit({ save: false });
     await soon(300);
 
+    // Presets: save the current montage, change it, recall it, and confirm the
+    // panels that did not change were reused rather than rebuilt.
+    enterEdit();
+    await soon(300);
+    await run(`window.forge.savePreset('Selftest A')`);
+    await soon(400);
+    step(9, `saved: ${config.presets.map((p) => p.id).join(',')}`);
+
+    const beforeIds = ids();
+    await run(`window.forge.addPanel({ x: 20, y: 20, width: 400, height: 300 })`);
+    await soon(600);
+    step(9, `montage changed: ${ids()}`);
+
+    await run(`window.forge.applyPreset('selftest-a')`);
+    await soon(800);
+    step(9, `after recall: ${ids()}`);
+    step(9, `matches the saved montage: ${ids() === beforeIds}`);
+    step(9, `views and config aligned: ${contentViews.length === config.views.length}`);
+
+    await run(`window.forge.deletePreset('selftest-a')`);
+    await soon(400);
+    step(9, `after delete: ${config.presets.length} presets`);
+    exitEdit({ save: false });
+    await soon(300);
+
     log('selftest done');
   })().catch((e) => warn('selftest failed:', e.message));
 }
@@ -1398,6 +1548,15 @@ function registerShortcuts() {
   // Panels are interactive in grid mode, so promoting one needs its own mode
   // rather than a click that would otherwise land on the page.
   globalShortcut.register('CommandOrControl+Shift+P', () => toggleSelect());
+  // Recall a montage by number, without opening the editor. Registered for all
+  // nine whether or not that many presets exist; the handler just does nothing.
+  for (let n = 1; n <= 9; n++) {
+    globalShortcut.register(`CommandOrControl+Shift+${n}`, () => {
+      const preset = config.presets[n - 1];
+      if (preset) applyPreset(preset.id);
+      else log(`no preset ${n}`);
+    });
+  }
   // NOTE: Esc is intentionally NOT a globalShortcut. globalShortcut is an
   // OS-level accelerator: it fires regardless of focus and swallows the key
   // before the page sees it, which would break every Esc-to-close modal in the

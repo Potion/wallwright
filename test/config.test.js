@@ -234,3 +234,79 @@ test('a saved layout round-trips back through validation', () => {
   assert.strictEqual(c.views[0].grid.width, 2000);
   assert.strictEqual(c.views[1].zoom, 0.9);
 });
+
+// ---- presets ----------------------------------------------------------------
+
+const withPresets = () => ({
+  ...good(),
+  presets: [
+    {
+      id: 'overview',
+      name: 'Overview',
+      views: [{ id: 'a', url: 'https://x/1', grid: { x: 0, y: 0, width: 100, height: 100 } }],
+    },
+  ],
+});
+
+test('a config with presets validates', () => {
+  assert.deepStrictEqual(validateConfig(withPresets()), []);
+});
+
+test('presets are optional', () => {
+  assert.deepStrictEqual(validateConfig(good()), []);
+  assert.deepStrictEqual(withDefaults(good()).presets, []);
+});
+
+test('duplicate preset ids are rejected', () => {
+  const c = withPresets();
+  c.presets.push({ ...c.presets[0] });
+  assert.match(validateConfig(c).join(), /duplicated/);
+});
+
+// The same rules as the live views, rather than a second set that could drift.
+test("a preset's views are validated like the live ones", () => {
+  const c = withPresets();
+  c.presets[0].views[0].grid = { x: 0, y: 0, width: 99999, height: 100 };
+  assert.match(validateConfig(c).join(), /presets\[0\].*falls outside/);
+});
+
+test('a preset with a non-array views is reported', () => {
+  const c = withPresets();
+  c.presets[0].views = 'nope';
+  assert.match(validateConfig(c).join(), /presets\[0\]\.views must be an array/);
+});
+
+test('presets survive defaults, and their views get defaults too', () => {
+  const c = withDefaults(withPresets());
+  assert.strictEqual(c.presets.length, 1);
+  assert.strictEqual(c.presets[0].views[0].zoom, 1);
+  assert.strictEqual(c.presets[0].views[0].partition, 'persist:forge-1');
+});
+
+test('saveViews writes presets alongside the live views', () => {
+  const f = tmpConfig(good());
+  saveViews(f, [view()], [{ id: 'p1', name: 'One', views: [view({ id: 'z' })] }]);
+  const out = JSON.parse(fs.readFileSync(f, 'utf8'));
+  assert.strictEqual(out.presets.length, 1);
+  assert.strictEqual(out.presets[0].name, 'One');
+  assert.strictEqual(out.presets[0].views[0].id, 'z');
+});
+
+test('saveViews does not add a presets key when there are none', () => {
+  const f = tmpConfig(good());
+  saveViews(f, [view()], []);
+  assert.ok(!('presets' in JSON.parse(fs.readFileSync(f, 'utf8'))));
+});
+
+test('saveViews removes presets once the last one is deleted', () => {
+  const f = tmpConfig(withPresets());
+  saveViews(f, [view()], []);
+  assert.ok(!('presets' in JSON.parse(fs.readFileSync(f, 'utf8'))));
+});
+
+test('a saved preset round-trips back through validation', () => {
+  const f = tmpConfig(good());
+  saveViews(f, [view()], [{ id: 'p1', name: 'One', views: [view({ id: 'z' })] }]);
+  const c = loadConfig(f);
+  assert.strictEqual(c.presets[0].views[0].id, 'z');
+});

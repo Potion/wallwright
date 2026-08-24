@@ -26,4 +26,9 @@ contextBridge.exposeInMainWorld('forge', {
   deletePanel: (id) => ipcRenderer.send('forge:deletePanel', id),
   updatePanel: (id, patch) => ipcRenderer.send('forge:updatePanel', { id, patch }),
   onSelect: (cb) => ipcRenderer.on('forge:select', (_e, id) => cb(id)),
+
+  // Named montages.
+  applyPreset: (id) => ipcRenderer.send('forge:applyPreset', id),
+  savePreset: (name) => ipcRenderer.send('forge:savePreset', name),
+  deletePreset: (id) => ipcRenderer.send('forge:deletePreset', id),
 });

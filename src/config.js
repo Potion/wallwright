@@ -103,6 +103,31 @@ function validateConfig(c) {
   if (c.recentUseMs !== undefined && !(Number.isFinite(c.recentUseMs) && c.recentUseMs >= 0)) {
     p.push('recentUseMs must be a number >= 0');
   }
+
+  // Presets are named snapshots of a montage. Each holds the same shape as the
+  // live views, so it is checked with the same rules rather than a second set
+  // that could drift.
+  if (c.presets !== undefined) {
+    if (!Array.isArray(c.presets)) {
+      p.push('"presets" must be an array');
+    } else {
+      const presetIds = new Set();
+      c.presets.forEach((preset, i) => {
+        const at = `presets[${i}]`;
+        if (!preset || typeof preset !== 'object') return p.push(`${at} is not an object`);
+        if (!preset.id) p.push(`${at}.id is required`);
+        else if (presetIds.has(preset.id)) p.push(`${at}.id "${preset.id}" is duplicated`);
+        else presetIds.add(preset.id);
+        if (!Array.isArray(preset.views)) {
+          p.push(`${at}.views must be an array`);
+          return;
+        }
+        validateConfig({ wall: c.wall, views: preset.views }).forEach((problem) =>
+          p.push(`${at}: ${problem}`)
+        );
+      });
+    }
+  }
   const sat = c.wall && c.wall.safeAreaTop;
   if (
     sat !== undefined &&
@@ -159,6 +184,16 @@ function withDefaults(c) {
     // How long after someone touches a panel it still counts as in use, and so
     // must not be reloaded under them by the watchdog.
     recentUseMs: c.recentUseMs ?? 60000,
+    presets: Array.isArray(c.presets)
+      ? c.presets.map((preset) => ({
+          ...preset,
+          views: preset.views.map((v, i) => ({
+            zoom: 1,
+            partition: `persist:forge-${i + 1}`,
+            ...v,
+          })),
+        }))
+      : [],
     backButton: c.backButton || { x: 24, y: 24, width: 176, height: 56 },
     views: c.views.map((v, i) => ({
       zoom: 1,
@@ -173,9 +208,20 @@ function withDefaults(c) {
 // patched in place. Everything else in the file is preserved, so keys the
 // running config filled in from defaults are not written back as if they had
 // been authored.
-function saveViews(file, views) {
+function saveViews(file, views, presets) {
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
   raw.views = views.map(serializeView);
+  // Only written when there are any, so a config that never used presets does
+  // not grow an empty key it did not ask for.
+  if (Array.isArray(presets) && presets.length) {
+    raw.presets = presets.map((preset) => ({
+      id: preset.id,
+      name: preset.name || preset.id,
+      views: preset.views.map(serializeView),
+    }));
+  } else if (raw.presets) {
+    delete raw.presets;
+  }
   fs.writeFileSync(file, JSON.stringify(raw, null, 2) + '\n');
   return raw.views.length;
 }
