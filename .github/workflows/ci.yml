@@ -7,14 +7,16 @@ on:
 
 jobs:
   check:
-    name: lint + test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # Windows is the deployment target, so the tests run there too. It also
-        # catches the class of bug where a script or path only works on POSIX.
-        os: [ubuntu-latest, windows-latest]
+    # The one remaining GitHub-hosted job, and the cheapest tier: Linux at 1x for
+    # about fifteen seconds a push. It stays hosted deliberately, as an
+    # independent signal that does not depend on the self-hosted runners being
+    # reachable, since the builds now do.
+    #
+    # There used to be a windows-latest job here too, at 2x on every push. Its
+    # lint and test coverage moved into build-windows.yml, which runs both on the
+    # self-hosted Windows runner before packaging.
+    name: lint + test
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v5

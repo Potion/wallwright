@@ -1,39 +1,59 @@
 name: Build Windows
 
-# Not on every push: Windows runners bill at 2x on a private repo, and a build
-# downloads the Electron binary. Tag a release or run it by hand.
+# Runs on the org-level self-hosted Windows runner (PROTO1-P8), the same pair
+# touch-table-sim uses. GitHub-hosted runners bill at 2x for Windows and 10x for
+# macOS on a private repo, which is why nothing here uses them.
+#
+# The org runner group must grant this repository access. If a job sits queued
+# forever, that is what is missing.
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to build (defaults to the triggering ref)'
+        required: false
   push:
     tags: ['v*']
 
 permissions:
   contents: write # to attach build artifacts to a release
 
+env:
+  # The tag being released, whether this was a tag push or a manual re-run.
+  TAG: ${{ github.event.inputs.ref || github.ref_name }}
+
+# The runner reuses one working directory, so two builds at once would fight
+# over it.
+concurrency:
+  group: build-windows
+  cancel-in-progress: false
+
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows]
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
 
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
-          cache: npm
+          node-version: '24'
 
-      - name: Cache Electron and builder downloads
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~\AppData\Local\electron\Cache
-            ~\AppData\Local\electron-builder\Cache
-          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
-          restore-keys: ${{ runner.os }}-electron-
+      # A self-hosted runner keeps its working directory between runs, and dist/
+      # is gitignored so checkout leaves it in place. Artifacts from an older
+      # version would otherwise be swept up by the release upload below. node
+      # rather than a shell builtin, so this does not depend on the runner's
+      # shell.
+      - name: Clear previous build output
+        run: node -e "require('fs').rmSync('dist',{recursive:true,force:true})"
 
       - run: npm ci
 
-      # Do not ship something that does not pass its own checks.
+      # Do not ship something that does not pass its own checks. This is also
+      # where Windows gets its lint and test coverage, since CI no longer runs a
+      # hosted Windows job.
       - run: npm run lint
       - run: npm test
 
@@ -42,13 +62,24 @@ jobs:
 
       # Unsigned for now: there is no certificate yet. Once there is one, add
       # CSC_LINK and CSC_KEY_PASSWORD as repository secrets and pass them as env
-      # here; electron-builder picks them up with no config change. A signed
-      # build is easier for Honeywell IT to approve.
-      - name: List what was produced
-        run: Get-ChildItem dist -File | Select-Object Name, Length
-        shell: pwsh
+      # here; electron-builder picks them up with no config change.
+      #
+      # A javascript action rather than the gh cli: gh is not installed on this
+      # hand-provisioned runner, and assuming it exists is how touch-table-sim's
+      # first release attempt failed.
+      - name: Attach to the release
+        if: startsWith(env.TAG, 'v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          files: |
+            dist/*.exe
+            dist/*.zip
+          fail_on_unmatched_files: true
 
-      - uses: actions/upload-artifact@v7
+      - name: Upload workflow artifacts (non-tag runs)
+        if: ${{ !startsWith(env.TAG, 'v') }}
+        uses: actions/upload-artifact@v7
         with:
           name: forge-windows-x64
           path: |
@@ -56,12 +87,3 @@ jobs:
             dist/*.zip
           if-no-files-found: error
           retention-days: 30
-
-      # On a tag, attach the build to that release. Uploaded from the runner, so
-      # a release does not mean downloading a few hundred MB of workflow
-      # artifacts and pushing them back up by hand.
-      - name: Attach to the release
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: gh release upload "${{ github.ref_name }}" dist/*.exe dist/*.zip --clobber
-        env:
-          GH_TOKEN: ${{ github.token }}
