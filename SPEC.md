@@ -14,15 +14,28 @@ four: panels are added, removed, re-pointed and rearranged from inside the app
 
 ## Interaction model
 
-There is no touch on the wall. Interaction is a single wireless keyboard and
-mouse used at the wall itself (no separate admin monitor). Behavior:
+There is no touch on the wall, and **only administrators have input**: a single
+wireless keyboard and mouse at the wall itself (no separate admin monitor), plus
+remote access. Visitors look, they do not drive.
 
-- Grid mode: every panel displays at its configured rectangle. A
-  transparent overlay on top captures clicks.
+That constraint decides more than it appears to. The wall is idle almost all of
+the time, so anything triggered by idleness is triggered constantly, and
+"a visitor might do X" is not a threat to design against. Behavior:
+
+- Grid mode: every panel displays at its configured rectangle, and each one is
+  **live and interactive**. Nothing covers them, because a `WebContentsView`
+  consumes any OS event that lands on it and cannot be made selectively
+  transparent to input.
+- Promotion therefore has its own mode rather than being a click in the grid:
+  `Ctrl/Cmd+Shift+P` shows a hotspot overlay, and the layout editor's inspector
+  can open a panel directly.
 - Click a panel: it animates/snaps to fullscreen and becomes the input target
   (active mode). It was always live; promoting just makes it big and frontmost.
 - Return to grid: Esc key, a small corner Back button, or an idle timeout
-  (default 4 minutes) so the wall heals itself if someone walks away mid-session.
+  (default 4 minutes) so the wall heals itself if an administrator walks away
+  mid-session. The timeout returns to the grid but does **not** reload the
+  pages: since idle is the wall's normal state, reloading on idle would be a
+  scheduled logout for every dashboard meant to sit there signed in.
 - On return, the panel is re-docked, NOT reloaded, so the operator's login and
   page state survive.
 

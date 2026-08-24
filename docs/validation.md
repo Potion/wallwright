@@ -203,6 +203,43 @@ housing. Two separate problems, handled differently:
 Set to `"auto"` in the local dev configs. The committed `config/wall.json` leaves
 it off, so deployment behaviour is unchanged.
 
+### Interactive grid panels
+
+Panels are live in grid mode. No coordinate translation was needed: each panel
+is a native `WebContentsView`, so Chromium routes and scales input to it,
+`zoomFactor` included. The work was removing the full-wall overlay that was
+swallowing every event, since a `WebContentsView` consumes any OS event landing
+on it and cannot be made selectively transparent to input.
+
+Overlay visibility per mode is what decides whether panels can be touched, so
+the self-test asserts it:
+
+```
+selftest 8: grid: overlay hidden (panels interactive): true
+selftest 8: select: overlay shown and full wall: true
+selftest 8: active: overlay shown, shrunk to the back button: true
+selftest 8: back to grid: overlay hidden again: true
+selftest 8: edit: overlay shown and full wall: true
+```
+
+Still to confirm by hand: that clicks and typing actually land in the right
+panel, and that focus follows the last click. The main process focuses the
+`mousedown` sender rather than relying on the platform, which is a no-op if
+sibling views already take focus natively; that has not been distinguished.
+
+### Idle behaviour is shaped by who has input
+
+Only administrators have keyboard and mouse access, so **the wall is idle almost
+all of the time**. Anything hung off the idle timer therefore fires constantly
+in normal operation, which inverts what a sensible default looks like.
+
+`idleResetUrls` was briefly defaulted to on, to stop a visitor leaving a panel
+somewhere strange. With admin-only input that reasoning does not hold, and the
+default was actively harmful: it would have reloaded every panel a few minutes
+after the operator stopped typing, logging them out of dashboards meant to sit
+signed in all day. It defaults to **off**, and the idle timeout returns to the
+grid without touching the pages.
+
 ### Panel CRUD works end to end
 
 `src/main.js` has no unit tests, so `FORGE_SELFTEST=1` drives the real path:
@@ -487,7 +524,14 @@ macOS passing does not settle the target platform. This group is the real risk.
       sit on the wall between interactions.
 - [ ] **Sustained run.** Leave it up for a working day against the real
       dashboards and watch for leaks, session expiry behaviour, and whether the
-      watchdog fires more than expected.
+      watchdog fires more than expected. Specifically confirm that a logged-in
+      panel is still logged in after hours of idleness, since idle is the wall's
+      normal state.
+- [ ] **Remote access.** Administrators reach the show PC remotely. A remote
+      desktop session can change display topology or resolution, which fires the
+      `display-metrics-changed` handler and re-targets the window. Confirm that
+      connecting and disconnecting does not move the wall to the wrong output or
+      leave it mis-scaled.
 
 ### What CI covers
 

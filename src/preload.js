@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('forge', {
   onState: (cb) => ipcRenderer.on('forge:state', (_e, s) => cb(s)),
   activate: (id) => ipcRenderer.send('forge:activate', id),
   back: () => ipcRenderer.send('forge:back'),
+  promote: (id) => ipcRenderer.send('forge:promote', id),
   escape: () => ipcRenderer.send('forge:escape'),
   toggleFullscreen: () => ipcRenderer.send('forge:toggleFullscreen'),
   // The Back-button corner is part of the wall too: moving the mouse there must

@@ -84,6 +84,7 @@ let lastEscAt = 0;
 const popups = new Set(); // BrowserWindows opened by SSO flows
 let editDrag = null; // { i, baseGrid, baseZoom } while a layout drag is in flight
 const watchdog = new Map(); // view id -> { attempts, pending, deferred }
+const touched = new Map(); // view id -> ms of the last input in that panel
 
 function log(...args) {
   console.log('[forge]', ...args);
@@ -473,6 +474,7 @@ function deletePanel(id) {
   const w = watchdog.get(id);
   if (w && w.pending) clearTimeout(w.pending);
   watchdog.delete(id);
+  touched.delete(id);
 
   // A promoted panel that gets deleted has to leave active mode, and indices
   // after the removed one have all shifted.
@@ -564,13 +566,39 @@ function dockGrid({ animate = true } = {}) {
     contentViews[i].webContents.setZoomFactor(panelZoom(i));
   });
 
+  // The overlay is hidden in grid mode, which is what makes the panels
+  // interactive: a WebContentsView consumes every OS event that lands on it,
+  // and there is no way to make one selectively transparent to input
+  // (setIgnoreMouseEvents is a BrowserWindow API). Promotion moved to select
+  // and edit modes for exactly this reason.
   overlay.setBounds(wallBounds());
+  overlay.setVisible(false);
   bringToTop(overlay);
   sendOverlayState();
-  overlay.webContents.focus();
 
   closePopups();
   runDeferredReloads();
+  resetIdle();
+}
+
+// Today's grid-mode overlay, now behind a key. Panels are not interactive here;
+// that is the point, the hotspots need the clicks.
+function enterSelect() {
+  if (state.mode === 'select') return;
+  if (state.mode === 'active' || state.mode === 'edit') dockGrid({ animate: false });
+  state = { mode: 'select', activeIndex: -1 };
+  overlay.setBounds(wallBounds());
+  overlay.setVisible(true);
+  bringToTop(overlay);
+  sendOverlayState();
+  overlay.webContents.focus();
+  resetIdle();
+  log('select mode: click a panel to open it fullscreen, Esc to cancel');
+}
+
+function toggleSelect() {
+  if (state.mode === 'select') dockGrid();
+  else enterSelect();
 }
 
 // The overlay lays out in window pixels, so everything it is told is already
@@ -596,9 +624,9 @@ function sendOverlayState() {
     });
     return;
   }
-  if (state.mode === 'grid') {
+  if (state.mode === 'grid' || state.mode === 'select') {
     overlay.webContents.send('forge:state', {
-      mode: 'grid',
+      mode: state.mode,
       hint: config.showHotspotHint,
       views: config.views.map((v, i) => publicView(v, i)),
     });
@@ -730,6 +758,7 @@ function enterEdit() {
     contentViews[i].webContents.setZoomFactor(panelZoom(i));
   });
   overlay.setBounds(wallBounds());
+  overlay.setVisible(true);
   bringToTop(overlay);
   sendOverlayState();
   overlay.webContents.focus();
@@ -780,6 +809,7 @@ function activate(index, { force = false } = {}) {
   // Keep the overlay on top but shrink it to the Back button corner so the rest
   // of the page below is directly clickable.
   overlay.setBounds(scaleRect(config.backButton));
+  overlay.setVisible(true);
   bringToTop(overlay);
   sendOverlayState();
 
@@ -794,9 +824,33 @@ function activate(index, { force = false } = {}) {
 
 function resetIdle() {
   clearIdle();
-  if (state.mode === 'active' && config.idleReturnMs > 0) {
-    idleTimer = setTimeout(() => dockGrid(), config.idleReturnMs);
+  // Armed in grid too, not just active: with interactive panels the grid is
+  // where people work, so that is where a wall gets left mid-something.
+  if (config.idleReturnMs > 0 && state.mode !== 'edit') {
+    idleTimer = setTimeout(() => idleReset(), config.idleReturnMs);
   }
+}
+
+// Return to the grid when the wall has been left alone, so a panel someone
+// promoted does not stay fullscreen forever.
+//
+// Putting the URLs back is opt-in (idleResetUrls) rather than part of this,
+// because only administrators have input: the wall is idle almost all the time,
+// so an automatic reload would be a scheduled logout for every logged-in
+// dashboard.
+function idleReset() {
+  const wasGrid = state.mode === 'grid';
+  if (!wasGrid) dockGrid();
+
+  if (!config.idleResetUrls) return;
+  config.views.forEach((v, i) => {
+    const current = contentViews[i].webContents.getURL();
+    const target = v.url || placeholderURL(v);
+    if (current === target) return;
+    log(`idle: returning ${v.id} to its configured URL`);
+    contentViews[i].webContents.loadURL(target);
+  });
+  touched.clear();
 }
 
 function clearIdle() {
@@ -832,6 +886,10 @@ function isAllowed(v, url) {
 // overlay cannot disagree. Returns true when the wall consumed the key, meaning
 // the page must not also see it.
 function handleEscape() {
+  if (state.mode === 'select') {
+    dockGrid();
+    return true;
+  }
   if (state.mode !== 'active') return false;
   const mode = config.escToGrid;
   if (mode === 'off') return false;
@@ -946,10 +1004,16 @@ function scheduleReload(view, v) {
   const w = wd(v.id);
   if (w.pending) return; // one in-flight reload per view
 
-  // Never reload the panel somebody is using: it would destroy their login
-  // mid-session. Defer it until the wall returns to the grid.
-  if (state.mode === 'active' && state.activeIndex === config.views.indexOf(v)) {
-    if (!w.deferred) log(`deferring reload of ${v.id} until it is no longer active`);
+  // Never reload a panel somebody is using: it would destroy their login
+  // mid-session, which SPEC.md forbids. That used to mean only the promoted
+  // panel, but with an interactive grid someone can be logging in without
+  // promoting anything, so recent input counts too.
+  const promoted = state.mode === 'active' && state.activeIndex === config.views.indexOf(v);
+  const recent = Date.now() - (touched.get(v.id) || 0) < config.recentUseMs;
+  if (promoted || recent) {
+    if (!w.deferred) {
+      log(`deferring reload of ${v.id}: ${promoted ? 'it is promoted' : 'in use just now'}`);
+    }
     w.deferred = true;
     return;
   }
@@ -970,10 +1034,12 @@ function scheduleReload(view, v) {
 function runDeferredReloads() {
   config.views.forEach((v, i) => {
     const w = watchdog.get(v.id);
-    if (w && w.deferred) {
-      w.deferred = false;
-      scheduleReload(contentViews[i], v);
-    }
+    if (!w || !w.deferred) return;
+    // Still in use: leave it deferred rather than reloading under them. The
+    // idle timer and the next dock will both come back around.
+    if (Date.now() - (touched.get(v.id) || 0) < config.recentUseMs) return;
+    w.deferred = false;
+    scheduleReload(contentViews[i], v);
   });
 }
 
@@ -987,7 +1053,13 @@ function closePopups() {
 // ---- IPC from the overlay ---------------------------------------------------
 
 ipcMain.on('forge:activate', (_e, id) => {
-  if (state.mode === 'edit') return; // handles own the mouse while editing
+  if (state.mode !== 'select') return; // grid panels are interactive; nothing to intercept
+  const i = config.views.findIndex((v) => v.id === id);
+  if (i >= 0) activate(i);
+});
+
+// From the editor's inspector, which is the other way to open a panel.
+ipcMain.on('forge:promote', (_e, id) => {
   const i = config.views.findIndex((v) => v.id === id);
   if (i >= 0) activate(i);
 });
@@ -996,8 +1068,21 @@ ipcMain.on('forge:back', () => {
 });
 ipcMain.on('forge:escape', () => handleEscape());
 ipcMain.on('forge:toggleFullscreen', () => toggleFullscreen());
-ipcMain.on('forge:activity', () => {
-  if (state.mode === 'active') resetIdle();
+// Panels report their own input. Which panel it came from now matters: it gives
+// the keyboard a target, keeps the watchdog off a panel being used, and keeps
+// the idle timer from resetting the wall under someone.
+ipcMain.on('forge:activity', (e, type) => {
+  const i = contentViews.findIndex(
+    (view) => !view.webContents.isDestroyed() && view.webContents === e.sender
+  );
+  if (i >= 0) {
+    touched.set(config.views[i].id, Date.now());
+    // Clicking a sibling WebContentsView is not guaranteed to move focus to it,
+    // and without focus the wireless keyboard has no target. Doing it here is a
+    // no-op when the platform already did it.
+    if (type === 'mousedown') e.sender.focus();
+  }
+  resetIdle();
 });
 
 // ---- IPC: layout editing ----------------------------------------------------
@@ -1175,6 +1260,38 @@ function selfTest() {
     // responding to clicks.
     const kids = win.contentView.children;
     step(7, `overlay still frontmost: ${kids[kids.length - 1] === overlay}`);
+
+    // Whether the overlay is showing is exactly what decides if the panels can
+    // be interacted with, so it is worth asserting per mode rather than
+    // discovering it at the wall.
+    const vis = () => overlay.getVisible();
+    const full = () => {
+      const b = overlay.getBounds();
+      return b.width === layout.width && b.height === layout.height;
+    };
+
+    dockGrid({ animate: false });
+    await soon(300);
+    step(8, `grid: overlay hidden (panels interactive): ${vis() === false}`);
+
+    enterSelect();
+    await soon(300);
+    step(8, `select: overlay shown and full wall: ${vis() && full()}`);
+
+    activate(0);
+    await soon(400);
+    step(8, `active: overlay shown, shrunk to the back button: ${vis() && !full()}`);
+
+    dockGrid({ animate: false });
+    await soon(300);
+    step(8, `back to grid: overlay hidden again: ${vis() === false}`);
+
+    enterEdit();
+    await soon(300);
+    step(8, `edit: overlay shown and full wall: ${vis() && full()}`);
+    exitEdit({ save: false });
+    await soon(300);
+
     log('selftest done');
   })().catch((e) => warn('selftest failed:', e.message));
 }
@@ -1265,6 +1382,9 @@ function registerShortcuts() {
   // Layout edit mode. Not dev-only: this is how the layout gets tuned at the
   // wall, against the real dashboards, without editing JSON on site.
   globalShortcut.register('CommandOrControl+Shift+E', () => toggleEdit());
+  // Panels are interactive in grid mode, so promoting one needs its own mode
+  // rather than a click that would otherwise land on the page.
+  globalShortcut.register('CommandOrControl+Shift+P', () => toggleSelect());
   // NOTE: Esc is intentionally NOT a globalShortcut. globalShortcut is an
   // OS-level accelerator: it fires regardless of focus and swallows the key
   // before the page sees it, which would break every Esc-to-close modal in the

@@ -100,6 +100,9 @@ function validateConfig(c) {
   if (c.escToGrid !== undefined && !['single', 'double', 'off'].includes(c.escToGrid)) {
     p.push('escToGrid must be "single", "double" or "off"');
   }
+  if (c.recentUseMs !== undefined && !(Number.isFinite(c.recentUseMs) && c.recentUseMs >= 0)) {
+    p.push('recentUseMs must be a number >= 0');
+  }
   const sat = c.wall && c.wall.safeAreaTop;
   if (
     sat !== undefined &&
@@ -142,6 +145,20 @@ function withDefaults(c) {
     // only the Back button and the idle timeout. See docs/validation.md.
     escToGrid: c.escToGrid || 'single',
     escDoubleMs: c.escDoubleMs ?? 600,
+    // On idle, put the panels back to their configured URLs.
+    //
+    // Off by default, and that default matters. Only administrators have
+    // keyboard and mouse access, so nobody touches the wall for most of its
+    // life: idle is the exhibit's normal state, not an exceptional one. Turning
+    // this on would reload every panel a few minutes after the operator stops
+    // typing and log them out of dashboards meant to sit there all day.
+    //
+    // Turn it on only where the pages are public and unauthenticated, and
+    // wandering away from the configured URL is the bigger risk.
+    idleResetUrls: c.idleResetUrls ?? false,
+    // How long after someone touches a panel it still counts as in use, and so
+    // must not be reloaded under them by the watchdog.
+    recentUseMs: c.recentUseMs ?? 60000,
     backButton: c.backButton || { x: 24, y: 24, width: 176, height: 56 },
     views: c.views.map((v, i) => ({
       zoom: 1,

@@ -58,7 +58,10 @@ and the decisions that need Jeff before some of it can be finalized.
 3. Scope `allowedOrigins` (per view, in config) to the real Honeywell IdP and app
    domains once the URLs are known. The enforcement code is already in place for
    both `will-navigate` and `setWindowOpenHandler`; this is now a config edit.
-   Decide how far a panel may legitimately navigate.
+   Decide how far a panel may legitimately navigate. Note this is a
+   misconfiguration guard, not a hardening measure: only administrators have
+   keyboard and mouse access, so there is no untrusted person at the wall to
+   defend against.
 4. Cursor auto-hide when idle (native on Windows; there is no cross-platform
    Electron API).
 5. Confirm and set per-panel `zoom` and the wall resolution/rectangles against
@@ -95,9 +98,14 @@ and the decisions that need Jeff before some of it can be finalized.
 - Keep all layout/content in `config/wall.json`; do not hardcode URLs or rects.
 - Target is Windows; development is macOS. Use project-relative paths, never
   absolute machine paths.
-- Do not reload a view on return-to-grid, and never reload the panel that is
-  currently active (it drops the operator's login). `scheduleReload()` defers
-  instead.
+- Do not reload a view on return-to-grid, and never reload a panel that is in
+  use: the promoted one, or any touched within `recentUseMs`. It drops the
+  operator's login. `scheduleReload()` defers instead.
+- Only administrators have input, so the wall is idle nearly all the time.
+  Anything hung off the idle timer fires constantly in normal operation. That is
+  why `idleResetUrls` defaults to off: reloading on idle would log every
+  dashboard out on a schedule. Think twice before adding idle-triggered
+  behaviour.
 - Esc must not be a `globalShortcut`. It is an OS-level accelerator that fires
   regardless of focus and consumes the key before the page sees it, which kills
   Esc-to-close inside the dashboards. Handle it per view in `hardenView()`.

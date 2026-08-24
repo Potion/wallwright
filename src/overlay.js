@@ -53,7 +53,7 @@ function render() {
   guideLayer = null;
   document.body.className = current.mode + (current.hint ? ' hint' : '');
 
-  if (current.mode === 'grid') return renderGrid();
+  if (current.mode === 'grid' || current.mode === 'select') return renderGrid();
   if (current.mode === 'edit') return renderEdit();
   return renderActive();
 }
@@ -61,6 +61,15 @@ function render() {
 // ---- grid -------------------------------------------------------------------
 
 function renderGrid() {
+  if (current.mode === 'select') {
+    const bar = document.createElement('div');
+    bar.className = 'editbar';
+    bar.innerHTML =
+      '<strong>Open a panel</strong> click one to fill the wall &middot; ' +
+      '<kbd>Esc</kbd> cancel';
+    root.appendChild(bar);
+  }
+
   current.views.forEach((v) => {
     const hs = document.createElement('button');
     hs.className = 'hotspot';
@@ -274,6 +283,11 @@ function renderInspector() {
     ? 'Shares a login with ' + v.sharedWith.join(', ')
     : 'Its login is independent of the other panels.';
 
+  const open = document.createElement('button');
+  open.className = 'insp-open';
+  open.textContent = 'Open fullscreen';
+  open.addEventListener('click', () => window.forge.promote(v.id));
+
   const del = document.createElement('button');
   del.className = 'insp-del';
   del.textContent = 'Delete panel';
@@ -289,6 +303,7 @@ function renderInspector() {
     field('Zoom', zoom),
     field('Session', session),
     note,
+    open,
     del
   );
   root.appendChild(box);
@@ -697,6 +712,7 @@ window.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (current.mode === 'edit') window.forge.editExit({ discard: e.shiftKey });
   // Not back(): the single/double/off policy lives in the main process, so the
-  // overlay reports the keypress rather than deciding what it means.
-  else if (current.mode === 'active') window.forge.escape();
+  // overlay reports the keypress rather than deciding what it means. Select
+  // mode goes through the same route, where Esc cancels without promoting.
+  else if (current.mode === 'active' || current.mode === 'select') window.forge.escape();
 });

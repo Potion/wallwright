@@ -11,11 +11,14 @@ live pages works.
 
 ![Four live web pages laid out on one wall](docs/images/grid.png)
 
-Click any panel and it fills the wall, becoming the input target. Esc puts it
-back in the grid. It was always live, so promoting it just makes it big, and
-returning does not reload it, which means a login survives the round trip. If
-nobody touches the wall for a while it returns to the grid on its own, so the
-exhibit heals itself when a visitor walks away mid-session.
+Every panel is live and usable where it sits, so the wall is a working montage
+rather than one usable page at a time. A panel can also be opened to fill the
+whole wall and then put back with Esc; promoting it does not reload it, so a
+login survives the round trip. If the wall is left alone for a while it returns
+to the grid on its own.
+
+Only administrators drive it, with a keyboard and mouse at the wall or over
+remote access. Visitors look.
 
 ## Building a montage at the wall
 
@@ -58,15 +61,22 @@ in once per panel, and the inspector's Session menu is where that is chosen.
 ## Using it at the wall
 
 There is no touchscreen. Everything is done with one wireless keyboard and
-mouse at the wall itself.
+mouse at the wall itself, or over remote access.
 
 | key                | what it does                                   |
 | ------------------ | ---------------------------------------------- |
-| click a panel      | promote it to fullscreen                       |
+| click a panel      | use the page, exactly as in a browser          |
+| `Ctrl/Cmd+Shift+P` | open-a-panel mode; click one to fill the wall  |
 | `Esc`              | back to the grid                               |
 | `Ctrl/Cmd+Shift+E` | open or close the layout editor                |
 | `Ctrl/Cmd+F`       | switch between filling the screen and a window |
 | `Ctrl/Cmd+Shift+Q` | quit                                           |
+
+Typing goes to whichever panel was clicked last, the way tabs work in a browser.
+
+Opening a panel fullscreen is its own mode rather than a click, because a click
+in the grid belongs to the page underneath. The layout editor's inspector can
+also open the selected panel directly.
 
 ## Download
 
@@ -221,6 +231,8 @@ writes this file.
   "hideInactiveWhenActive": false, // hide the others while one is fullscreen
   "transitionMs": 220, // promote/return animation (0 = snap)
   "escToGrid": "single", // "single" | "double" | "off"  (see AGENTS.md)
+  "idleResetUrls": false, // on idle, also put panels back to their configured URLs
+  "recentUseMs": 60000, // how long a touched panel is protected from a watchdog reload
   "backButton": { "x": 24, "y": 24, "width": 176, "height": 56 },
   "views": [
     // May be empty: a montage can be built from a blank wall in the editor.
