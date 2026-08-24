@@ -248,7 +248,12 @@ result matches what is on the display.
 
 The tool exists because OS screen capture is not always available. It needs no
 Screen Recording permission, so it also works on a CI runner or a headless show
-PC.
+PC, and it can capture the **editor**, which an OS screenshot of a kiosk window
+can only do with someone standing there.
+
+It now lives in `src/main.js` rather than duplicating the layout maths in a
+standalone script, so it captures through the real layout, the real overlay and
+the real state machine. The two screenshots in the README were produced with it.
 
 ### Packaging works, and it is what fixes the app name
 

@@ -107,6 +107,9 @@ and the decisions that need Jeff before some of it can be finalized.
 - npm scripts must run on Windows too, so no `FOO=1 cmd` prefixes and no shell
   loops. Put the environment setup inside the node script instead.
 - Nothing under `src/dev/` ships: `electron-builder.yml` excludes it.
+- The README is the non-developer entry point: what the thing does, with
+  screenshots, before any build instructions. Regenerate the images with
+  `npm run capture` after a visible change to the wall or the editor.
 - Panels may deliberately share a session partition, so do not reintroduce a
   uniqueness check on it. Several views of one SSO-protected app need one login.
 - Never capture a view's index in a closure. Panels can be deleted, which shifts

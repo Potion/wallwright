@@ -18,7 +18,7 @@
     "build:win": "electron-builder --win --publish never",
     "build:mac": "electron-builder --mac --publish never",
     "build:mac:dir": "electron-builder --mac --dir --publish never",
-    "capture": "electron src/dev/capture.js"
+    "capture": "node src/dev/capture.js"
   },
   "engines": {
     "node": ">=18"
