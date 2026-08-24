@@ -17,7 +17,8 @@
     "icon": "node src/dev/make-icon.js",
     "build:win": "electron-builder --win --publish never",
     "build:mac": "electron-builder --mac --publish never",
-    "build:mac:dir": "electron-builder --mac --dir --publish never"
+    "build:mac:dir": "electron-builder --mac --dir --publish never",
+    "capture": "electron src/dev/capture.js"
   },
   "engines": {
     "node": ">=18"

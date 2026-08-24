@@ -185,6 +185,21 @@ right-click then Open, or clear it with
 
 Neither has been run on Windows yet; see the checklist. Both are unsigned.
 
+### The wall composites correctly, captured end to end
+
+`npm run capture` rendered four live public sites in a 2x2 grid and wrote a
+single 3600x2338 PNG: a Grafana dashboard, a live wind-map globe, NASA's APOD,
+and Hacker News. All four painted fully, at their configured rectangles, with no
+browser chrome and no seams.
+
+This is also independent evidence for the compositing claim above: each panel is
+captured from its own `webContents` and drawn at its wall coordinates, and the
+result matches what is on the display.
+
+The tool exists because OS screen capture is not always available. It needs no
+Screen Recording permission, so it also works on a CI runner or a headless show
+PC.
+
 ### Packaging works, and it is what fixes the app name
 
 `npm run build:mac` produces `Forge.app` with `CFBundleName = Forge`, which is

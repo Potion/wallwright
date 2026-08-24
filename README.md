@@ -66,6 +66,23 @@ npm run build:mac:dir  # macOS: unpacked .app only, faster, for a quick check
 npm run icon           # regenerate build/icon.png
 ```
 
+### Screenshotting the wall
+
+```sh
+FORGE_CONFIG=./config/my-wall.json \
+FORGE_CAPTURE_OUT=./wall.png \
+npm run capture
+```
+
+Renders the wall and writes a single PNG of it, at the display's device pixel
+ratio. It captures each panel with `webContents.capturePage()` and composites
+them at their wall coordinates, so it needs no OS screen-recording permission
+and works where `screencapture` cannot run: a terminal without that permission,
+a CI runner, a headless show PC.
+
+`FORGE_CAPTURE_SETTLE` (default 7000ms) is how long to wait after load before
+capturing; raise it for pages with charts or maps that draw late.
+
 Packaging is electron-builder, configured in `electron-builder.yml`.
 
 The exhibit runs on Windows; the macOS build exists for development and for
