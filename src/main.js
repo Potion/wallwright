@@ -24,7 +24,7 @@ const {
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { loadConfig, saveLayout } = require('./config');
+const { loadConfig, saveViews } = require('./config');
 const { clampGrid, snapGrid } = require('./layout');
 
 // Set before anything reads userData, because this decides where the `persist:`
@@ -65,6 +65,10 @@ const DEV = process.env.FORGE_DEV === '1';
 
 // Smallest panel the layout editor will produce, in wall units.
 const MIN_PANEL = 160;
+
+// Past this many live browser views, say something. Not a cap: an operator may
+// have a good reason, and the warning is in the log where it belongs.
+const BUSY_PANELS = 8;
 
 let config = null;
 let win = null; // BaseWindow: the wall
@@ -323,23 +327,7 @@ function createWall() {
   win.contentView.addChildView(backdrop);
   backdrop.setBounds(wallBounds());
 
-  config.views.forEach((v, i) => {
-    const view = new WebContentsView({
-      webPreferences: {
-        partition: v.partition,
-        preload: path.join(__dirname, 'content-preload.js'),
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-      },
-    });
-    win.contentView.addChildView(view);
-    view.setBounds(panelRect(i));
-    view.webContents.setZoomFactor(panelZoom(i));
-    hardenView(view, v, i);
-    view.webContents.loadURL(v.url);
-    contentViews.push(view);
-  });
+  config.views.forEach((v) => contentViews.push(createContentView(v)));
 
   // Transparent overlay, added last so it sits on top.
   overlay = new WebContentsView({
@@ -354,8 +342,156 @@ function createWall() {
   // architectural risk in SPEC.md. Validate per OS; fallbacks are in the spec.
   overlay.setBackgroundColor('#00000000');
   win.contentView.addChildView(overlay);
+  // The overlay is a renderer, so its errors are invisible from here unless
+  // they are forwarded. Dev only: on a wall nobody is reading a console.
+  if (DEV) {
+    overlay.webContents.on('console-message', (e) => {
+      const level = e.level === 'error' || e.level === 'warning' ? warn : log;
+      level(`overlay[${e.level}] ${e.message} (${e.lineNumber})`);
+    });
+  }
   overlay.webContents.loadFile(path.join(__dirname, 'overlay.html'));
-  overlay.webContents.once('did-finish-load', () => dockGrid());
+  overlay.webContents.once('did-finish-load', () => {
+    dockGrid();
+    // Dev convenience: come up straight in the editor, for testing it and for
+    // screenshotting it.
+    if (DEV && process.env.FORGE_START_EDIT === '1') enterEdit();
+    if (DEV && process.env.FORGE_SELFTEST === '1') selfTest();
+  });
+}
+
+// ---- panel lifecycle -------------------------------------------------------
+
+// A panel with no URL yet is a normal state right after it is created in the
+// editor. Show something that says so rather than a black rectangle.
+function placeholderURL(v) {
+  const html = `<body style="margin:0;height:100vh;display:flex;align-items:center;
+    justify-content:center;background:#0d1117;color:#8b949e;
+    font:16px/1.5 -apple-system,Helvetica,Arial,sans-serif;text-align:center">
+    <div><div style="color:#f04e23;font-weight:600;margin-bottom:8px">
+    ${escapeHtml(v.label || v.id)}</div>
+    No URL set. Select this panel in layout edit mode and enter one.</div></body>`;
+  return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+}
+
+function createContentView(v) {
+  const view = new WebContentsView({
+    webPreferences: {
+      partition: v.partition,
+      preload: path.join(__dirname, 'content-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  win.contentView.addChildView(view);
+  const i = config.views.indexOf(v);
+  if (i >= 0) {
+    view.setBounds(panelRect(i));
+    view.webContents.setZoomFactor(panelZoom(i));
+  }
+  hardenView(view, v);
+  view.webContents.loadURL(v.url || placeholderURL(v));
+  return view;
+}
+
+function uniqueId(base) {
+  let n = config.views.length + 1;
+  const taken = new Set(config.views.map((v) => v.id));
+  while (taken.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
+// Each new panel gets its own session by default. The editor can point it at
+// another panel's session afterwards, which is what several views of one
+// SSO-protected app need.
+function addPanel(rect) {
+  const id = uniqueId('panel');
+  const v = {
+    id,
+    label: '',
+    url: '',
+    grid: clampGrid(rect, wallUnits(), MIN_PANEL),
+    zoom: 1,
+    partition: `persist:${id}`,
+  };
+  config.views.push(v);
+  contentViews.push(createContentView(v));
+  if (config.views.length > BUSY_PANELS) {
+    warn(
+      `${config.views.length} panels. Each one is a live browser view, so on a ` +
+        '4K wall expect this to show in GPU and memory.'
+    );
+  }
+  log(`added ${id}`);
+  return v;
+}
+
+function deletePanel(id) {
+  const i = indexOfId(id);
+  if (i < 0) return;
+  const view = contentViews[i];
+
+  win.contentView.removeChildView(view);
+  // Without this the renderer process for a deleted panel keeps running.
+  if (!view.webContents.isDestroyed()) view.webContents.close();
+
+  config.views.splice(i, 1);
+  contentViews.splice(i, 1);
+
+  const w = watchdog.get(id);
+  if (w && w.pending) clearTimeout(w.pending);
+  watchdog.delete(id);
+
+  // A promoted panel that gets deleted has to leave active mode, and indices
+  // after the removed one have all shifted.
+  if (state.mode === 'active') {
+    if (state.activeIndex === i) state = { mode: 'grid', activeIndex: -1 };
+    else if (state.activeIndex > i) state.activeIndex -= 1;
+  }
+  log(`deleted ${id}`);
+}
+
+// url, label, zoom and partition. A partition change means a new session, which
+// can only be chosen when a view is created, so that one rebuilds the view.
+function updatePanel(id, patch) {
+  const i = indexOfId(id);
+  if (i < 0) return;
+  const v = config.views[i];
+
+  if (patch.label !== undefined) v.label = String(patch.label);
+  if (patch.zoom !== undefined && Number.isFinite(patch.zoom) && patch.zoom > 0) {
+    v.zoom = patch.zoom;
+    contentViews[i].webContents.setZoomFactor(panelZoom(i));
+  }
+
+  const newPartition =
+    patch.partition !== undefined && patch.partition && patch.partition !== v.partition
+      ? String(patch.partition)
+      : null;
+  const newUrl =
+    patch.url !== undefined && String(patch.url) !== v.url ? String(patch.url) : null;
+  if (newUrl !== null) v.url = newUrl;
+
+  if (newPartition) {
+    v.partition = newPartition;
+    const old = contentViews[i];
+    win.contentView.removeChildView(old);
+    if (!old.webContents.isDestroyed()) old.webContents.close();
+    contentViews[i] = createContentView(v);
+    log(`${id}: session -> ${newPartition}`);
+  } else if (newUrl !== null) {
+    // Loading a new URL is exactly what was asked for here, so the usual
+    // "never reload a panel" rule does not apply.
+    contentViews[i].webContents.loadURL(v.url || placeholderURL(v));
+    log(`${id}: ${v.url || '(no url)'}`);
+  }
+
+  bringToTop(overlay);
+}
+
+function wallUnits() {
+  return { width: config.wall.width, height: config.wall.height };
 }
 
 // ---- state transitions ------------------------------------------------------
@@ -419,6 +555,12 @@ function sendOverlayState() {
         ...publicView(v, i),
         wallGrid: v.grid,
         zoom: round3(v.zoom),
+        url: v.url || '',
+        partition: v.partition,
+        // Which other panels share this session, so the picker can say so.
+        sharedWith: config.views
+          .filter((o) => o !== v && o.partition === v.partition)
+          .map((o) => o.id),
       })),
     });
     return;
@@ -568,7 +710,7 @@ function exitEdit({ save = true } = {}) {
   editDrag = null;
   if (save) {
     try {
-      saveLayout(configPath, config.views);
+      saveViews(configPath, config.views);
       log(`layout saved to ${configPath}`);
     } catch (e) {
       warn('could not save layout:', e.message);
@@ -678,8 +820,12 @@ function handleEscape() {
   return false;
 }
 
-function hardenView(view, v, i) {
+function hardenView(view, v) {
   const wc = view.webContents;
+  // Resolved on each call, never captured. Panels can be deleted, which shifts
+  // every later index, and these handlers outlive that. The spec object's
+  // identity is stable, so it is the reliable key.
+  const idx = () => config.views.indexOf(v);
 
   wc.on('before-input-event', (event, input) => {
     if (isFullscreenToggle(input)) {
@@ -687,7 +833,7 @@ function hardenView(view, v, i) {
       toggleFullscreen();
       return;
     }
-    if (state.mode !== 'active' || state.activeIndex !== i) return;
+    if (state.mode !== 'active' || state.activeIndex !== idx()) return;
     resetIdle();
     if (input.type !== 'keyDown' || input.key !== 'Escape') return;
     if (handleEscape()) event.preventDefault();
@@ -743,13 +889,13 @@ function hardenView(view, v, i) {
   // Watchdog: reload on crash / failed main-frame load, with backoff.
   wc.on('render-process-gone', (_e, details) => {
     warn(`${v.id} render process gone:`, details && details.reason);
-    scheduleReload(view, v, i);
+    scheduleReload(view, v);
   });
   wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     // -3 is ERR_ABORTED, which a normal redirect or a cancelled load produces.
     if (!isMainFrame || code === -3) return;
     warn(`${v.id} failed to load ${url}: ${desc} (${code})`);
-    scheduleReload(view, v, i);
+    scheduleReload(view, v);
   });
   // 'unresponsive' is deliberately NOT a reload trigger: a slow enterprise
   // dashboard is not a crashed one, and reloading would drop the session.
@@ -765,13 +911,13 @@ function wd(id) {
   return watchdog.get(id);
 }
 
-function scheduleReload(view, v, i) {
+function scheduleReload(view, v) {
   const w = wd(v.id);
   if (w.pending) return; // one in-flight reload per view
 
   // Never reload the panel somebody is using: it would destroy their login
   // mid-session. Defer it until the wall returns to the grid.
-  if (state.mode === 'active' && state.activeIndex === i) {
+  if (state.mode === 'active' && state.activeIndex === config.views.indexOf(v)) {
     if (!w.deferred) log(`deferring reload of ${v.id} until it is no longer active`);
     w.deferred = true;
     return;
@@ -795,7 +941,7 @@ function runDeferredReloads() {
     const w = watchdog.get(v.id);
     if (w && w.deferred) {
       w.deferred = false;
-      scheduleReload(contentViews[i], v, i);
+      scheduleReload(contentViews[i], v);
     }
   });
 }
@@ -914,6 +1060,93 @@ ipcMain.on('forge:layout', (_e, msg) => {
 });
 
 ipcMain.on('forge:editExit', (_e, opts) => exitEdit({ save: !(opts && opts.discard) }));
+
+ipcMain.on('forge:addPanel', (_e, rect) => {
+  if (state.mode !== 'edit' || !rect) return;
+  const v = addPanel(unscaleRect(rect));
+  bringToTop(overlay);
+  sendOverlayState();
+  // Tell the overlay which panel to select, so the inspector opens on the thing
+  // that was just created and the URL field is ready to type into.
+  overlay.webContents.send('forge:select', v.id);
+});
+
+ipcMain.on('forge:deletePanel', (_e, id) => {
+  if (state.mode !== 'edit') return;
+  deletePanel(id);
+  bringToTop(overlay);
+  sendOverlayState();
+});
+
+ipcMain.on('forge:updatePanel', (_e, msg) => {
+  if (state.mode !== 'edit' || !msg) return;
+  updatePanel(msg.id, msg.patch || {});
+  sendOverlayState();
+  overlay.webContents.send('forge:select', msg.id);
+});
+
+// Dev-only smoke test for panel CRUD. Nothing in src/main.js has unit tests, it
+// imports electron at module scope, so this drives the real path instead: the
+// overlay's bridge, over IPC, into the same handlers a click would reach.
+//
+//   FORGE_DEV=1 FORGE_SELFTEST=1 npm start
+function selfTest() {
+  const step = (n, msg) => log(`selftest ${n}: ${msg}`);
+  const ids = () => config.views.map((v) => v.id).join(',');
+  const run = (js) => overlay.webContents.executeJavaScript(js, true);
+  const soon = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  (async () => {
+    enterEdit();
+    await soon(400);
+    const before = config.views.length;
+    step(1, `start with ${before} panels: ${ids()}`);
+
+    await run(`window.forge.addPanel({ x: 40, y: 700, width: 500, height: 300 })`);
+    await soon(600);
+    const added = config.views[config.views.length - 1];
+    step(2, `after add: ${config.views.length} panels: ${ids()}`);
+    step(
+      2,
+      `new panel partition ${added.partition}, url "${added.url}" (placeholder expected)`
+    );
+
+    await run(
+      `window.forge.updatePanel(${JSON.stringify(added.id)}, { url: 'https://example.com/', label: 'Added by selftest' })`
+    );
+    await soon(700);
+    step(3, `after url set: url="${added.url}" label="${added.label}"`);
+
+    // The interesting one: sharing a session rebuilds the view, because a
+    // partition can only be chosen when a WebContentsView is created.
+    const target = config.views[0];
+    await run(
+      `window.forge.updatePanel(${JSON.stringify(added.id)}, { partition: ${JSON.stringify(target.partition)} })`
+    );
+    await soon(700);
+    const sharers = config.views
+      .filter((v) => v.partition === target.partition)
+      .map((v) => v.id);
+    step(4, `after sharing session: ${target.partition} used by ${sharers.join(' + ')}`);
+    step(4, `view count still matches config: ${contentViews.length === config.views.length}`);
+
+    await run(`window.forge.updatePanel(${JSON.stringify(added.id)}, { zoom: 0.5 })`);
+    await soon(300);
+    step(5, `after zoom: ${added.zoom}`);
+
+    await run(`window.forge.deletePanel(${JSON.stringify(added.id)})`);
+    await soon(600);
+    step(6, `after delete: ${config.views.length} panels: ${ids()}`);
+    step(6, `views and config still aligned: ${contentViews.length === config.views.length}`);
+    step(6, `back to the starting count: ${config.views.length === before}`);
+
+    // Overlay must still be frontmost after all that churn, or the wall stops
+    // responding to clicks.
+    const kids = win.contentView.children;
+    step(7, `overlay still frontmost: ${kids[kids.length - 1] === overlay}`);
+    log('selftest done');
+  })().catch((e) => warn('selftest failed:', e.message));
+}
 
 // ---- lockdown + lifecycle ---------------------------------------------------
 

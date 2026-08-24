@@ -185,6 +185,38 @@ right-click then Open, or clear it with
 
 Neither has been run on Windows yet; see the checklist. Both are unsigned.
 
+### Panel CRUD works end to end
+
+`src/main.js` has no unit tests, so `FORGE_SELFTEST=1` drives the real path:
+the overlay's bridge, over IPC, into the same handlers a click reaches.
+
+```
+selftest 1: start with 2 panels: a,b
+selftest 2: after add: 3 panels: a,b,panel-3
+selftest 2: new panel partition persist:panel-3, url "" (placeholder expected)
+selftest 3: after url set: url="https://example.com/" label="Added by selftest"
+selftest 4: after sharing session: persist:a used by a + panel-3
+selftest 4: view count still matches config: true
+selftest 5: after zoom: 0.5
+selftest 6: after delete: 2 panels: a,b
+selftest 6: views and config still aligned: true
+selftest 6: back to the starting count: true
+selftest 7: overlay still frontmost: true
+```
+
+The last two lines are the ones that matter most. `contentViews` runs parallel to
+`config.views`, so a bug in add or delete desynchronises them and every panel
+after the change gets the wrong bounds. And the overlay has to stay frontmost
+through all that churn or the wall stops responding to clicks entirely.
+
+Deleting a panel shifts every later index, which is why no handler captures its
+index any more: they resolve it from the spec object at call time. A promoted
+panel that gets deleted also drops the wall out of active mode.
+
+Still to check by hand: that a shared session really does mean one login (the
+self-test confirms the wiring, not the cookie behaviour), and that a panel
+created by drawing on empty wall lands where it was drawn.
+
 ### The wall composites correctly, captured end to end
 
 `npm run capture` rendered four live public sites in a 2x2 grid and wrote a

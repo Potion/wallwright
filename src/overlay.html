@@ -97,6 +97,107 @@
         height: 1px;
       }
 
+      .editbar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .barhint {
+        opacity: 0.85;
+      }
+      .addbtn {
+        font: inherit;
+        font-weight: 600;
+        color: #ffffff;
+        background: rgba(240, 78, 35, 0.9);
+        border: 0;
+        border-radius: 6px;
+        padding: 5px 12px;
+        cursor: pointer;
+      }
+      .addbtn:hover {
+        background: #f04e23;
+      }
+
+      /* Rubber band while drawing a new panel. */
+      .band {
+        position: absolute;
+        box-sizing: border-box;
+        border: 2px dashed #00e5ff;
+        background: rgba(0, 229, 255, 0.1);
+        pointer-events: none;
+        z-index: 8;
+      }
+
+      /* Inspector for the selected panel. */
+      .inspector {
+        position: absolute;
+        right: 24px;
+        top: 84px;
+        width: 340px;
+        box-sizing: border-box;
+        padding: 16px 18px;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.88);
+        color: #e6edf3;
+        font-size: 13px;
+        z-index: 11;
+      }
+      .insp-head {
+        font-family: ui-monospace, Menlo, monospace;
+        font-weight: 600;
+        color: #f04e23;
+        margin-bottom: 12px;
+      }
+      .insp-empty {
+        color: #8b949e;
+        line-height: 1.5;
+      }
+      .insp-field {
+        display: block;
+        margin-bottom: 10px;
+      }
+      .insp-field span {
+        display: block;
+        color: #8b949e;
+        margin-bottom: 4px;
+      }
+      .insp-field input,
+      .insp-field select {
+        width: 100%;
+        box-sizing: border-box;
+        font: inherit;
+        padding: 7px 9px;
+        border-radius: 6px;
+        border: 1px solid #30363d;
+        background: #161b22;
+        color: #e6edf3;
+      }
+      .insp-field input:focus,
+      .insp-field select:focus {
+        outline: 2px solid rgba(240, 78, 35, 0.9);
+        outline-offset: -1px;
+      }
+      .insp-note {
+        color: #8b949e;
+        margin: 10px 0 14px;
+        line-height: 1.45;
+      }
+      .insp-del {
+        width: 100%;
+        font: inherit;
+        padding: 8px;
+        border-radius: 6px;
+        cursor: pointer;
+        color: #ffa198;
+        background: transparent;
+        border: 1px solid #f8514933;
+      }
+      .insp-del:hover {
+        background: #f851491f;
+        border-color: #f85149;
+      }
+
       .epanel {
         position: absolute;
         box-sizing: border-box;
@@ -107,6 +208,15 @@
       .epanel.dragging {
         border-color: #ffffff;
         background: rgba(240, 78, 35, 0.14);
+      }
+      /* Selected reads brighter and solid, so it is obvious which panel the
+         inspector is editing. */
+      .epanel.selected {
+        border-color: #ffffff;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+      }
+      .epanel.selected .elabel {
+        background: rgba(240, 78, 35, 0.92);
       }
       .elabel {
         position: absolute;

@@ -37,13 +37,14 @@ function validateConfig(c) {
     if (!isPositiveInt(w.height)) p.push('wall.height must be a positive integer');
   }
 
-  if (!Array.isArray(c.views) || c.views.length === 0) {
-    p.push('"views" must be a non-empty array');
+  // May be empty: a montage can be built from an empty wall.
+  if (!Array.isArray(c.views)) {
+    p.push('"views" must be an array');
     return p;
   }
 
   const ids = new Set();
-  const partitions = new Set();
+  const partitions = new Set(); // collected for reference; sharing is legal
   c.views.forEach((v, i) => {
     const at = `views[${i}]`;
     if (!v || typeof v !== 'object') {
@@ -54,14 +55,14 @@ function validateConfig(c) {
     else if (ids.has(v.id)) p.push(`${at}.id "${v.id}" is duplicated`);
     else ids.add(v.id);
 
-    if (typeof v.url !== 'string' || !v.url) p.push(`${at}.url is required`);
+    // An empty url means "not set yet", which is a normal state for a panel
+    // that was just created in the editor.
+    if (typeof v.url !== 'string') p.push(`${at}.url must be a string`);
 
-    // Distinct partitions keep the four logins independent. A shared partition
-    // is almost always a copy/paste mistake, and silently sharing cookies
-    // between panels would be a confusing failure on the wall.
-    const part = v.partition || `persist:forge-${i + 1}`;
-    if (partitions.has(part)) p.push(`${at}.partition "${part}" is used by another view`);
-    else partitions.add(part);
+    // Sharing a partition is allowed and sometimes required: several panels
+    // showing the same SSO-protected app should share one login rather than
+    // making an operator sign in once per panel.
+    partitions.add(v.partition || `persist:forge-${i + 1}`);
 
     const g = v.grid;
     if (!g || typeof g !== 'object') {
@@ -141,28 +142,34 @@ function withDefaults(c) {
   };
 }
 
-// Write edited panel rectangles and zoom back to the config file. Re-reads the
-// file and patches only grid/zoom by view id, so keys the running config filled
-// in from defaults are not written back into the file as if they were authored.
-function saveLayout(file, views) {
+// Write the panel list back to the config file. The editor can add, delete and
+// retitle panels, not just move them, so the whole array is replaced rather than
+// patched in place. Everything else in the file is preserved, so keys the
+// running config filled in from defaults are not written back as if they had
+// been authored.
+function saveViews(file, views) {
   const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-  const byId = new Map(views.map((v) => [v.id, v]));
-  let patched = 0;
-  (raw.views || []).forEach((v) => {
-    const u = byId.get(v.id);
-    if (!u) return;
-    v.grid = {
-      x: Math.round(u.grid.x),
-      y: Math.round(u.grid.y),
-      width: Math.round(u.grid.width),
-      height: Math.round(u.grid.height),
-    };
-    v.zoom = Math.round(u.zoom * 1000) / 1000;
-    patched++;
-  });
-  if (!patched) throw new Error('no matching view ids in ' + file);
+  raw.views = views.map(serializeView);
   fs.writeFileSync(file, JSON.stringify(raw, null, 2) + '\n');
-  return patched;
+  return raw.views.length;
 }
 
-module.exports = { loadConfig, validateConfig, withDefaults, saveLayout };
+function serializeView(v) {
+  const out = { id: v.id };
+  if (v.label) out.label = v.label;
+  out.url = v.url || '';
+  out.grid = {
+    x: Math.round(v.grid.x),
+    y: Math.round(v.grid.y),
+    width: Math.round(v.grid.width),
+    height: Math.round(v.grid.height),
+  };
+  out.zoom = Math.round((v.zoom ?? 1) * 1000) / 1000;
+  out.partition = v.partition;
+  if (Array.isArray(v.allowedOrigins) && v.allowedOrigins.length) {
+    out.allowedOrigins = v.allowedOrigins;
+  }
+  return out;
+}
+
+module.exports = { loadConfig, validateConfig, withDefaults, saveViews, serializeView };

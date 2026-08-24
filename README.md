@@ -41,11 +41,28 @@ Requires Node 18+ and Electron 43+ (for `BaseWindow`, `WebContentsView`,
 `View.setVisible`, and animated `View.setBounds`). Target deployment is Windows;
 development is on macOS.
 
-`Cmd/Ctrl+Shift+E` enters layout edit mode: drag a panel to move it, drag a side
-handle to resize one axis (the page reflows), drag a corner to scale
-proportionally (the page zoom follows the frame). Edges snap to each other, to
-the wall edges, and to the wall centre lines; hold `Alt` to defeat snapping. Esc
-saves the layout back to the config file, `Shift`+Esc discards it.
+`Cmd/Ctrl+Shift+E` enters layout edit mode, where the whole montage is editable
+at the wall without touching JSON:
+
+| gesture                   | effect                                                  |
+| ------------------------- | ------------------------------------------------------- |
+| drag a panel's body       | move it                                                 |
+| drag a **side** handle    | resize one axis; the page reflows into the new viewport |
+| drag a **corner** handle  | scale proportionally; page zoom follows the frame       |
+| drag on **empty wall**    | draw a new panel                                        |
+| `+ Add panel`             | drop a new panel in the middle                          |
+| click a panel             | select it, opening the inspector                        |
+| `Del` / `Backspace`       | delete the selected panel                               |
+| hold `Alt` while dragging | defeat edge snapping                                    |
+| `Esc` / `Shift`+`Esc`     | save the montage to config / discard                    |
+
+Edges snap to each other, to the wall edges, and to the wall centre lines, so
+panels tile without seams.
+
+The inspector edits the selected panel's **URL, label, zoom and session**, and
+deletes it. Panels default to their own session, but can share another panel's:
+several views of the same SSO-protected app should sit behind one login rather
+than making an operator sign in once per panel.
 
 `Cmd/Ctrl+F` toggles between owning the whole display and an 85% window, so the
 app can be driven on a dev machine without taking over the screen.
@@ -82,6 +99,20 @@ a CI runner, a headless show PC.
 
 `FORGE_CAPTURE_SETTLE` (default 7000ms) is how long to wait after load before
 capturing; raise it for pages with charts or maps that draw late.
+
+### Dev flags
+
+With `FORGE_DEV=1`:
+
+| variable             | effect                                          |
+| -------------------- | ----------------------------------------------- |
+| `FORGE_START_EDIT=1` | boot straight into layout edit mode             |
+| `FORGE_SELFTEST=1`   | run the panel CRUD smoke test and log each step |
+
+`FORGE_SELFTEST` exists because nothing in `src/main.js` has unit tests: it
+imports electron at module scope. It drives the real path instead, through the
+overlay's bridge and over IPC into the same handlers a click reaches, covering
+add, URL change, session sharing, zoom and delete.
 
 Packaging is electron-builder, configured in `electron-builder.yml`.
 

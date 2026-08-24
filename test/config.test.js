@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 const fs = require('node:fs');
-const { validateConfig, withDefaults, loadConfig } = require('../src/config');
+const { validateConfig, withDefaults, loadConfig, saveViews } = require('../src/config');
 
 const good = () => ({
   wall: { width: 3840, height: 2160 },
@@ -44,11 +44,31 @@ test('duplicate ids are rejected', () => {
   assert.match(validateConfig(c).join(), /duplicated/);
 });
 
-test('a shared partition is rejected', () => {
+// Several panels showing the same SSO-protected app should share one login
+// rather than making an operator sign in once per panel.
+test('a shared partition is allowed', () => {
   const c = good();
   c.views[0].partition = 'persist:same';
   c.views[1].partition = 'persist:same';
-  assert.match(validateConfig(c).join(), /used by another view/);
+  assert.deepStrictEqual(validateConfig(c), []);
+});
+
+test('an empty view list is allowed, so a montage can start from nothing', () => {
+  const c = good();
+  c.views = [];
+  assert.deepStrictEqual(validateConfig(c), []);
+});
+
+test('a panel with no url yet is allowed', () => {
+  const c = good();
+  c.views[0].url = '';
+  assert.deepStrictEqual(validateConfig(c), []);
+});
+
+test('a non-string url is still rejected', () => {
+  const c = good();
+  c.views[0].url = 42;
+  assert.match(validateConfig(c).join(), /must be a string/);
 });
 
 test('default partitions do not collide', () => {
@@ -92,7 +112,6 @@ test('a malformed file fails with a readable message, not a stack trace', () => 
 // ---- saveLayout -------------------------------------------------------------
 
 const os = require('node:os');
-const { saveLayout } = require('../src/config');
 
 function tmpConfig(body) {
   const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'forge-')), 'wall.json');
@@ -100,53 +119,97 @@ function tmpConfig(body) {
   return f;
 }
 
-test('saveLayout writes back grid and zoom', () => {
+const view = (over) => ({
+  id: 'a',
+  url: 'https://x/1',
+  grid: { x: 0, y: 0, width: 100, height: 100 },
+  zoom: 1,
+  partition: 'persist:a',
+  ...over,
+});
+
+test('saveViews writes back grid and zoom', () => {
   const f = tmpConfig(good());
-  saveLayout(f, [
-    { id: 'a', grid: { x: 10, y: 20, width: 300, height: 400 }, zoom: 0.6666666 },
-    { id: 'b', grid: { x: 0, y: 0, width: 100, height: 100 }, zoom: 1 },
+  saveViews(f, [
+    view({ id: 'a', grid: { x: 10, y: 20, width: 300, height: 400 }, zoom: 0.6666666 }),
+    view({ id: 'b', partition: 'persist:b' }),
   ]);
   const out = JSON.parse(fs.readFileSync(f, 'utf8'));
   assert.deepStrictEqual(out.views[0].grid, { x: 10, y: 20, width: 300, height: 400 });
   assert.strictEqual(out.views[0].zoom, 0.667);
 });
 
-test('saveLayout does not write defaults into the file', () => {
+test('saveViews adds and removes panels, not just moves them', () => {
+  const f = tmpConfig(good()); // starts with two views
+  saveViews(f, [view({ id: 'only', url: 'https://new/', partition: 'persist:only' })]);
+  let out = JSON.parse(fs.readFileSync(f, 'utf8'));
+  assert.strictEqual(out.views.length, 1);
+  assert.strictEqual(out.views[0].id, 'only');
+  assert.strictEqual(out.views[0].url, 'https://new/');
+
+  saveViews(f, [
+    view({ id: 'only', partition: 'persist:only' }),
+    view({ id: 'added', partition: 'persist:added' }),
+    view({ id: 'more', partition: 'persist:more' }),
+  ]);
+  out = JSON.parse(fs.readFileSync(f, 'utf8'));
+  assert.deepStrictEqual(
+    out.views.map((v) => v.id),
+    ['only', 'added', 'more']
+  );
+});
+
+test('saveViews keeps a shared partition as written', () => {
   const f = tmpConfig(good());
-  saveLayout(f, [{ id: 'a', grid: { x: 0, y: 0, width: 10, height: 10 }, zoom: 1 }]);
+  saveViews(f, [
+    view({ id: 'a', partition: 'persist:shared' }),
+    view({ id: 'b', partition: 'persist:shared' }),
+  ]);
+  const out = JSON.parse(fs.readFileSync(f, 'utf8'));
+  assert.strictEqual(out.views[0].partition, 'persist:shared');
+  assert.strictEqual(out.views[1].partition, 'persist:shared');
+});
+
+test('saveViews omits an empty label and empty allowedOrigins', () => {
+  const f = tmpConfig(good());
+  saveViews(f, [view({ allowedOrigins: [] })]);
+  const out = JSON.parse(fs.readFileSync(f, 'utf8'));
+  assert.ok(!('label' in out.views[0]));
+  assert.ok(!('allowedOrigins' in out.views[0]));
+});
+
+test('saveViews does not write top-level defaults into the file', () => {
+  const f = tmpConfig(good());
+  saveViews(f, [view()]);
   const out = JSON.parse(fs.readFileSync(f, 'utf8'));
   // These were never in the authored file and must not appear just because the
   // running config filled them in.
   assert.ok(!('escToGrid' in out));
   assert.ok(!('kiosk' in out.wall));
-  assert.ok(!('partition' in out.views[0]));
 });
 
-test('saveLayout leaves unrelated keys and unmatched views alone', () => {
+test('saveViews leaves unrelated top-level keys alone', () => {
   const base = good();
-  base.views[0].label = 'keep me';
   base.idleReturnMs = 999;
+  base.backButton = { x: 1, y: 2, width: 3, height: 4 };
   const f = tmpConfig(base);
-  saveLayout(f, [{ id: 'a', grid: { x: 1, y: 2, width: 3, height: 4 }, zoom: 2 }]);
+  saveViews(f, [view({ label: 'keep me' })]);
   const out = JSON.parse(fs.readFileSync(f, 'utf8'));
-  assert.strictEqual(out.views[0].label, 'keep me');
   assert.strictEqual(out.idleReturnMs, 999);
-  assert.deepStrictEqual(out.views[1].grid, good().views[1].grid); // untouched
-});
-
-test('saveLayout refuses a file with no matching ids', () => {
-  const f = tmpConfig(good());
-  assert.throws(
-    () => saveLayout(f, [{ id: 'nope', grid: { x: 0, y: 0, width: 1, height: 1 }, zoom: 1 }]),
-    /no matching view ids/
-  );
+  assert.deepStrictEqual(out.backButton, { x: 1, y: 2, width: 3, height: 4 });
+  assert.strictEqual(out.views[0].label, 'keep me');
 });
 
 test('a saved layout round-trips back through validation', () => {
   const f = tmpConfig(good());
-  saveLayout(f, [
-    { id: 'a', grid: { x: 0, y: 0, width: 2000, height: 1200 }, zoom: 1.04 },
-    { id: 'b', grid: { x: 2000, y: 0, width: 1840, height: 1200 }, zoom: 0.9 },
+  saveViews(f, [
+    view({ id: 'a', grid: { x: 0, y: 0, width: 2000, height: 1200 }, zoom: 1.04 }),
+    view({
+      id: 'b',
+      grid: { x: 2000, y: 0, width: 1840, height: 1200 },
+      zoom: 0.9,
+      partition: 'persist:b',
+    }),
   ]);
   const c = loadConfig(f);
   assert.strictEqual(c.views[0].grid.width, 2000);

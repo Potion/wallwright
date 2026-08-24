@@ -13,6 +13,8 @@ let current = { mode: 'grid' };
 const readouts = new Map(); // view id -> readout element
 const panels = new Map(); // view id -> panel element
 let guideLayer = null;
+let bandEl = null; // rubber band while drawing a new panel
+let selectedId = null;
 
 window.forge.onState((s) => {
   current = s;
@@ -23,6 +25,22 @@ window.forge.onLayoutEcho(({ id, grid, zoom }) => {
   const el = readouts.get(id);
   if (el) el.textContent = fmt(grid, zoom);
 });
+
+window.forge.onSelect((id) => {
+  selectedId = id;
+  render();
+  // A panel that was just created has no URL, so put the caret where the work
+  // is instead of making someone hunt for the field.
+  const url = document.getElementById('insp-url');
+  if (url && !url.value) url.focus();
+});
+
+// True when a text field has focus, so the editor's own key handling does not
+// swallow typing. Esc and Cmd+F both mean something different mid-edit.
+function typing() {
+  const el = document.activeElement;
+  return !!el && (el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.isContentEditable);
+}
 
 function fmt(grid, zoom) {
   return `${grid.width} x ${grid.height}  at ${grid.x},${grid.y}  zoom ${zoom}`;
@@ -76,13 +94,44 @@ const SIDES = ['n', 'e', 's', 'w'];
 const SNAP = 10;
 
 function renderEdit() {
+  // Drop the selection if the panel it pointed at is gone.
+  if (selectedId && !current.views.some((v) => v.id === selectedId)) selectedId = null;
+
   const bar = document.createElement('div');
   bar.className = 'editbar';
-  bar.innerHTML =
-    '<strong>Layout edit</strong> drag to move &middot; sides resize &middot; ' +
-    'corners scale &middot; <kbd>Alt</kbd> no snap &middot; ' +
-    '<kbd>Esc</kbd> save and exit &middot; <kbd>Shift</kbd>+<kbd>Esc</kbd> discard';
+  const add = document.createElement('button');
+  add.className = 'addbtn';
+  add.textContent = '+ Add panel';
+  add.addEventListener('click', () => {
+    // Drop it somewhere visible and let it be moved; drawing on empty wall is
+    // the other way in.
+    const st = current.stage;
+    const w = Math.round(st.width / 3);
+    const h = Math.round(st.height / 3);
+    window.forge.addPanel({
+      x: Math.round(st.x + (st.width - w) / 2),
+      y: Math.round(st.y + (st.height - h) / 2),
+      width: w,
+      height: h,
+    });
+  });
+  const hint = document.createElement('span');
+  hint.className = 'barhint';
+  hint.innerHTML =
+    'drag to move &middot; sides resize &middot; corners scale &middot; ' +
+    'drag empty wall to add &middot; <kbd>Alt</kbd> no snap &middot; ' +
+    '<kbd>Del</kbd> remove &middot; <kbd>Esc</kbd> save &middot; ' +
+    '<kbd>Shift</kbd>+<kbd>Esc</kbd> discard';
+  const title = document.createElement('strong');
+  title.textContent = 'Layout edit';
+  bar.append(title, add, hint);
+  bar.addEventListener('pointerdown', (e) => e.stopPropagation());
   root.appendChild(bar);
+
+  bandEl = document.createElement('div');
+  bandEl.className = 'band';
+  bandEl.style.display = 'none';
+  root.appendChild(bandEl);
 
   guideLayer = document.createElement('div');
   guideLayer.className = 'guides';
@@ -90,7 +139,7 @@ function renderEdit() {
 
   current.views.forEach((v) => {
     const panel = document.createElement('div');
-    panel.className = 'epanel';
+    panel.className = 'epanel' + (v.id === selectedId ? ' selected' : '');
     place(panel, v.grid);
     panels.set(v.id, panel);
 
@@ -99,6 +148,7 @@ function renderEdit() {
     const name = document.createElement('span');
     name.className = 'ename';
     name.textContent = v.label || v.id;
+    name.textContent = v.label || v.url || v.id;
     const read = document.createElement('span');
     read.className = 'eread';
     read.textContent = fmt(v.wallGrid, v.zoom);
@@ -106,9 +156,14 @@ function renderEdit() {
     label.append(name, read);
     panel.appendChild(label);
 
-    // The body is the move target.
+    // The body selects, and moves if the pointer goes anywhere.
     panel.addEventListener('pointerdown', (e) => {
       if (e.target !== panel && e.target !== label && e.target.parentElement !== label) return;
+      if (selectedId !== v.id) {
+        selectedId = v.id;
+        renderInspector();
+        panels.forEach((el, id) => el.classList.toggle('selected', id === selectedId));
+      }
       startDrag(e, v, panel, 'move');
     });
 
@@ -121,6 +176,122 @@ function renderEdit() {
 
     root.appendChild(panel);
   });
+
+  renderInspector();
+}
+
+// ---- inspector --------------------------------------------------------------
+
+function renderInspector() {
+  const existing = document.getElementById('inspector');
+  if (existing) existing.remove();
+  if (current.mode !== 'edit') return;
+
+  const v = current.views.find((x) => x.id === selectedId);
+  const box = document.createElement('div');
+  box.id = 'inspector';
+  box.className = 'inspector';
+
+  if (!v) {
+    box.innerHTML =
+      '<div class="insp-empty">No panel selected.<br />Click a panel to edit it, ' +
+      'or drag on empty wall to add one.</div>';
+    root.appendChild(box);
+    return;
+  }
+
+  const commit = (patch) => window.forge.updatePanel(v.id, patch);
+
+  const field = (labelText, el) => {
+    const wrap = document.createElement('label');
+    wrap.className = 'insp-field';
+    const t = document.createElement('span');
+    t.textContent = labelText;
+    wrap.append(t, el);
+    return wrap;
+  };
+
+  const head = document.createElement('div');
+  head.className = 'insp-head';
+  head.textContent = v.id;
+
+  const url = document.createElement('input');
+  url.id = 'insp-url';
+  url.type = 'text';
+  url.value = v.url || '';
+  url.placeholder = 'https://...';
+  url.spellcheck = false;
+  // On change, not on input: every commit re-renders, which would steal focus
+  // after each keystroke.
+  url.addEventListener('change', () => commit({ url: url.value.trim() }));
+  url.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') url.blur();
+  });
+
+  const label = document.createElement('input');
+  label.type = 'text';
+  label.value = v.label || '';
+  label.placeholder = '(optional)';
+  label.addEventListener('change', () => commit({ label: label.value }));
+
+  const zoom = document.createElement('input');
+  zoom.type = 'number';
+  zoom.step = '0.05';
+  zoom.min = '0.1';
+  zoom.value = String(v.zoom);
+  zoom.addEventListener('change', () => {
+    const n = parseFloat(zoom.value);
+    if (Number.isFinite(n) && n > 0) commit({ zoom: n });
+  });
+
+  const session = document.createElement('select');
+  const own = document.createElement('option');
+  own.value = 'persist:' + v.id;
+  own.textContent = 'Its own session';
+  session.appendChild(own);
+  current.views
+    .filter((o) => o.id !== v.id)
+    .forEach((o) => {
+      const opt = document.createElement('option');
+      opt.value = o.partition;
+      opt.textContent = `Share with ${o.label || o.id}`;
+      session.appendChild(opt);
+    });
+  session.value = v.partition;
+  if (session.value !== v.partition) {
+    // Its partition is not one of the offered options, so show it as-is.
+    const opt = document.createElement('option');
+    opt.value = v.partition;
+    opt.textContent = v.partition;
+    session.appendChild(opt);
+    session.value = v.partition;
+  }
+  session.addEventListener('change', () => commit({ partition: session.value }));
+
+  const note = document.createElement('div');
+  note.className = 'insp-note';
+  note.textContent = v.sharedWith.length
+    ? 'Shares a login with ' + v.sharedWith.join(', ')
+    : 'Its login is independent of the other panels.';
+
+  const del = document.createElement('button');
+  del.className = 'insp-del';
+  del.textContent = 'Delete panel';
+  del.addEventListener('click', () => {
+    selectedId = null;
+    window.forge.deletePanel(v.id);
+  });
+
+  box.append(
+    head,
+    field('URL', url),
+    field('Label', label),
+    field('Zoom', zoom),
+    field('Session', session),
+    note,
+    del
+  );
+  root.appendChild(box);
 }
 
 // ---- snapping ---------------------------------------------------------------
@@ -262,6 +433,87 @@ function drawGuides(guides) {
   });
 }
 
+// ---- creating by drawing ----------------------------------------------------
+
+// Drag on empty wall to draw a new panel. Snapping applies to the rectangle
+// being drawn, so a new panel lands flush with its neighbours.
+function snapCreate(r) {
+  const { xs, ys } = snapTargets(null);
+  const guides = { x: [], y: [] };
+  const left = nearest(r.x, xs);
+  if (left) {
+    const right = r.x + r.w;
+    r.x = left.target;
+    r.w = right - r.x;
+    guides.x.push(left.target);
+  }
+  const right = nearest(r.x + r.w, xs);
+  if (right) {
+    r.w = right.target - r.x;
+    guides.x.push(right.target);
+  }
+  const top = nearest(r.y, ys);
+  if (top) {
+    const bottom = r.y + r.h;
+    r.y = top.target;
+    r.h = bottom - r.y;
+    guides.y.push(top.target);
+  }
+  const bottom = nearest(r.y + r.h, ys);
+  if (bottom) {
+    r.h = bottom.target - r.y;
+    guides.y.push(bottom.target);
+  }
+  return guides;
+}
+
+function startCreate(e) {
+  const ax = e.clientX;
+  const ay = e.clientY;
+  let rect = null;
+
+  const onMove = (ev) => {
+    // Normalise, so dragging up and to the left works.
+    const r = {
+      x: Math.min(ax, ev.clientX),
+      y: Math.min(ay, ev.clientY),
+      w: Math.abs(ev.clientX - ax),
+      h: Math.abs(ev.clientY - ay),
+    };
+    const guides = ev.altKey ? { x: [], y: [] } : snapCreate(r);
+    drawGuides(guides);
+    bandEl.style.display = 'block';
+    place(bandEl, { x: r.x, y: r.y, width: r.w, height: r.h });
+    rect = r;
+  };
+
+  const onUp = () => {
+    window.removeEventListener('pointermove', onMove);
+    window.removeEventListener('pointerup', onUp);
+    bandEl.style.display = 'none';
+    drawGuides({ x: [], y: [] });
+
+    // Too small to be a panel: treat it as a click on empty wall, which just
+    // clears the selection.
+    if (!rect || rect.w < current.minPx || rect.h < current.minPx) {
+      if (selectedId !== null) {
+        selectedId = null;
+        render();
+      }
+      return;
+    }
+    window.forge.addPanel({
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.w),
+      height: Math.round(rect.h),
+    });
+  };
+
+  window.addEventListener('pointermove', onMove);
+  window.addEventListener('pointerup', onUp);
+}
+
 // ---- dragging ---------------------------------------------------------------
 
 function startDrag(e, view, panel, handle) {
@@ -399,6 +651,15 @@ function place(el, rect) {
   el.style.height = rect.height + 'px';
 }
 
+// Anything that reaches the root in edit mode is empty wall: panels and the
+// toolbar stop their own events.
+root.addEventListener('pointerdown', (e) => {
+  if (current.mode !== 'edit') return;
+  if (e.target !== root) return;
+  e.preventDefault();
+  startCreate(e);
+});
+
 // Report activity while the pointer is over the overlay. In active mode that is
 // only the Back-button corner; the pages report their own activity through
 // content-preload.js.
@@ -407,6 +668,16 @@ function place(el, rect) {
 );
 
 window.addEventListener('keydown', (e) => {
+  // While a field has focus, Esc means "leave this field" and Cmd+F means
+  // nothing. Exiting the whole editor mid-sentence would be hostile.
+  if (typing()) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      document.activeElement.blur();
+    }
+    return;
+  }
+
   // The overlay holds focus in grid and edit modes, so the fullscreen toggle
   // has to be handled here too, not just in the content views.
   if (e.key.toLowerCase() === 'f' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
@@ -414,6 +685,15 @@ window.addEventListener('keydown', (e) => {
     window.forge.toggleFullscreen();
     return;
   }
+
+  if (current.mode === 'edit' && (e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+    e.preventDefault();
+    const id = selectedId;
+    selectedId = null;
+    window.forge.deletePanel(id);
+    return;
+  }
+
   if (e.key !== 'Escape') return;
   if (current.mode === 'edit') window.forge.editExit({ discard: e.shiftKey });
   // Not back(): the single/double/off policy lives in the main process, so the

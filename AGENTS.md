@@ -24,11 +24,15 @@ and the decisions that need Jeff before some of it can be finalized.
 - Hardening: SSO popups allowed and centered on the wall, an `allowedOrigins`
   navigation policy (permissive when empty), a watchdog that will not reload the
   panel someone is using, single-instance lock, no application menu.
-- Layout edit mode (`Ctrl/Cmd+Shift+E`): corners scale proportionally with the
-  page zoom following the frame, sides resize one axis and let the page reflow,
-  the body drags to move. Edges snap to each other, the wall edges, and the wall
-  centre lines, in wall units so saved layouts have no seams. Esc saves back to
-  config, Shift+Esc discards.
+- Layout edit mode (`Ctrl/Cmd+Shift+E`) is a full montage editor: corners scale
+  proportionally with the page zoom following the frame, sides resize one axis
+  and let the page reflow, the body drags to move. Edges snap to each other, the
+  wall edges, and the wall centre lines, in wall units so saved layouts have no
+  seams. Panels are added by drawing on empty wall or an Add button, deleted with
+  Del, and an inspector edits URL, label, zoom and session. Esc saves the whole
+  panel list back to config, Shift+Esc discards.
+- Panels are created and destroyed at runtime, so the count is not fixed at four
+  and `views` may be empty.
 - `wall.fitToDisplay` scales and centres the authored layout into whatever window
   it gets, so a 3840x2160 wall layout is previewable on a laptop at the same
   proportions it will have on the wall.
@@ -103,3 +107,10 @@ and the decisions that need Jeff before some of it can be finalized.
 - npm scripts must run on Windows too, so no `FOO=1 cmd` prefixes and no shell
   loops. Put the environment setup inside the node script instead.
 - Nothing under `src/dev/` ships: `electron-builder.yml` excludes it.
+- Panels may deliberately share a session partition, so do not reintroduce a
+  uniqueness check on it. Several views of one SSO-protected app need one login.
+- Never capture a view's index in a closure. Panels can be deleted, which shifts
+  every later index; resolve it from the spec object with
+  `config.views.indexOf(v)` at call time.
+- `src/main.js` has no unit tests, so after changing panel lifecycle behaviour
+  run `FORGE_DEV=1 FORGE_SELFTEST=1 npm start` and read the log.

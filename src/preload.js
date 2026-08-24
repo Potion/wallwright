@@ -19,4 +19,10 @@ contextBridge.exposeInMainWorld('forge', {
   dragEnd: () => ipcRenderer.send('forge:dragEnd'),
   editExit: (opts) => ipcRenderer.send('forge:editExit', opts),
   onLayoutEcho: (cb) => ipcRenderer.on('forge:layoutEcho', (_e, m) => cb(m)),
+
+  // Panel CRUD, from the layout editor's inspector.
+  addPanel: (rect) => ipcRenderer.send('forge:addPanel', rect),
+  deletePanel: (id) => ipcRenderer.send('forge:deletePanel', id),
+  updatePanel: (id, patch) => ipcRenderer.send('forge:updatePanel', { id, patch }),
+  onSelect: (cb) => ipcRenderer.on('forge:select', (_e, id) => cb(id)),
 });

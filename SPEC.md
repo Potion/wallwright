@@ -2,18 +2,22 @@
 
 ## Goal
 
-Show four live Honeywell web dashboards on one large LED wall in the "Next Gen
-Control Room / Experion Orion" exhibit. The four panels are laid out in a grid,
-each positioned and scaled independently, with no browser chrome. The pages are
-real, interactive browser views: an operator must be able to log in and use them
-(SSO included), not just look at a static picture.
+Show live web pages on one large LED wall in the "Next Gen Control Room /
+Experion Orion" exhibit. Panels are laid out in a grid, each positioned and
+scaled independently, with no browser chrome. The pages are real, interactive
+browser views: an operator must be able to log in and use them (SSO included),
+not just look at a static picture.
+
+The immediate exhibit is four Honeywell dashboards, but nothing is fixed at
+four: panels are added, removed, re-pointed and rearranged from inside the app
+(see "Layout editor"), so the same build serves any montage of live pages.
 
 ## Interaction model
 
 There is no touch on the wall. Interaction is a single wireless keyboard and
 mouse used at the wall itself (no separate admin monitor). Behavior:
 
-- Grid mode: all four panels display at their configured rectangles. A
+- Grid mode: every panel displays at its configured rectangle. A
   transparent overlay on top captures clicks.
 - Click a panel: it animates/snaps to fullscreen and becomes the input target
   (active mode). It was always live; promoting just makes it big and frontmost.
@@ -42,13 +46,44 @@ window-manager approach were both viable but Electron with `WebContentsView`
 gives independent per-view scaling, persistent per-view sessions, clean
 lockdown, and no chrome with far less code and better maintainability.
 
+## Layout editor
+
+Because the wall has no admin monitor, the layout has to be adjustable at the
+wall itself, against the real dashboards, without editing JSON on site.
+`Ctrl/Cmd+Shift+E` toggles a layout edit mode. It is a mode rather than
+always-on handles: in grid mode a click promotes a panel, so live handles would
+both fight that gesture and let a visitor wreck the exhibit.
+
+In edit mode a panel can be:
+
+- **moved** by dragging its body,
+- **resized** by dragging a side handle, which changes one axis and lets the page
+  reflow into the new viewport,
+- **scaled** by dragging a corner, which is aspect-locked and takes `zoomFactor`
+  with it, so the page scales like an image rather than reflowing. `SPEC.md`
+  already noted that enterprise apps often do not reflow to arbitrary sizes;
+  this is the gesture for that case.
+
+Edges snap to each other, to the wall edges, and to the wall centre lines, so
+panels tile without seams. Snapping happens twice: in window pixels for feel,
+then again in wall units before saving, because a layout tuned on a scaled-down
+preview would otherwise store edges a unit or two apart, which is a visible seam
+at wall resolution.
+
+Selecting a panel opens an inspector for its **URL, label, zoom and session**,
+plus delete. New panels come from dragging on empty wall or an Add button. Esc
+saves the whole panel list back to the config file, Shift+Esc discards.
+
 ## Components
 
-- `BaseWindow` (frameless, kiosk, fullscreen) sized to the wall resolution,
-  placed on the wall's display output.
-- Four content `WebContentsView`s, one per configured URL. Each has its own
-  persistent session partition (logins survive restarts) and a `zoomFactor` for
-  per-panel scale.
+- `BaseWindow` (frameless, fullscreen) sized to the wall resolution, placed on
+  the wall's display output. On macOS this must be _simple_ fullscreen: every
+  native fullscreen and kiosk path leaves the menu-bar strip uncovered.
+- An opaque backdrop `View` behind everything, so wall area no panel covers
+  clears to the background colour instead of keeping stale pixels.
+- One content `WebContentsView` per configured URL, created and destroyed at
+  runtime as panels are added and removed. Each has a session partition
+  (logins survive restarts) and a `zoomFactor` for per-panel scale.
 - One transparent overlay `WebContentsView`, always kept on top:
   - Grid mode: sized to the whole wall; renders four invisible hotspots at the
     panel rectangles that capture the click and request activation.
@@ -64,13 +99,24 @@ lockdown, and no chrome with far less code and better maintainability.
 - `idleReturnMs` (0 disables auto-return)
 - `showHotspotHint` (hover highlight on panels in grid mode)
 - `backButton` rectangle (position/size of the corner Back control)
-- `views[]`: `{ id, label, url, grid:{x,y,width,height}, zoom, partition }`
+- `views[]`: `{ id, label, url, grid:{x,y,width,height}, zoom, partition }`.
+  May be empty, so a montage can be built from a blank wall. Written back by the
+  layout editor.
 
 ## Sessions and SSO
 
 Each view uses a `persist:` partition so cookies/sessions persist. Auth popups
 are allowed via `setWindowOpenHandler` so SSO that spawns a popup works; the
 allow-list should be scoped to the real identity-provider domains once known.
+
+Panels default to their own partition, but may deliberately **share** one. This
+matters for the exhibit: several panels showing the same SSO-protected app
+should sit behind one login rather than making an operator sign in once per
+panel. The editor's inspector chooses this per panel.
+
+In a packaged app the bundled config is read-only inside `app.asar`, so the live
+config is a copy under the user data directory, seeded on first run. That is what
+the editor writes to, so a layout tuned at the wall survives a reinstall.
 
 ## Reliability
 
