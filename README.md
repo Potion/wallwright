@@ -48,6 +48,16 @@ the page a new viewport and lets it reflow. Scaling from a corner keeps the
 proportions and scales the page itself, which is what enterprise dashboards
 need when they refuse to reflow to an arbitrary shape.
 
+### Saved montages
+
+A montage can be saved under a name and recalled later, which is how one wall
+serves an overview layout, a detail layout, and whatever a given demo needs. The
+editor's toolbar lists them; `Ctrl/Cmd+Shift+1` through `9` recall the first
+nine without opening the editor at all.
+
+Recalling reuses panels that have not changed rather than rebuilding them, so
+switching montages does not reload pages that were already right.
+
 ## Sessions and logins
 
 Each panel keeps its own cookies and session, and they survive restarts, so an
