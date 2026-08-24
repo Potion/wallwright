@@ -10,6 +10,9 @@ on:
   push:
     tags: ['v*']
 
+permissions:
+  contents: write # to attach build artifacts to a release
+
 jobs:
   build:
     runs-on: macos-latest
@@ -55,3 +58,12 @@ jobs:
           path: dist/*.dmg
           if-no-files-found: error
           retention-days: 30
+
+      # On a tag, attach the build to that release. Uploaded from the runner, so
+      # a release does not mean downloading a few hundred MB of workflow
+      # artifacts and pushing them back up by hand.
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: gh release upload "${{ github.ref_name }}" dist/*.dmg --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
