@@ -63,6 +63,8 @@ function resolveConfigPath() {
   return live;
 }
 const DEV = process.env.FORGE_DEV === '1';
+// Dev only: log which panel each click and keypress reaches.
+const LOG_INPUT = DEV && process.env.FORGE_LOG_INPUT === '1';
 
 // Smallest panel the layout editor will produce, in wall units.
 const MIN_PANEL = 160;
@@ -1077,6 +1079,12 @@ ipcMain.on('forge:activity', (e, type) => {
   );
   if (i >= 0) {
     touched.set(config.views[i].id, Date.now());
+    // Grid-mode input is otherwise completely silent, which makes "do clicks
+    // land in the right panel" impossible to check except by eye. Mousemove is
+    // left out: it would drown everything else.
+    if (LOG_INPUT && type !== 'mousemove') {
+      log(`input: ${type} -> ${config.views[i].id} (${state.mode} mode)`);
+    }
     // Clicking a sibling WebContentsView is not guaranteed to move focus to it,
     // and without focus the wireless keyboard has no target. Doing it here is a
     // no-op when the platform already did it.

@@ -222,10 +222,21 @@ selftest 8: back to grid: overlay hidden again: true
 selftest 8: edit: overlay shown and full wall: true
 ```
 
-Still to confirm by hand: that clicks and typing actually land in the right
-panel, and that focus follows the last click. The main process focuses the
-`mousedown` sender rather than relying on the platform, which is a no-op if
-sibling views already take focus natively; that has not been distinguished.
+Clicks land in the right panel, confirmed with `FORGE_LOG_INPUT=1`, which logs
+which panel each event reaches:
+
+```
+input: mousedown -> view-2 (grid mode)
+```
+
+That was with the wall at scale 0.469 and offset inside the window, which is the
+case that would expose a coordinate problem: a mistranslated click would have
+been attributed to the wrong panel or to none.
+
+Still to confirm: that typing follows the last click across panels. The main
+process focuses the `mousedown` sender rather than relying on the platform,
+which is a no-op if sibling views already take focus natively; the two have not
+been distinguished.
 
 ### Idle behaviour is shaped by who has input
 
