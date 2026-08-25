@@ -16,8 +16,8 @@ and the decisions that need Jeff before some of it can be finalized.
 - Four content `WebContentsView`s, each with its own persistent session
   partition and per-view `zoomFactor`.
 - Transparent overlay `WebContentsView` on top with grid hotspots and an
-  active-mode Back button. **Transparency is confirmed working on macOS**; none
-  of the `SPEC.md` fallbacks are needed there.
+  active-mode Back button. **Transparency is confirmed working on macOS and on
+  Windows**; none of the `SPEC.md` fallbacks are needed on either.
 - Grid/active state machine with native animated transitions (`transitionMs`).
   Click a hotspot to fullscreen a panel; Back / double-Esc / idle timeout returns
   to the grid without reloading.
@@ -47,7 +47,7 @@ and the decisions that need Jeff before some of it can be finalized.
 ## Where this was left
 
 Released as **v0.1.1** with Windows and macOS artifacts, built on Potion's
-self-hosted runners. `npm test` is 80 tests, `npm run selftest` is 20 end to end
+self-hosted runners. `npm test` is 133 tests, `npm run selftest` is 38 end to end
 assertions, and both gate every build. CI is green.
 
 The app is **Wallwright**, the repository is `Potion/wallwright`, and the npm
@@ -66,24 +66,32 @@ both. Nothing had been downloaded, so it was free to do, and `CHANGELOG.md`
 records it so nobody does it a second time. Anything built from here on is
 `Wallwright-*`.
 
-**One thing is genuinely unverified and it is the important one.** Overlay
-compositing on Windows. Everything CI can prove about Windows is proven: the
-view APIs, the fullscreen paths, `main.js` behaviour, and the build. What is
-missing is a person looking at the wall on a Windows machine. Do that before
-anything else; if it fails, the `SPEC.md` fallbacks are the plan, and the
-build-versus-buy question genuinely reopens.
+**The architectural risk is closed.** Overlay compositing on Windows was the one
+genuinely unverified thing, and it works: confirmed 2026-08-25 on HQ-PROTO-MINI-2
+with a packaged build, editor chrome and an inspector drawn over live page content.
+See "Overlay compositing on Windows: WORKS" in `docs/validation.md`. None of the
+`SPEC.md` fallbacks are needed, and the build-versus-buy question stays closed.
 
-Parked, not abandoned: making the self-hosted Windows runner able to photograph
-the wall. It cannot today because nobody is signed in to that machine and the
-runner is a service in session 0. `docs/windows-runner.md` has the full
-diagnosis, a script, and the security trade-off. Jeff decided this is not needed
-right now, and the cheaper path is simply to run the app on any Windows machine
-with a display.
+**What is unverified now is longevity, not architecture.** Nothing has run for more
+than a few hours, and the memory countermeasure ships switched off because the
+number that would engage it has to come from a measured baseline. That is the soak,
+and it is the next thing.
+
+Parked, and now largely moot: making the self-hosted runner photograph the wall.
+The question it existed to answer has been answered another way, on a machine that
+already has a signed-in console session. `docs/windows-runner.md` still has the
+diagnosis and the security trade-off if per-build screenshots are ever wanted, and
+`docs/validation.md` has the pattern that worked instead: a Scheduled Task with an
+`InteractiveToken` principal, everything else over SSH.
 
 ## Build / harden next (TODO)
 
-1. **Look at the wall on Windows.** See above. Highest value, roughly an hour,
-   and it is the only remaining architectural risk.
+1. **The sustained run.** Now the highest-value open item, and the only one that
+   can set `memoryLimitMb`, which ships at 0 precisely because guessing it is worse
+   than leaving it off. Needs a sampler, a panel lineup that separates an app leak
+   from a page leak, and a machine whose geometry represents a wall: HQ-PROTO-MINI-2
+   is a portrait touch display at 200% scaling, so a soak there would run at 0.281
+   scale. See the plan and `docs/validation.md`.
 2. **Walk the checklist in `docs/validation.md` "Still to verify".** Grouped by
    where each check can be done: (A) on the dev machine now, (B) blocked on the
    real dashboard URLs, (C) needs the show PC.
@@ -104,15 +112,12 @@ with a display.
 8. **Decide `hideInactiveWhenActive`** (default off). Several live dashboards on
    a 4K wall is real GPU load, but hiding a view may throttle it. Mock 4's ticker
    exists to measure this.
-9. **Sustained run.** A working day against the real dashboards, watching memory
-   and session expiry. Two panels and the overlay already measured 699MB.
+9. **Sustained run against the real dashboards**, once the URLs exist, for session
+   expiry rather than memory. Four live public dashboards measured 1513MB.
 10. Optional polish: an idle countdown before auto-return, and a manual "reset
     panel" action.
 
 ## Open decisions (need Jeff)
-
-- Whether to rename the repository and npm package to match the app. Left alone
-  so far because it breaks clones and existing release URLs.
 
 - Real dashboard URLs and the wall's true resolution and panel layout.
 - ~~Esc behavior.~~ **Decided 2026-08-21: `escToGrid: "single"`.** A single Esc

@@ -489,6 +489,100 @@ those events to one a second is worth it regardless, since unthrottled motion
 across several panels was the highest-frequency thing this app did and carried
 almost no information.
 
+### Overlay compositing on Windows: WORKS
+
+The project's last architectural unknown, and the item `AGENTS.md` called the most
+important unverified thing in it. **Confirmed on Windows 11.**
+
+![The layout editor compositing over live pages on Windows](images/windows-compositing.png)
+
+Edit mode on a packaged build: panel frames in the accent colour, corner and side
+grips, the label bars with their green readouts, the inspector with its URL, label,
+zoom and session fields, and the bottom edit bar - all drawn over **live page
+content that is visible underneath**, the control page on the left and a live web
+page on the right. Active mode composites too: a Back button over a promoted
+panel. Grid mode is the control and shows the panels alone, because the overlay is
+`setVisible(false)` there by design.
+
+So none of the three fallbacks in `SPEC.md` are needed on either platform.
+
+Run on **HQ-PROTO-MINI-2** (i7-14700, 31.6GB, Windows 11 Pro build 26200), from
+git `ddafb04`, artifact `Wallwright-0.1.1-x64.zip`, sha256 `020be292...`, verified
+by `certutil` against the local hash after transfer. Not the show PC, and not the
+GitHub runner: a machine with a real signed-in console session, which is what made
+this possible at all.
+
+### How to run something on the wall machine from somewhere else
+
+`docs/windows-runner.md` recorded this as blocked. It is not blocked; it needed a
+machine with a desktop rather than a change to the runner.
+
+The pattern, which works and is worth keeping:
+
+- A **Scheduled Task with an `InteractiveToken` principal**, fired with
+  `schtasks /run`. That is the only way into the console session. An SSH session is
+  not it, and neither is a task set to run whether the user is logged on or not.
+- A **wrapper `.cmd`** as the task action, because environment does not propagate
+  through `schtasks /run`: the task carries its own.
+- **Everything else over SSH.** Loopback TCP crosses the session boundary freely,
+  so `GET 127.0.0.1/api/status` works from the SSH session even though the app is
+  in session 1. Only display enumeration and the screen grab have to be in-session.
+
+Two settings that would have bitten, both Task Scheduler defaults:
+`ExecutionTimeLimit` defaults to **`PT72H`**, which would kill a 72-hour soak at
+exactly hour 72, so it is set to `PT0S`; and `Priority` defaults to 7, which is
+below-normal process and low I/O priority, and would distort both rendering and any
+memory measurement, so it is set to 4.
+
+### Diagnostics on disk: confirmed on the platform that needed it
+
+The reason the log exists is that a double-clicked Windows build has no stdout.
+Verified end to end on a packaged build launched by a task with no console:
+
+```
+2026-08-25T08:33:51.235-04:00 info diagnostics log: C:\Users\Proto\AppData\Roaming\Wallwright\logs\wallwright.log
+2026-08-25T08:33:51.238-04:00 info session runId=55948047 version=0.1.1 electron=43.4.1 chrome=150.0.7871.224 platform=win32-x64 release=10.0.26200 host=HQ-Proto-Mini-2 packaged=true config=... wall=3840x2160 panels=2
+2026-08-25T08:38:01.520-04:00 info memory: 588MB total (Tab 240MB, GPU 186MB, Browser 106MB, Utility 56MB)
+```
+
+Creation is not the interesting part; **continuing to write** is. Sampled twice 95
+seconds apart the file grew 2215 to 2429 bytes, one `memory:` line per minute. That
+is the mechanism a multi-day soak depends on, working on the target platform.
+
+The self-test also passed all 38 assertions on Windows, including the two that
+matter most there: `the old renderer process was returned to the OS` (pid confirmed
+gone from `getAppMetrics`) and `a line written through log() reached it`.
+
+Per-panel memory attribution works on Windows: each panel reports its own `pid` and
+`memoryMb` with `pidShared: false` for panels in separate partitions, so a rising
+total can be blamed on a panel rather than on the wall.
+
+### The display is not what any single query said it was
+
+Four sources, four answers, and the disagreement is the finding:
+
+| source                                                         | answer                                                    |
+| -------------------------------------------------------------- | --------------------------------------------------------- |
+| `Win32_VideoController` (machine-wide WMI)                     | 3840x2160 @60Hz                                           |
+| `[Screen]::AllScreens` **from an SSH session**                 | `WinDisc 1024x768`                                        |
+| `[Screen]::AllScreens` **from the console session**, DPI-aware | `\\.\DISPLAY5 2160x3840`, primary                         |
+| the app's own log, from inside that session                    | `layout 3840x2160 in a 1080x1920 window, scaled to 0.281` |
+
+The truth: a 4K panel mounted in **portrait**, 2160x3840, at **200% display
+scaling** (system DPI 192), so the app is handed a 1080x1920 logical window and
+scales the authored 3840x2160 layout to 0.281.
+
+Two lessons. The `WinDisc 1024x768` reading that `docs/windows-runner.md`
+attributed to PROTO1-P8 being a session-0 service **is at least partly an artifact
+of querying from an SSH session**: the same string appears here on a machine that
+demonstrably has an active desktop. And any display measurement has to come from
+the console session, DPI-aware, or it is measuring the wrong thing.
+
+Consequence for the soak: this machine is a portrait touch display, not a wall.
+Compositing is compositing at any geometry, so this run stands. A memory soak at
+0.281 scale would not represent a 4K wall's raster and GPU load, so the geometry
+has to be settled before T0 rather than after.
+
 ### Panel CRUD works end to end
 
 `src/main.js` has no unit tests, so `WALLWRIGHT_SELFTEST=1` drives the real path:
@@ -730,10 +824,13 @@ behave differently from a mock.
 
 macOS passing does not settle the target platform. This group is the real risk.
 
-- [ ] **Install the built artifact on the show PC.** The installer and zip build
-      in CI but have never been run on Windows. Check the NSIS install, that the
-      config seeds to `%APPDATA%\\Wallwright\\wall.json`, and that the layout editor
-      can save there without admin rights.
+- [~] **Install the built artifact on the show PC.** The **zip** has now been run
+  on Windows (HQ-PROTO-MINI-2, 2026-08-25): it extracts, launches from a
+  Scheduled Task, and runs. The **NSIS installer** is still unrun, and the
+  `%APPDATA%` config seeding path is still unverified because this run pointed
+  `WALLWRIGHT_CONFIG` at a staged file rather than letting it seed. Check the NSIS install, that the
+  config seeds to `%APPDATA%\\Wallwright\\wall.json`, and that the layout editor
+  can save there without admin rights.
 - [ ] **Code signing, both platforms.** Unsigned Windows builds may be blocked
       or warned about by SmartScreen, and a signed build is easier for Honeywell
       IT to approve. Unsigned macOS builds are quarantined by Gatekeeper on any
@@ -744,12 +841,10 @@ macOS passing does not settle the target platform. This group is the real risk.
       from a quarantined download, which is the path anyone else will take.
 - [ ] **Auto-launch on boot and crash restart.** Not built. Required for
       unattended operation.
-- [ ] **Overlay alpha compositing on Windows.** Still open, and the blocker is
-      infrastructure rather than code. See "Why CI cannot photograph the wall"
-      above: the runner is a service in session 0 and cannot reach the desktop.
-      Either run the runner interactively in the console session, and the
-      existing workflow captures the wall unchanged, or run `npm start` on a
-      Windows machine and look at it.
+- [x] **Overlay alpha compositing on Windows.** Confirmed 2026-08-25 on
+      HQ-PROTO-MINI-2. See "Overlay compositing on Windows: WORKS" above. The
+      blocker was never the code and not really the runner either: it needed a
+      machine with a signed-in console session, which that one has.
 - [ ] **Re-run the probes on the real show PC.** CI answered them on a 1024x768
       virtual display. Confirm on the actual hardware and wall resolution.
 - [ ] **Display targeting.** Set `wall.displayLabel` or `wall.displayId` to the
