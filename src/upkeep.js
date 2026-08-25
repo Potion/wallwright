@@ -87,6 +87,18 @@ function ineligibleReason(p, { now, recentUseMs, minRecycleIntervalMs, force }) 
   return null;
 }
 
+// Why each panel was passed over, for the log. A wall that does nothing should be
+// able to say what stopped it.
+function describeBlockers(panels, opts) {
+  const seen = (panels || [])
+    .map((p) => ineligibleReason(p, { force: false, ...opts }))
+    .filter(Boolean);
+  if (!seen.length) return 'no panels';
+  const counts = new Map();
+  for (const r of seen) counts.set(r, (counts.get(r) || 0) + 1);
+  return [...counts.entries()].map(([r, n]) => (n > 1 ? `${n} ${r}` : r)).join(', ');
+}
+
 // Ordered best-first.
 //
 // The old ordering was ascending on the last-touched timestamp, which looks like
@@ -252,7 +264,19 @@ function memoryPlan(input) {
       };
     }
   }
-  return { rung: 2, action: 'none', over: true, reason: 'every panel is in use' };
+  // Name the actual blockers. Measured against four live dashboards, the reason
+  // nothing was eligible was usually the cooldown rather than anybody using the
+  // wall, and "every panel is in use" would have been simply untrue in the log.
+  return {
+    rung: 2,
+    action: 'none',
+    over: true,
+    reason: `nothing eligible (${describeBlockers(panels, {
+      now,
+      recentUseMs: c.recentUseMs,
+      minRecycleIntervalMs: c.minRecycleIntervalMs,
+    })})`,
+  };
 }
 
 // ---- schedules --------------------------------------------------------------
@@ -292,6 +316,7 @@ function memoryHardLimitFromBaseline(p95Mb, peakMb) {
 }
 
 module.exports = {
+  describeBlockers,
   classifyActivity,
   deferralExpired,
   summarizeMetrics,

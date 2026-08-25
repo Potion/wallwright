@@ -5,7 +5,29 @@
 // target when a panel is clicked.
 const { ipcRenderer } = require('electron');
 
-const report = (e) => ipcRenderer.send('ww:activity', e.type);
+// mousemove is throttled, and the other events are not.
+//
+// Two reasons. It is the highest-frequency thing this app does - four panels of
+// unthrottled pointer motion, every message crossing IPC and allocating on both
+// sides - and it carries almost no information: the main process only wants to
+// know that a cursor was moving recently, not how far.
+//
+// The second reason matters more on an unattended wall. Chromium dispatches
+// synthetic mouse-move when content scrolls or animates under a stationary
+// pointer, so a mouse left resting on an animated dashboard reports motion
+// indefinitely. Main treats pointer motion as presence rather than interaction
+// for that reason; throttling here keeps the volume sane either way.
+const MOVE_EVERY_MS = 1000;
+let lastMove = 0;
+
+const report = (e) => {
+  if (e.type === 'mousemove') {
+    const now = Date.now();
+    if (now - lastMove < MOVE_EVERY_MS) return;
+    lastMove = now;
+  }
+  ipcRenderer.send('ww:activity', e.type);
+};
 
 ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart'].forEach((ev) =>
   window.addEventListener(ev, report, { passive: true, capture: true })

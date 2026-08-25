@@ -33,6 +33,13 @@ const { createControlServer } = require('./control-server');
 const { statusPage } = require('./control-page');
 const { createDiagLog } = require('./diag-log');
 const { createCounters } = require('./counters');
+const {
+  classifyActivity,
+  deferralExpired,
+  ineligibleReason,
+  memoryPlan,
+  staggerSeeds,
+} = require('./upkeep');
 
 // The app was called Forge before it was Wallwright. The name decides the
 // userData folder, so renaming it orphans the tuned layout and every login;
@@ -175,7 +182,37 @@ const recycleProbes = [];
 // measurement rather than taste: see the probe answers in docs/validation.md.
 const RECYCLE_PROBE_MS = Number(process.env.WALLWRIGHT_RECYCLE_PROBE_MS || 3000);
 const RECYCLE_PROBE_LATE_MS = Number(process.env.WALLWRIGHT_RECYCLE_PROBE_LATE_MS || 30000);
-const touched = new Map(); // view id -> ms of the last input in that panel
+const touched = new Map(); // view id -> ms of the last INTERACTION in that panel
+// Pointer motion, kept separately and deliberately doing much less work. A mouse
+// left resting on an animated dashboard reports motion for as long as the content
+// moves, because Chromium dispatches synthetic moves under a stationary cursor,
+// so this can never be allowed to defer upkeep. It is reported in status, and it
+// is the one thing that blocks a relaunch, on the grounds that a wall should not
+// vanish while somebody is demonstrably standing at it.
+const present = new Map(); // view id -> ms of the last pointer motion
+// Which panel opened each SSO popup. `popups` alone could not answer that, so
+// rebuilding the opener mid-login was possible.
+const popupOwner = new Map(); // BrowserWindow -> view id
+// When upkeep first wanted to do something it could not, per panel and operation,
+// so a deferral can expire instead of lasting forever.
+const deferredSince = new Map(); // `${id}:${op}` -> ms
+// The most recent per-process reading, so ranking candidates by weight does not
+// mean asking the OS again for every panel on every tick.
+let lastMemoryByPid = new Map();
+// State the memory ladder keeps between checks. All of it resets the moment the
+// total comes back under the limit.
+let memoryPressureSince = null; // when the limit was first exceeded, unbroken
+let memoryHardChecks = 0; // consecutive checks past the hard limit
+let memorySweptAt = null; // when the whole wall was last rebuilt at once
+let recyclesSinceReduction = 0; // rebuilds that did not reclaim anything
+let pendingReduction = null; // the total before the last rebuild, to compare
+let memoryExhaustedSaid = false; // so "nothing left to try" is said once
+// Survives a relaunch through argv, which is the only place to keep it: a file
+// would outlive the condition, and a counter that resets on restart is no bound
+// at all.
+let relaunchCount = Number(
+  (process.argv.find((a) => a.startsWith('--ww-relaunch-count=')) || '').split('=')[1] || 0
+);
 
 // Console and file, not one or the other. `npm run dev` and `npm run selftest`
 // are read off stdout, and CI reads the same stream, so removing it would buy
@@ -669,9 +706,73 @@ let memoryTimer = null;
 const lastRefresh = new Map(); // view id -> ms
 const lastRecycle = new Map();
 
-function inUse(v) {
-  const promoted = state.mode === 'active' && state.activeIndex === config.views.indexOf(v);
-  return promoted || Date.now() - (touched.get(v.id) || 0) < config.recentUseMs;
+// inUse() used to live here, and eligible() below replaces it. The convention it
+// existed to serve - one answer to "is somebody using this panel", not three that
+// can drift - is unchanged; there is simply more to the answer now than a
+// timestamp comparison, and the interesting parts are testable.
+
+// What src/upkeep.js needs to know about each panel, in plain values. Built here
+// because it is the only place that can see the views, the watchdog and the
+// popups at once.
+function panelStates() {
+  return config.views.map((v, i) => {
+    const wc = contentViews[i] && contentViews[i].webContents;
+    const alive = wc && !wc.isDestroyed();
+    const pid = osPidOf(contentViews[i]);
+    return {
+      id: v.id,
+      index: i,
+      promoted: state.mode === 'active' && state.activeIndex === i,
+      interactAt: touched.get(v.id) || 0,
+      presentAt: present.get(v.id) || 0,
+      rssMb: pid ? lastMemoryByPid.get(pid) || 0 : 0,
+      lastRecycleAt: lastRecycle.get(v.id) || 0,
+      loading: alive ? wc.isLoading() : false,
+      popupOpen: [...popupOwner.values()].includes(v.id),
+      neverRecycle: !!v.neverRecycle,
+    };
+  });
+}
+
+// Whether one panel may be rebuilt or refreshed right now, and if not, why.
+//
+// The single in-use check the conventions ask for: upkeep, the memory ladder and
+// the watchdog all come through here, so there is one answer rather than three
+// that can drift apart. `op` only distinguishes which deferral clock is used.
+function eligible(v, i, op, { force = false } = {}) {
+  const now = Date.now();
+  const p = panelStates(now)[i];
+  const key = `${v.id}:${op}`;
+  const reason = ineligibleReason(p, {
+    now,
+    recentUseMs: config.recentUseMs,
+    minRecycleIntervalMs: op === 'refresh' ? 0 : config.minRecycleIntervalMs,
+    force,
+  });
+  if (!reason) {
+    deferredSince.delete(key);
+    return { ok: true, forced: false };
+  }
+  // A promoted panel is never forced, so its deferral is not on a clock: the idle
+  // timer will dock it, and then it becomes an ordinary candidate.
+  if (p.promoted) return { ok: false, reason, forced: false };
+
+  if (!deferredSince.has(key)) deferredSince.set(key, now);
+  const expired = deferralExpired({
+    wantedSince: deferredSince.get(key),
+    now,
+    maxDeferMs: config.maxDeferMs,
+  });
+  // Only "in use" expires. A loading page or an open SSO popup is a reason to
+  // wait rather than a claim on the panel, and forcing through either would
+  // interrupt exactly what the rule exists to protect.
+  if (expired && reason === 'in use') {
+    const waited = Math.round((now - deferredSince.get(key)) / 1000);
+    deferredSince.delete(key);
+    warn(`${v.id}: ${op} deferred for ${waited}s, proceeding anyway`);
+    return { ok: true, forced: true };
+  }
+  return { ok: false, reason, forced: false };
 }
 
 function dueFor(map, v, everyMs) {
@@ -764,11 +865,17 @@ function probeRecycle(probe) {
 }
 
 function runUpkeep() {
+  if (state.mode === 'edit') return; // not while the layout is being changed
   config.views.forEach((v, i) => {
-    if (inUse(v)) return; // never under someone's hands
-    if (state.mode === 'edit') return; // nor while the layout is being changed
-    if (dueFor(lastRecycle, v, v.recycleMs)) return recyclePanel(i);
-    if (dueFor(lastRefresh, v, v.refreshMs)) return refreshPanel(i);
+    const wantsRecycle = dueFor(lastRecycle, v, v.recycleMs);
+    const wantsRefresh = dueFor(lastRefresh, v, v.refreshMs);
+    if (!wantsRecycle && !wantsRefresh) return;
+    const op = wantsRecycle ? 'recycle' : 'refresh';
+    // Deferral is recorded per panel and operation, so a panel that is always
+    // busy eventually gets its upkeep rather than never getting it.
+    if (!eligible(v, i, op).ok) return;
+    if (wantsRecycle) return recyclePanel(i);
+    return refreshPanel(i);
   });
 }
 
@@ -776,6 +883,21 @@ function startUpkeep() {
   if (upkeepTimer) clearInterval(upkeepTimer);
   const wanted = config.views.some((v) => v.refreshMs || v.recycleMs);
   if (!wanted) return;
+  // Spread the clocks, so panels sharing one interval do not all come due in the
+  // same second. dueFor() falls back to process start, so without this four
+  // panels on one refreshMs reload together: a whole-wall flicker and four
+  // renderers loading at once.
+  for (const [map, key] of [
+    [lastRefresh, 'refreshMs'],
+    [lastRecycle, 'recycleMs'],
+  ]) {
+    const on = config.views.filter((v) => v[key]);
+    if (on.length < 2) continue;
+    const seeds = staggerSeeds(on.length, on[0][key], startedAt);
+    on.forEach((v, n) => {
+      if (!map.has(v.id)) map.set(v.id, seeds[n]);
+    });
+  }
   // Checked once a second; each panel's own interval decides when it is due.
   upkeepTimer = setInterval(runUpkeep, 1000);
 }
@@ -804,14 +926,21 @@ function memorySnapshot() {
   } catch {
     /* metrics unavailable */
   }
+  lastMemoryByPid = byPid;
   return { totalMb, byType, byPid };
 }
 
 // Memory. Reported rather than acted on by default: an exhibit that restarts
 // itself unpredictably is worse than one that uses a lot of RAM, and knowing the
-// real numbers has to come before tuning anything.
+// real numbers has to come before tuning anything. Everything below rung 0 is
+// inert until someone sets memoryLimitMb.
+//
+// The decision lives in src/upkeep.js so it can be tested; this function reads
+// the meters, keeps the state the ladder needs between checks, and carries out
+// whatever comes back.
 function checkMemory() {
   const { totalMb: total, byType } = memorySnapshot();
+  const now = Date.now();
   counters.highWater('memoryMb', Math.round(total));
   const parts = [...byType.entries()]
     .sort((a, b) => b[1] - a[1])
@@ -819,21 +948,125 @@ function checkMemory() {
     .join(', ');
   log(`memory: ${Math.round(total)}MB total (${parts})`);
 
-  if (!config.memoryLimitMb || total <= config.memoryLimitMb) return;
-  counters.bump('memoryLimitHits');
-  warn(`memory is over the ${config.memoryLimitMb}MB limit`);
-  // Recycle the least recently used idle panel, one per check, so a spike does
-  // not rebuild the whole wall at once.
-  const candidates = config.views
-    .map((v, i) => ({ v, i }))
-    .filter(({ v }) => !inUse(v))
-    .sort((a, b) => (touched.get(a.v.id) || 0) - (touched.get(b.v.id) || 0));
-  if (!candidates.length) {
-    counters.bump('memoryAllInUse');
-    return log('every panel is in use; leaving them alone');
+  // Did the last rebuild actually reclaim anything? Without this, "the
+  // countermeasure fired" and "the countermeasure worked" look identical in a
+  // log, and the wall can churn sessions for no benefit indefinitely.
+  if (pendingReduction !== null) {
+    const dropped = pendingReduction - total;
+    if (dropped >= config.memoryReduceMinMb) {
+      recyclesSinceReduction = 0;
+    } else {
+      recyclesSinceReduction += 1;
+      warn(
+        `the last recycle reclaimed ${Math.round(dropped)}MB, under the ` +
+          `${config.memoryReduceMinMb}MB that counts (${recyclesSinceReduction} in a row)`
+      );
+    }
+    pendingReduction = null;
   }
-  counters.bump('memoryRecycles', config.views[candidates[0].i].id);
-  recyclePanel(candidates[0].i);
+
+  const over = config.memoryLimitMb > 0 && total > config.memoryLimitMb;
+  if (!over) {
+    // Recovered. Forget the pressure history, so a spike next week starts its own
+    // clock rather than inheriting this one.
+    memoryPressureSince = null;
+    memoryHardChecks = 0;
+    memorySweptAt = null;
+    memoryExhaustedSaid = false;
+    return;
+  }
+
+  counters.bump('memoryLimitHits');
+  if (!memoryPressureSince) memoryPressureSince = now;
+  if (config.memoryHardLimitMb > 0 && total > config.memoryHardLimitMb) memoryHardChecks += 1;
+  else memoryHardChecks = 0;
+
+  // The relaunch gates. Kept here rather than in the policy because they are
+  // facts about this process, and every one of them is a way the rung can be
+  // wrong: no unsaved layout, nobody standing at the wall, and not in the first
+  // ten minutes, which is what stops a limit set below the baseline turning into
+  // a restart loop.
+  const recentPresence = [...present.values()].some((at) => now - at < config.presenceGraceMs);
+  const relaunchEnabled =
+    config.memoryRelaunch &&
+    state.mode !== 'edit' &&
+    !recentPresence &&
+    now - startedAt > config.minUptimeMs &&
+    relaunchCount < config.maxRelaunches;
+
+  const plan = memoryPlan({
+    totalMb: total,
+    limitMb: config.memoryLimitMb,
+    hardLimitMb: config.memoryHardLimitMb,
+    panels: panelStates(),
+    mode: state.mode,
+    now,
+    pressureSince: memoryPressureSince,
+    hardChecks: memoryHardChecks,
+    sweptAt: memorySweptAt,
+    recyclesSinceReduction,
+    cfg: {
+      recentUseMs: config.recentUseMs,
+      minRecycleIntervalMs: config.minRecycleIntervalMs,
+      memoryForceAfterMs: config.memoryForceAfterMs,
+      memoryHardForChecks: config.memoryHardForChecks,
+      memoryReduceMinMb: config.memoryReduceMinMb,
+      memoryGiveUpAfter: config.memoryGiveUpAfter,
+      relaunchEnabled,
+    },
+  });
+
+  warn(`memory is over the ${config.memoryLimitMb}MB limit (rung ${plan.rung})`);
+  const indexOf = (id) => config.views.findIndex((v) => v.id === id);
+
+  if (plan.action === 'recycle') {
+    const i = indexOf(plan.targetIds[0]);
+    if (i < 0) return;
+    if (plan.forced) warn(`forcing a recycle of ${plan.targetIds[0]}: ${plan.reason}`);
+    counters.bump('memoryRecycles', plan.targetIds[0]);
+    pendingReduction = total;
+    return recyclePanel(i);
+  }
+
+  if (plan.action === 'sweep') {
+    warn(`sweeping ${plan.targetIds.length} panels: ${plan.reason}`);
+    memorySweptAt = now;
+    pendingReduction = total;
+    // Highest index first, so rebuilding one cannot shift the next one's index.
+    plan.targetIds
+      .map(indexOf)
+      .filter((i) => i >= 0)
+      .sort((a, b) => b - a)
+      .forEach((i) => {
+        counters.bump('memoryRecycles', config.views[i].id);
+        recyclePanel(i);
+      });
+    return;
+  }
+
+  if (plan.action === 'dock') {
+    // Docking reloads nothing, so it costs a fullscreen state the idle timer
+    // would have taken anyway, and it makes that panel an ordinary candidate on
+    // the next check. Cheaper than overriding promotion.
+    warn(`docking the wall: ${plan.reason}`);
+    return dockGrid();
+  }
+
+  if (plan.action === 'relaunch') {
+    relaunchCount += 1;
+    warn(`relaunching (${relaunchCount} of ${config.maxRelaunches}): ${plan.reason}`);
+    app.relaunch({ args: [...process.argv.slice(1), `--ww-relaunch-count=${relaunchCount}`] });
+    return app.exit(0);
+  }
+
+  if (plan.rung === 2) counters.bump('memoryAllInUse');
+  // Said once rather than every minute for as long as it lasts.
+  if (plan.exhausted && !memoryExhaustedSaid) {
+    memoryExhaustedSaid = true;
+    warn(`no further action available: ${plan.reason}`);
+  } else if (plan.reason && !plan.exhausted) {
+    log(plan.reason);
+  }
 }
 
 function startMemoryWatch() {
@@ -1535,7 +1768,13 @@ ipcMain.on('ww:activity', (e, type) => {
     (view) => !view.webContents.isDestroyed() && view.webContents === e.sender
   );
   if (i >= 0) {
-    touched.set(config.views[i].id, Date.now());
+    // Interaction and presence are not the same claim. An interaction says
+    // somebody is doing something a rebuild would ruin; pointer motion says only
+    // that a cursor moved, which on an unattended wall may be the mouse sitting
+    // where it was left with animated content passing under it.
+    const kind = classifyActivity(type);
+    const clock = kind === 'presence' ? present : touched;
+    clock.set(config.views[i].id, Date.now());
     // Grid-mode input is otherwise completely silent, which makes "do clicks
     // land in the right panel" impossible to check except by eye. Mousemove is
     // left out: it would drown everything else.

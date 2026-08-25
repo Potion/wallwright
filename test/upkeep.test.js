@@ -209,7 +209,7 @@ test('rung 2: nothing idle holds off, then forces once pressure persists', () =>
   const held = memoryPlan(ladder({ panels: inUse, pressureSince: NOW - 1000 }));
   assert.strictEqual(held.rung, 2);
   assert.strictEqual(held.action, 'none');
-  assert.match(held.reason, /every panel is in use/);
+  assert.match(held.reason, /nothing eligible \(2 in use\)/);
 
   const forced = memoryPlan(
     ladder({ panels: inUse, pressureSince: NOW - 400000, cfg: { memoryForceAfterMs: 300000 } })
@@ -312,4 +312,23 @@ test('the hard limit always sits clear of the soft one', () => {
     const hard = memoryHardLimitFromBaseline(p95, peak);
     assert.ok(hard >= soft + 750, `${hard} clear of ${soft}`);
   }
+});
+
+test('when nothing is eligible it says what actually blocked it', () => {
+  // Measured against four live dashboards, the usual blocker was the cooldown
+  // rather than anybody using the wall, so "every panel is in use" was untrue.
+  const plan = memoryPlan({
+    totalMb: 1000,
+    limitMb: 800,
+    now: NOW,
+    panels: [
+      panel({ id: 'a', lastRecycleAt: NOW - 1000 }),
+      panel({ id: 'b', lastRecycleAt: NOW - 2000 }),
+      panel({ id: 'c', loading: true }),
+    ],
+    cfg: { minRecycleIntervalMs: 60000 },
+  });
+  assert.strictEqual(plan.action, 'none');
+  assert.match(plan.reason, /2 recycled too recently/);
+  assert.match(plan.reason, /still loading/);
 });
