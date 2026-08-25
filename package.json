@@ -20,7 +20,8 @@
     "build:mac:dir": "electron-builder --mac --dir --publish never",
     "capture": "node src/dev/capture.js",
     "probe:session": "node src/dev/session-probe-run.js",
-    "coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\""
+    "coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\"",
+    "selftest": "node src/dev/selftest-run.js"
   },
   "engines": {
     "node": ">=18"

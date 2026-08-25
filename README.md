@@ -184,6 +184,7 @@ FORGE_CONFIG=./config/local-demo.json npm start
 
 npm test      # 80 tests: config, layout geometry, control server and page
 npm run coverage # the same, with a coverage report
+npm run selftest # drives the real app over IPC; needs a display, exits non-zero on failure
 npm run lint
 npm run probe # check the Electron view APIs on this platform
 npm run probe:fs # check which fullscreen path covers the display
@@ -336,6 +337,11 @@ Four GitHub Actions workflows:
 - **CI** (`ci.yml`) - lint and tests on every push to `main` and every PR, on
   both Ubuntu and Windows. Installs with `--ignore-scripts` to skip Electron's
   binary download, which the tests do not need.
+  Both build workflows run lint, the unit tests, and the **self-test** before
+  packaging. The self-test needs a real display, which the self-hosted runners
+  have and a hosted Linux runner does not, so that is the only place it can run.
+  It gates the build.
+
 - **Build Windows** (`build-windows.yml`) - on a `v*` tag or manual dispatch,
   attaching artifacts to the matching release. Not on every push: Windows
   runners bill at 2x on a private repo.

@@ -57,6 +57,20 @@ jobs:
       - run: npm run lint
       - run: npm test
 
+      # The only coverage src/main.js has: it drives the real app over IPC,
+      # checking panel CRUD, overlay visibility in every mode, preset recall,
+      # and the refresh and recycle timers. Needs a real display, which the
+      # self-hosted runners have and the hosted Linux CI job does not, so this
+      # is the only place it can run.
+      #
+      # Gating, not advisory. It exits non-zero and names what failed, and it
+      # polls for conditions rather than sleeping, so a loaded runner does not
+      # make it flake. If it ever does flake, fix the test rather than adding
+      # continue-on-error: a smoke test people learn to ignore is worse than
+      # none.
+      - name: Self-test
+        run: npm run selftest
+
       - name: Build installer and zip
         run: npm run build:win
 

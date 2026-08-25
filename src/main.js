@@ -1470,6 +1470,18 @@ function selfTest() {
   const run = (js) => overlay.webContents.executeJavaScript(js, true);
   const soon = (ms) => new Promise((r) => setTimeout(r, ms));
 
+  // Wait for a condition rather than sleeping a guessed amount. On a shared
+  // build runner a fixed sleep is a coin toss, and a smoke test that fails at
+  // random is worse than none: people learn to ignore it.
+  const until = async (fn, timeoutMs = 20000) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (fn()) return true;
+      await soon(100);
+    }
+    return false;
+  };
+
   (async () => {
     enterEdit();
     await soon(400);
@@ -1477,7 +1489,7 @@ function selfTest() {
     step(1, `start with ${before} panels: ${ids()}`);
 
     await run(`window.forge.addPanel({ x: 40, y: 700, width: 500, height: 300 })`);
-    await soon(600);
+    await until(() => config.views.length === before + 1);
     const added = config.views[config.views.length - 1];
     step(2, `after add: ${config.views.length} panels: ${ids()}`);
     step(
@@ -1488,7 +1500,7 @@ function selfTest() {
     await run(
       `window.forge.updatePanel(${JSON.stringify(added.id)}, { url: 'https://example.com/', label: 'Added by selftest' })`
     );
-    await soon(700);
+    await until(() => added.url === 'https://example.com/');
     check(
       3,
       'url and label applied',
@@ -1501,7 +1513,7 @@ function selfTest() {
     await run(
       `window.forge.updatePanel(${JSON.stringify(added.id)}, { partition: ${JSON.stringify(target.partition)} })`
     );
-    await soon(700);
+    await until(() => added.partition === target.partition);
     const sharers = config.views
       .filter((v) => v.partition === target.partition)
       .map((v) => v.id);
@@ -1509,11 +1521,11 @@ function selfTest() {
     check(4, 'view count still matches config', contentViews.length === config.views.length);
 
     await run(`window.forge.updatePanel(${JSON.stringify(added.id)}, { zoom: 0.5 })`);
-    await soon(300);
+    await until(() => added.zoom === 0.5);
     check(5, 'zoom applied', added.zoom === 0.5);
 
     await run(`window.forge.deletePanel(${JSON.stringify(added.id)})`);
-    await soon(600);
+    await until(() => config.views.length === before);
     step(6, `after delete: ${config.views.length} panels: ${ids()}`);
     check(6, 'views and config still aligned', contentViews.length === config.views.length);
     check(6, 'back to the starting count', config.views.length === before);
@@ -1559,16 +1571,16 @@ function selfTest() {
     enterEdit();
     await soon(300);
     await run(`window.forge.savePreset('Selftest A')`);
-    await soon(400);
+    await until(() => config.presets.length === 1);
     step(9, `saved: ${config.presets.map((p) => p.id).join(',')}`);
 
     const beforeIds = ids();
     await run(`window.forge.addPanel({ x: 20, y: 20, width: 400, height: 300 })`);
-    await soon(600);
+    await until(() => ids() !== beforeIds);
     step(9, `montage changed: ${ids()}`);
 
     await run(`window.forge.applyPreset('selftest-a')`);
-    await soon(800);
+    await until(() => ids() === beforeIds);
     step(9, `after recall: ${ids()}`);
     check(9, 'recall matches the saved montage', ids() === beforeIds);
     check(
@@ -1578,7 +1590,7 @@ function selfTest() {
     );
 
     await run(`window.forge.deletePreset('selftest-a')`);
-    await soon(400);
+    await until(() => config.presets.length === 0);
     check(9, 'preset deleted', config.presets.length === 0);
     exitEdit({ save: false });
     await soon(300);
@@ -1588,27 +1600,39 @@ function selfTest() {
     dockGrid({ animate: false });
     await soon(300);
     const upkeepPanel = config.views[0];
+    const realRecentUse = config.recentUseMs;
     upkeepPanel.refreshMs = 1200;
     lastRefresh.delete(upkeepPanel.id);
     touched.delete(upkeepPanel.id);
     startUpkeep();
 
-    await soon(2600);
-    check(10, 'idle panel refreshed on its timer', lastRefresh.has(upkeepPanel.id));
+    // "In use" is driven through recentUseMs rather than by clearing touched,
+    // because the pages report every mousemove. With a pointer resting over the
+    // window this test otherwise depends on where the mouse happens to be: the
+    // panel stays perpetually in use and the refresh never fires. That is the
+    // right behaviour, and a lousy thing to hang a test on.
+    config.recentUseMs = 0; // nothing counts as recent, so the panel is idle
+    check(
+      10,
+      'idle panel refreshed on its timer',
+      await until(() => lastRefresh.has(upkeepPanel.id))
+    );
 
     // Now claim it is being used, and confirm the timer leaves it alone.
     const refreshedAt = lastRefresh.get(upkeepPanel.id);
+    config.recentUseMs = 60000;
     touched.set(upkeepPanel.id, Date.now());
-    await soon(2600);
+    // A fixed wait on purpose: this asserts that nothing happened, so there is
+    // no condition to poll for. Comfortably longer than the 1200ms interval.
+    await soon(4000);
     check(10, 'in-use panel left alone', lastRefresh.get(upkeepPanel.id) === refreshedAt);
 
     // And that it resumes once the panel goes quiet again.
-    touched.set(upkeepPanel.id, Date.now() - config.recentUseMs - 1000);
-    await soon(2600);
+    config.recentUseMs = 0;
     check(
       10,
       'refresh resumes once the panel is quiet',
-      lastRefresh.get(upkeepPanel.id) !== refreshedAt
+      await until(() => lastRefresh.get(upkeepPanel.id) !== refreshedAt)
     );
 
     // Recycling swaps the view for a new one, which is how the renderer process
@@ -1618,8 +1642,11 @@ function selfTest() {
     upkeepPanel.recycleMs = 1200;
     lastRecycle.delete(upkeepPanel.id);
     touched.delete(upkeepPanel.id);
-    await soon(2600);
-    check(10, 'recycle replaced the view', contentViews[0] !== viewBeforeRecycle);
+    check(
+      10,
+      'recycle replaced the view',
+      await until(() => contentViews[0] !== viewBeforeRecycle)
+    );
     check(
       10,
       'views and config aligned after recycle',
@@ -1629,6 +1656,7 @@ function selfTest() {
     check(10, 'overlay still frontmost after recycling', kids2[kids2.length - 1] === overlay);
 
     upkeepPanel.recycleMs = 0;
+    config.recentUseMs = realRecentUse;
     startUpkeep();
     checkMemory();
 

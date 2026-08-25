@@ -700,9 +700,20 @@ selftest FAILED (1): 7: overlay still frontmost
 exit code 1
 ```
 
-Because it exits with a code it could gate a build, though it needs a real
-display, so it belongs on the self-hosted runners rather than in the Linux CI
-job.
+It now gates both build workflows, which run on the self-hosted runners. Those
+have real displays; the hosted Linux CI job does not, so that is the only place
+it can run. Gating rather than advisory: it polls for conditions instead of
+sleeping, so a loaded runner should not make it flake, and a smoke test people
+learn to ignore is worse than none.
+
+Making it fit for CI found one more thing. The upkeep check was reading whether
+the pointer happened to be over the window: the pages report every `mousemove`,
+so a panel under a moving mouse is perpetually "in use" and never refreshes. That
+is the right behaviour and a lousy thing to hang a test on, so the test drives
+the guard through `recentUseMs` instead. Worth knowing about the product too: an
+administrator moving the mouse across the wall pauses refreshes for
+`recentUseMs`, which is what should happen, and means refreshes only really run
+when the wall is unattended.
 
 What it covers: panel add, URL and label change, session sharing, zoom, delete,
 overlay visibility across all four modes, preset save, recall and delete
