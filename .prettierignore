@@ -7,4 +7,4 @@ out
 
 # A print-styled document. Prettier reflows inline elements, which changes
 # spacing in the rendered PDF.
-docs/report/comparison.html
+docs/report/*.html

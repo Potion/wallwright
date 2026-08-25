@@ -19,6 +19,14 @@ app.whenReady().then(async () => {
     // Fonts and layout settle before measuring page breaks.
     await new Promise((r) => setTimeout(r, 600));
 
+    // The footer used to hard-code one document's title, so every other report
+    // rendered with the wrong name in its running foot. Take it from the page.
+    const title = await win.webContents.executeJavaScript('document.title', true);
+    const escaped = String(title).replace(
+      /[&<>]/g,
+      (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]
+    );
+
     const pdf = await win.webContents.printToPDF({
       printBackground: true, // the report uses tinted panels and rules
       preferCSSPageSize: true, // honour the @page rule in the stylesheet
@@ -27,7 +35,9 @@ app.whenReady().then(async () => {
       footerTemplate:
         '<div style="width:100%;font-size:7pt;color:#8892a0;' +
         'font-family:Helvetica,Arial,sans-serif;padding:0 16mm;">' +
-        '<span style="float:left">Wallwright and the commercial alternatives</span>' +
+        '<span style="float:left">' +
+        escaped +
+        '</span>' +
         '<span style="float:right">' +
         '<span class="pageNumber"></span> of <span class="totalPages"></span>' +
         '</span></div>',

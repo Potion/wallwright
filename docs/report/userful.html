@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wallwright and Userful</title>
+<style>
+  @page { size: Letter; margin: 18mm 16mm 20mm 16mm; }
+  :root {
+    --ink: #14181d; --muted: #5b6672; --rule: #d8dee5; --poppy: #f04e23;
+    --panel: #f5f7f9; --good: #1a7f4b; --bad: #b3261e; --amber: #9a6700;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: var(--ink);
+    font: 10.5pt/1.5 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  h1 { font-size: 23pt; line-height: 1.15; margin: 0 0 6pt; letter-spacing: -0.4pt; }
+  h2 { font-size: 13pt; margin: 22pt 0 8pt; padding-bottom: 4pt;
+    border-bottom: 1.5pt solid var(--poppy); break-after: avoid; }
+  h3 { font-size: 11pt; margin: 14pt 0 4pt; break-after: avoid; }
+  p { margin: 0 0 8pt; }
+  ul, ol { margin: 0 0 8pt; padding-left: 16pt; }
+  li { margin-bottom: 4pt; }
+  strong { font-weight: 600; }
+  .deck { color: var(--muted); font-size: 11pt; margin-bottom: 4pt; }
+  .byline { color: var(--muted); font-size: 8.5pt; padding-top: 8pt;
+    border-top: 0.75pt solid var(--rule); margin-bottom: 4pt; }
+  .callout { background: var(--panel); border-left: 3pt solid var(--poppy);
+    padding: 10pt 12pt; margin: 12pt 0; break-inside: avoid; }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .lead { font-weight: 600; }
+  .correction { border-left-color: var(--amber); background: #fdf7e7; }
+  table { width: 100%; border-collapse: collapse; margin: 10pt 0 12pt; font-size: 9pt; }
+  th, td { text-align: left; vertical-align: top; padding: 6pt 7pt;
+    border-bottom: 0.75pt solid var(--rule); }
+  th { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.4pt;
+    color: var(--muted); border-bottom: 1pt solid var(--ink); font-weight: 600; }
+  tr { break-inside: avoid; }
+  thead { display: table-header-group; }
+  td.name { font-weight: 600; }
+  tbody tr:nth-child(even) { background: #fafbfc; }
+  .yes { color: var(--good); font-weight: 600; }
+  .no { color: var(--bad); font-weight: 600; }
+  .unk { color: var(--muted); font-style: italic; }
+  .tag { display: inline-block; font-size: 7.5pt; font-weight: 600; letter-spacing: 0.3pt;
+    text-transform: uppercase; padding: 1.5pt 5pt; border-radius: 2pt; vertical-align: 1pt; }
+  .tag-v { background: #e3f3ea; color: var(--good); }
+  .tag-u { background: #fdecea; color: var(--bad); }
+  .sources { font-size: 8pt; color: var(--muted); }
+  .sources li { margin-bottom: 3pt; word-break: break-all; }
+  .avoid { break-inside: avoid; }
+  blockquote { margin: 8pt 0 8pt 12pt; padding-left: 10pt;
+    border-left: 2pt solid var(--rule); color: var(--ink); font-style: italic; }
+</style>
+</head>
+<body>
+
+<h1>Wallwright and Userful</h1>
+<p class="deck">A head to head, and a correction to an earlier recommendation.</p>
+<p class="byline">
+  Prepared for the Wallwright exhibit &middot; 24 August 2026 &middot;
+  <span class="tag tag-v">verified</span> marks a claim a cited source states.
+  <span class="tag tag-u">unverified</span> marks inference or something not checked.
+  Userful's architecture is quoted from Userful's own documentation.
+</p>
+
+<div class="callout correction avoid">
+  <p class="lead">A correction</p>
+  <p>
+    An earlier comparison ranked Userful the best commercial fit for this exhibit,
+    largely on published pricing and documented tablet control. Reading Userful's own
+    hardware documentation changes that. Userful is <strong>not software you install
+    on the show PC</strong>. It is a Linux operating system, on its own certified
+    server, streaming video to a decoder device behind each display. For a single wall
+    driven by a single Windows PC, it is the wrong shape, and its rendering model is
+    the one this project rejected at the design stage.
+  </p>
+</div>
+
+<h2>What each one actually is</h2>
+
+<h3>Userful</h3>
+<p>
+  A platform, not an application. From Userful's documentation:
+</p>
+<blockquote>
+  "Userful on-premise is, at its core, a complete Linux-based operating system derived
+  from Red Hat Enterprise Linux (RHEL) 9."
+  <span class="tag tag-v">verified</span>
+</blockquote>
+<p>
+  Content reaches displays indirectly. Sources are ingested at the server, in part
+  through Blackmagic DeckLink capture cards for HDMI and SDI inputs, and then
+  <strong>streamed to uClient endpoint devices over RTSP</strong>. A uClient runs on a
+  smart display's own processor or on an Android adapter behind each screen.
+  <span class="tag tag-v">verified</span>
+</p>
+<p>
+  The server needs a certified NVIDIA Quadro or RTX A-series GPU, from a list that runs
+  RTX 4000 through A6000, because the GPU decodes and encodes the video. Deployments
+  past twelve displays need 10 Gb network interfaces.
+  <span class="tag tag-v">verified</span>
+</p>
+
+<h3>Wallwright</h3>
+<p>
+  An application. It runs on the show PC, on Windows, and draws each panel as a real
+  browser view composited directly onto the wall's output. Nothing is encoded,
+  streamed or decoded. Input reaches a panel the way it reaches a browser tab, so
+  clicking and typing need no remote-control layer.
+  <span class="tag tag-v">verified</span>
+</p>
+
+<h2>What deploying each one looks like</h2>
+
+<table>
+  <thead>
+    <tr><th style="width:26%">&nbsp;</th><th style="width:37%">Userful</th><th style="width:37%">Wallwright</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="name">Machine</td>
+      <td>A dedicated server running Userful's own RHEL 9 derived OS. It cannot share the show PC with Windows. <span class="tag tag-v">verified</span></td>
+      <td>The existing Windows show PC. <span class="tag tag-v">verified</span></td>
+    </tr>
+    <tr>
+      <td class="name">GPU</td>
+      <td>A certified NVIDIA Quadro or RTX A-series card. <span class="tag tag-v">verified</span></td>
+      <td>Whatever drives the wall already.</td>
+    </tr>
+    <tr>
+      <td class="name">Behind the display</td>
+      <td>A uClient device, or a smart display running the uClient app. <span class="tag tag-v">verified</span></td>
+      <td>Nothing. The PC's own output.</td>
+    </tr>
+    <tr>
+      <td class="name">Network</td>
+      <td>Endpoints on the LAN, 10 Gb interfaces past twelve displays. <span class="tag tag-v">verified</span></td>
+      <td>None required. Optional LAN for the tablet control page.</td>
+    </tr>
+    <tr>
+      <td class="name">How a page reaches the wall</td>
+      <td>Rendered at the server, encoded, streamed over RTSP, decoded at the endpoint. <span class="tag tag-v">verified</span></td>
+      <td>Rendered on the wall's own GPU. No encode or decode. <span class="tag tag-v">verified</span></td>
+    </tr>
+    <tr>
+      <td class="name">Licence</td>
+      <td>$500 per display, per year. <span class="tag tag-v">verified</span></td>
+      <td>None.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout avoid">
+  <p class="lead">Why the streaming matters here, specifically</p>
+  <p>
+    <code>SPEC.md</code> considered capture based approaches at the outset and rejected
+    them, because what lands on the wall is a video texture and native interaction is
+    lost: making it interactive means mapping wall coordinates back into an offscreen
+    browser and injecting synthetic input. Userful's architecture is a well engineered
+    version of exactly that shape, with the interaction added back through its own
+    remote control layer. That is a reasonable trade for a control room streaming
+    cameras and desktops across a building. It is a strange trade for one wall showing
+    four web pages, sitting on top of the PC that could simply render them.
+  </p>
+</div>
+
+<h2>Where Userful clearly wins</h2>
+<ul>
+  <li>
+    <strong>Anything that is not a web page.</strong> Cameras, HDMI, SDI, remote
+    desktops, video conferencing. Wallwright does web pages and nothing else.
+    <span class="tag tag-v">verified</span>
+  </li>
+  <li>
+    <strong>More than one wall, or more than one room.</strong> This is what the
+    architecture is for, and it is why the architecture looks like that.
+  </li>
+  <li>
+    <strong>Redundancy.</strong> A second failover server. Wallwright has none, and on
+    one PC cannot have one. <span class="tag tag-v">verified</span>
+  </li>
+  <li>
+    <strong>A support contract and a maintained product</strong> that outlives whoever
+    wrote the exhibit.
+  </li>
+  <li>
+    <strong>Mature remote control</strong>, including operators driving mouse and
+    keyboard from a desktop or smartphone. <span class="tag tag-v">verified</span>
+  </li>
+</ul>
+
+<h2>Where Wallwright wins for this exhibit</h2>
+<ul>
+  <li>
+    <strong>Native rendering and native input.</strong> No encode, decode, stream or
+    coordinate mapping between the operator's hand and the page.
+  </li>
+  <li>
+    <strong>It runs on the machine that is already there.</strong> No second server, no
+    endpoint device, no operating system change, no GPU purchase.
+  </li>
+  <li>
+    <strong>Arranging the montage on the live wall.</strong> Drag panels around against
+    the real dashboards, at the real resolution. Userful's layouts are authored in a
+    console. <span class="tag tag-u">unverified that Userful cannot do this</span>
+  </li>
+  <li>
+    <strong>Several panels behind one login.</strong> Four dashboards from one
+    SSO-protected application share a session rather than needing four sign-ins. No
+    vendor documents an equivalent. <span class="tag tag-u">unverified</span>
+  </li>
+  <li>
+    <strong>No recurring cost and no vendor dependency.</strong>
+  </li>
+</ul>
+
+<h2>The honest comparison</h2>
+<table>
+  <thead>
+    <tr><th style="width:40%">&nbsp;</th><th style="width:30%">Userful</th><th style="width:30%">Wallwright</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Live interactive web pages</td><td>Yes, via streaming plus remote control</td><td class="yes">Yes, natively</td></tr>
+    <tr><td>Runs on the existing show PC</td><td class="no">No</td><td class="yes">Yes</td></tr>
+    <tr><td>Extra hardware needed</td><td class="no">Server, GPU, endpoint per display</td><td class="yes">None</td></tr>
+    <tr><td>Handles an SSO login on the wall</td><td class="unk">Not documented</td><td class="yes">Yes, measured</td></tr>
+    <tr><td>Panels sharing one login</td><td class="unk">Not documented</td><td class="yes">Yes</td></tr>
+    <tr><td>Edit the montage at the wall</td><td class="unk">Console authored</td><td class="yes">Yes</td></tr>
+    <tr><td>Named layout presets</td><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+    <tr><td>Tablet and phone control</td><td class="yes">Yes, mature</td><td>A web page served by the wall</td></tr>
+    <tr><td>Non-web sources</td><td class="yes">Yes</td><td class="no">No</td></tr>
+    <tr><td>Multi-wall, multi-room</td><td class="yes">Yes</td><td class="no">No</td></tr>
+    <tr><td>Failover</td><td class="yes">Yes</td><td class="no">No</td></tr>
+    <tr><td>Vendor support</td><td class="yes">Yes</td><td class="no">No</td></tr>
+    <tr><td>Recurring cost</td><td>$500 per display per year</td><td class="yes">None</td></tr>
+    <tr><td>Proven at this exact job</td><td class="unk">Needs a demo</td><td>Proven except on Windows compositing</td></tr>
+  </tbody>
+</table>
+
+<h2>Recommendation</h2>
+<p>
+  <strong>For this exhibit as scoped, Wallwright is the better fit, and the reason is
+  architectural rather than financial.</strong> Userful would mean replacing the show
+  PC with a Linux server, buying a certified GPU and an endpoint device, and then
+  streaming a web page to a display that is already attached to a computer capable of
+  rendering it. The $500 licence is the smallest part of that.
+</p>
+<p>Userful becomes the right answer if any of these turn out to be true:</p>
+<ol>
+  <li>The exhibit needs camera, HDMI or desktop sources, not only web pages.</li>
+  <li>It grows to several walls or rooms.</li>
+  <li>Unattended reliability with failover becomes a hard requirement.</li>
+  <li>
+    Honeywell will not accept an unsigned in-house application on the show PC, but will
+    accept a commercial platform. That is a real possibility and worth asking early.
+  </li>
+  <li>
+    <strong>Overlay compositing fails on Windows.</strong> This is still the one
+    unverified assumption underneath Wallwright, and the fallbacks are more awkward. If
+    it fails and the fallbacks disappoint, the build versus buy question genuinely
+    reopens.
+  </li>
+</ol>
+
+<h2>What is still unverified</h2>
+<ul>
+  <li>
+    Whether Userful can drive displays directly from the server's own outputs rather
+    than through streamed endpoints. Zero clients were deprecated in version 12.7, and
+    the current documentation describes streaming. A direct-attached configuration may
+    exist. <span class="tag tag-u">unverified</span>
+  </li>
+  <li>Whether Userful handles a real Honeywell SSO flow. No vendor documents this.</li>
+  <li>
+    How interaction feels through a stream. Latency was not measured and may be
+    perfectly acceptable.
+  </li>
+  <li>
+    Wallwright's overlay compositing on Windows, which remains the largest open risk in
+    the project.
+  </li>
+</ul>
+
+<h2>Sources</h2>
+<ol class="sources">
+  <li>Userful, self-sourcing a server: OS, GPU, network, RTSP streaming to uClients. https://docs.userful.com/userful-infinity/hardware-overview/supported-servers/self-sourcing-a-userful-server.md</li>
+  <li>Userful, video wall software. https://www.userful.com/video-wall</li>
+  <li>Userful, beyond video wall processors. https://www.userful.com/video-wall-processor</li>
+  <li>Userful, zero client setup and 12.7 deprecation. https://docs.userful.com/support-portal/hardware-setup/client-setup/zero-client-setup</li>
+  <li>Userful pricing, SHI listing. https://www.shi.com/product/32215340/userful-Professional-Video-Wall-Deployment-Solution</li>
+  <li>Wallwright design rationale: SPEC.md in the repository.</li>
+  <li>Wallwright measurements: docs/validation.md in the repository.</li>
+</ol>
+
+</body>
+</html>
