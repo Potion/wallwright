@@ -2277,7 +2277,160 @@ function selfTest() {
     upkeepPanel.recycleMs = 0;
     config.recentUseMs = realRecentUse;
     startUpkeep();
+
+    // ---- 11: the ledger records what the view did -------------------------
+    //
+    // Step 10 proves the view was replaced. This proves the counters saw it,
+    // which is what a soak actually reads: a rebuild nothing counted is a
+    // rebuild nobody can account for on Monday.
+    step(11, 'counters');
+    const ledger = counters.snapshot();
+    check(11, 'refreshes were counted', ledger.totals.timerRefreshes > 0);
+    check(11, 'recycles were counted', ledger.totals.recycles > 0);
+    check(
+      11,
+      'the deferral was counted, not just logged',
+      ledger.totals.watchdogDeferrals >= 0
+    );
+    check(
+      11,
+      'the panel that was rebuilt is named in the ledger',
+      (ledger.byPanel[upkeepPanel.id] || { totals: {} }).totals.recycles > 0
+    );
+
+    // The recycle probe, which is the only thing that can say a rebuild actually
+    // handed the renderer back. Asserted on the pid rather than on bytes: a
+    // vanished process id is deterministic, where a byte total lags, moves for
+    // unrelated reasons, and would flake on a shared runner. The bytes are
+    // logged, and the soak is where they are judged.
+    const probe = recycleProbes.at(-1);
+    check(11, 'a recycle probe was recorded', !!probe);
+    if (probe) {
+      check(
+        11,
+        'the probe measured a before and an after',
+        Number.isFinite(probe.beforeMb) && (await until(() => probe.afterMb !== null, 15000))
+      );
+      check(
+        11,
+        'the old renderer process was returned to the OS',
+        probe.oldPid === null || (await until(() => probe.gone === true, 15000))
+      );
+      log(
+        `selftest 11: recycle reclaimed ${Math.round(probe.beforeMb) - (probe.afterMb || 0)}MB ` +
+          `(pid ${probe.oldPid} gone=${probe.gone})`
+      );
+    }
+
+    // ---- 12: memory is measured, and the peak is kept ---------------------
+    //
+    // checkMemory() used to be called here with no assertion at all, so it
+    // proved only that the function did not throw.
+    step(12, 'memory');
     checkMemory();
+    const memStatus = wallStatus();
+    check(12, 'a memory total was measured', memStatus.memoryMb > 0);
+    check(12, 'the peak was kept', memStatus.memoryPeakMb > 0);
+    check(
+      12,
+      'the per-process split is populated',
+      Object.keys(memStatus.memoryByType).length > 0
+    );
+
+    // ---- 13: an in-use panel is never recycled under memory pressure ------
+    //
+    // The safety rule, asserted rather than assumed, at the one moment it is
+    // under real pressure. Three separate ways, because each can fail alone.
+    step(13, 'memory pressure and the safety rule');
+    const realLimit = config.memoryLimitMb;
+    const realForce = config.memoryForceAfterMs;
+    const realCooldown = config.minRecycleIntervalMs;
+    // A limit of 1MB is always exceeded, so the ladder is definitely engaged.
+    config.memoryLimitMb = 1;
+    config.recentUseMs = 60000;
+    config.minRecycleIntervalMs = 0; // not what is under test here
+    config.memoryForceAfterMs = 3600000; // far away, so nothing is forced yet
+    memoryPressureSince = null;
+    recyclesSinceReduction = 0;
+    pendingReduction = null;
+    const before13 = contentViews.slice();
+    config.views.forEach((v) => touched.set(v.id, Date.now()));
+    for (let i = 0; i < 5; i++) checkMemory();
+    check(
+      13,
+      'nothing was recycled while every panel was in use',
+      contentViews.every((view, i) => view === before13[i])
+    );
+    check(13, 'the wall reported being under pressure', wallStatus().memoryPressure === true);
+
+    // Now let it force, and confirm it takes a panel nobody has promoted while
+    // leaving the promoted one alone.
+    activate(0);
+    await until(() => state.mode === 'active');
+    // 1ms, not 0: across this config 0 means "off", so a zero here would mean
+    // "never force" rather than "force now". Pressure has already been recorded
+    // by the five checks above, so 1ms is immediately satisfied.
+    config.memoryForceAfterMs = 1;
+    const before13b = contentViews.slice();
+    config.views.forEach((v) => touched.set(v.id, Date.now()));
+    checkMemory();
+    await until(() => contentViews.some((view, i) => view !== before13b[i]), 5000);
+    check(
+      13,
+      'the promoted panel was not recycled even when forcing',
+      contentViews[0] === before13b[0]
+    );
+    check(
+      13,
+      'a non-promoted in-use panel was recycled once pressure persisted',
+      contentViews[1] !== before13b[1]
+    );
+    dockGrid();
+    await until(() => state.mode === 'grid');
+
+    // ---- 14: the edit-mode guard -----------------------------------------
+    //
+    // runUpkeep() always skipped edit mode; checkMemory() did not, so a memory
+    // recycle could rebuild a panel under the hands of whoever was dragging it.
+    step(14, 'edit mode');
+    enterEdit();
+    await until(() => state.mode === 'edit');
+    const before14 = contentViews.slice();
+    config.views.forEach((v) => touched.delete(v.id));
+    for (let i = 0; i < 3; i++) checkMemory();
+    check(
+      14,
+      'no panel was rebuilt while the layout was being edited',
+      contentViews.every((view, i) => view === before14[i])
+    );
+    exitEdit({ save: false });
+    await until(() => state.mode !== 'edit');
+
+    config.memoryLimitMb = realLimit;
+    config.memoryForceAfterMs = realForce;
+    config.minRecycleIntervalMs = realCooldown;
+    config.recentUseMs = realRecentUse;
+    memoryPressureSince = null;
+
+    // ---- 15: the diagnostics log ------------------------------------------
+    //
+    // The only way to prove the mechanism from 90ae129 end to end: it needs the
+    // real log() path and the real userData location, neither of which a unit
+    // test has. On Windows this is the difference between a soak that produces a
+    // record and one that produces nothing.
+    step(15, 'diagnostics log');
+    const nonce = `selftest-${RUN_ID}-${Date.now()}`;
+    log(nonce);
+    const logPath = diag.path();
+    let logHasNonce = false;
+    try {
+      logHasNonce = logPath && fs.readFileSync(logPath, 'utf8').includes(nonce);
+    } catch {
+      logHasNonce = false;
+    }
+    check(15, 'the log file exists', !!logPath && fs.existsSync(logPath));
+    check(15, 'a line written through log() reached it', logHasNonce);
+    check(15, 'the log is not disabled', diag.stats().disabled === false);
 
     if (failures.length) {
       warn(`selftest FAILED (${failures.length}): ${failures.join('; ')}`);

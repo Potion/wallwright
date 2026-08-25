@@ -17,6 +17,11 @@ const env = {
   WALLWRIGHT_SELFTEST: '1',
   WALLWRIGHT_CONFIG:
     process.env.WALLWRIGHT_CONFIG || path.join(ROOT, 'config', 'selftest.json'),
+  // The recycle probe waits 3s then 30s in production, which is right for a wall
+  // and absurd for a smoke test. Compressed here rather than in the assertion, so
+  // the test still polls for the condition instead of sleeping a guess.
+  WALLWRIGHT_RECYCLE_PROBE_MS: process.env.WALLWRIGHT_RECYCLE_PROBE_MS || '1500',
+  WALLWRIGHT_RECYCLE_PROBE_LATE_MS: process.env.WALLWRIGHT_RECYCLE_PROBE_LATE_MS || '4000',
 };
 
 const r = spawnSync(electron, ['.'], { stdio: 'inherit', cwd: ROOT, env });

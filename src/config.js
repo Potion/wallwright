@@ -30,7 +30,8 @@ function loadConfig(file) {
 const NON_NEGATIVE = {
   maxDeferMs: 'how long upkeep may be deferred before it proceeds anyway; 0 = forever',
   memoryHardLimitMb: 'the point past which the whole wall is swept; 0 = no hard limit',
-  memoryForceAfterMs: 'how long memory pressure must persist before overriding in-use',
+  memoryForceAfterMs:
+    'how long memory pressure must persist before overriding in-use; 0 = never override',
   memoryHardForChecks: 'consecutive checks over the hard limit before sweeping',
   minRecycleIntervalMs: 'the cooldown between rebuilds of one panel',
   memoryReduceMinMb: 'what counts as a recycle having reclaimed something',
@@ -293,6 +294,8 @@ function withDefaults(c) {
     // in src/upkeep.js. A limit inside the normal operating band is worse than
     // none, because it rebuilds a panel on every check.
     memoryHardLimitMb: c.memoryHardLimitMb ?? 0,
+    // 0 here means the in-use rule is never overridden, matching every other 0 in
+    // this file. It does not mean "force immediately".
     memoryForceAfterMs: c.memoryForceAfterMs ?? 300000,
     memoryHardForChecks: c.memoryHardForChecks ?? 2,
     minRecycleIntervalMs: c.minRecycleIntervalMs ?? 60000,
