@@ -44,44 +44,64 @@ and the decisions that need Jeff before some of it can be finalized.
   and Windows, a Windows installer build, and a manual Windows probe job that
   answers the open platform questions without the show PC.
 
+## Where this was left
+
+Released as **v0.3.0** with Windows and macOS artifacts, built on Potion's
+self-hosted runners. `npm test` is 80 tests, `npm run selftest` is 20 end to end
+assertions, and both gate every build. CI is green.
+
+The app is **Wallwright**. The repository is still `Potion/hon-forge` and the npm
+package is still `hon-forge`, deliberately: renaming the repo breaks clones and
+existing release URLs. Artifacts from v0.3.0 and earlier are named `Forge-*`;
+anything built since is `Wallwright-*`.
+
+**One thing is genuinely unverified and it is the important one.** Overlay
+compositing on Windows. Everything CI can prove about Windows is proven: the
+view APIs, the fullscreen paths, `main.js` behaviour, and the build. What is
+missing is a person looking at the wall on a Windows machine. Do that before
+anything else; if it fails, the `SPEC.md` fallbacks are the plan, and the
+build-versus-buy question genuinely reopens.
+
+Parked, not abandoned: making the self-hosted Windows runner able to photograph
+the wall. It cannot today because nobody is signed in to that machine and the
+runner is a service in session 0. `docs/windows-runner.md` has the full
+diagnosis, a script, and the security trade-off. Jeff decided this is not needed
+right now, and the cheaper path is simply to run the app on any Windows machine
+with a display.
+
 ## Build / harden next (TODO)
 
-1. **Walk the checklist in `docs/validation.md` "Still to verify".** 30 items in
-   three groups: (A) mechanical, doable on the dev machine right now, (B) blocked
-   on the real dashboard URLs, (C) needs the Windows show PC and the real wall.
-   Group A is the highest-value next action; group C is where the real risk is.
-2. Re-check **overlay transparency on the Windows show PC**. This is the one
-   thing CI cannot answer, and the whole architecture rests on it. The Electron
-   API questions are settled: the **Probe Windows** workflow confirmed the view
-   APIs behave exactly as on macOS and that every fullscreen path covers the
-   display on Windows, so the macOS simple-fullscreen workaround stays scoped to
-   darwin. That was on a 1024x768 virtual display though, so re-run the probes on
-   the real hardware too.
-3. Scope `allowedOrigins` (per view, in config) to the real Honeywell IdP and app
-   domains once the URLs are known. The enforcement code is already in place for
-   both `will-navigate` and `setWindowOpenHandler`; this is now a config edit.
-   Decide how far a panel may legitimately navigate. Note this is a
-   misconfiguration guard, not a hardening measure: only administrators have
-   keyboard and mouse access, so there is no untrusted person at the wall to
-   defend against.
-4. Cursor auto-hide when idle (native on Windows; there is no cross-platform
-   Electron API).
-5. Confirm and set per-panel `zoom` and the wall resolution/rectangles against
-   the real dashboards.
-6. Decide `hideInactiveWhenActive` (default `false`). Four live dashboards on a
-   4K wall is real GPU load, but hiding a view may throttle it. Mock 4's ticker
-   is there to measure this.
-7. Optional polish: a subtle idle-countdown indicator before auto-return; a
-   manual "reset panel" action that reloads a view to its configured URL.
-8. Packaging: **partly done.** electron-builder is configured
-   (`electron-builder.yml`). The Windows installer and zip build in CI on
-   `windows-latest`, macOS arm64 and x64 dmgs build on `macos-latest`, and a
-   packaged app copies its config to userData so the layout editor can write to
-   it. Still to do: **code signing** on both platforms (no certificate yet; see
-   README "Signing" for exactly which secrets each needs), **auto-launch on
-   boot**, and a **crash-restart wrapper** for unattended operation.
+1. **Look at the wall on Windows.** See above. Highest value, roughly an hour,
+   and it is the only remaining architectural risk.
+2. **Walk the checklist in `docs/validation.md` "Still to verify".** Grouped by
+   where each check can be done: (A) on the dev machine now, (B) blocked on the
+   real dashboard URLs, (C) needs the show PC.
+3. **Real URLs and wall geometry.** Set the dashboard URLs, the wall resolution,
+   the panel rectangles and the per-panel `zoom` against the real dashboards.
+   Everything else is guesswork until this lands.
+4. **Scope `allowedOrigins`** to the real Honeywell IdP and app domains once
+   known. Enforcement already exists for `will-navigate` and
+   `setWindowOpenHandler`, so this is a config edit. It is a misconfiguration
+   guard, not hardening: only administrators have input.
+5. **Code signing**, both platforms. No certificates yet. README "Signing" lists
+   exactly which secrets each needs. Unsigned builds are warned about by
+   SmartScreen and quarantined by Gatekeeper, and a signed build is easier for
+   Honeywell IT to approve.
+6. **Auto-launch on boot and crash restart**, for unattended operation.
+7. **Cursor auto-hide when idle.** Needs a native Windows approach; there is no
+   cross-platform Electron API.
+8. **Decide `hideInactiveWhenActive`** (default off). Several live dashboards on
+   a 4K wall is real GPU load, but hiding a view may throttle it. Mock 4's ticker
+   exists to measure this.
+9. **Sustained run.** A working day against the real dashboards, watching memory
+   and session expiry. Two panels and the overlay already measured 699MB.
+10. Optional polish: an idle countdown before auto-return, and a manual "reset
+    panel" action.
 
 ## Open decisions (need Jeff)
+
+- Whether to rename the repository and npm package to match the app. Left alone
+  so far because it breaks clones and existing release URLs.
 
 - Real dashboard URLs and the wall's true resolution and panel layout.
 - ~~Esc behavior.~~ **Decided 2026-08-21: `escToGrid: "single"`.** A single Esc
