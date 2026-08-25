@@ -5,7 +5,7 @@
 // target when a panel is clicked.
 const { ipcRenderer } = require('electron');
 
-const report = (e) => ipcRenderer.send('forge:activity', e.type);
+const report = (e) => ipcRenderer.send('ww:activity', e.type);
 
 ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart'].forEach((ev) =>
   window.addEventListener(ev, report, { passive: true, capture: true })

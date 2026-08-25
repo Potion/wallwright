@@ -27,7 +27,7 @@
         })
           .catch(() => {})
           .finally(() => {
-            if (window.opener) window.opener.postMessage({ forgeIdp: user }, '*');
+            if (window.opener) window.opener.postMessage({ wwIdp: user }, '*');
             window.close();
           });
       };

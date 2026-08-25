@@ -62,7 +62,7 @@ function validateConfig(c) {
     // Sharing a partition is allowed and sometimes required: several panels
     // showing the same SSO-protected app should share one login rather than
     // making an operator sign in once per panel.
-    partitions.add(v.partition || `persist:forge-${i + 1}`);
+    partitions.add(v.partition || `persist:wall-${i + 1}`);
 
     const g = v.grid;
     if (!g || typeof g !== 'object') {
@@ -226,7 +226,7 @@ function withDefaults(c) {
           ...preset,
           views: preset.views.map((v, i) => ({
             zoom: 1,
-            partition: `persist:forge-${i + 1}`,
+            partition: `persist:wall-${i + 1}`,
             ...v,
           })),
         }))
@@ -234,7 +234,7 @@ function withDefaults(c) {
     backButton: c.backButton || { x: 24, y: 24, width: 176, height: 56 },
     views: c.views.map((v, i) => ({
       zoom: 1,
-      partition: `persist:forge-${i + 1}`,
+      partition: `persist:wall-${i + 1}`,
       ...v,
     })),
   };

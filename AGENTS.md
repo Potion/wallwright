@@ -130,7 +130,7 @@ and the decisions that need Jeff before some of it can be finalized.
   every later index; resolve it from the spec object with
   `config.views.indexOf(v)` at call time.
 - `src/main.js` has no unit tests, so after changing panel lifecycle behaviour
-  run `FORGE_DEV=1 FORGE_SELFTEST=1 npm start`. It exits non-zero on failure, so
+  run `WALLWRIGHT_DEV=1 WALLWRIGHT_SELFTEST=1 npm start`. It exits non-zero on failure, so
   check the code, not just the log.
 - New logic that could live without electron should. Extraction is what got
   `src/layout.js` and `src/control-server.js` to full coverage; anything left in

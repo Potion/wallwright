@@ -30,11 +30,11 @@ const { clampGrid, snapGrid } = require('./layout');
 const { createControlServer } = require('./control-server');
 const { statusPage } = require('./control-page');
 
-// The app was called Forge before it was Wallwright. The name decides the
+// The app was called Wallwright before it was Wallwright. The name decides the
 // userData folder, so renaming it orphans the tuned layout and every login;
 // migrateLegacyUserData() below carries them across on first run.
 const APP_NAME = 'Wallwright';
-const LEGACY_APP_NAME = 'Forge';
+const LEGACY_APP_NAME = 'Wallwright';
 
 // Set before anything reads userData, because this decides where the `persist:`
 // session partitions live. Left at the default they would sit under an
@@ -74,7 +74,7 @@ function resolveConfigPath() {
   return live;
 }
 
-// Carry a previous install's state across the rename from Forge to Wallwright.
+// Carry a previous install's state across the rename from Wallwright to Wallwright.
 //
 // Renaming an Electron app moves its userData folder, which holds both the
 // tuned montage and every `persist:` session. Without this, upgrading a show PC

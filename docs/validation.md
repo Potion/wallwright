@@ -1,4 +1,4 @@
-# Forge validation record
+# Wallwright validation record
 
 What has actually been observed running, versus what is still assumed. The point
 of this file is the "Known risks / things to validate" section of `SPEC.md`: the
@@ -164,15 +164,15 @@ which still has to be judged by eye on the real wall, and it says nothing about
 | `Forge-0.1.0-arm64.dmg` | 114 MB |
 | `Forge-0.1.0-x64.dmg`   | 116 MB |
 
-Inside: `Forge.app` with the drag-to-Applications layout,
-`CFBundleName = Forge`, `CFBundleIdentifier = com.potion.forge`, thin arm64.
+Inside: `Wallwright.app` with the drag-to-Applications layout,
+`CFBundleName = Wallwright`, `CFBundleIdentifier = com.potion.forge`, thin arm64.
 
 Unsigned, and `identity: null` in `electron-builder.yml` now says so explicitly
 rather than letting electron-builder hunt the keychain and report unrelated Jamf
 certificates, which read like a failure and was not. Consequence: Gatekeeper
 quarantines the app on any machine that downloads it. Open it once with
 right-click then Open, or clear it with
-`xattr -dr com.apple.quarantine /Applications/Forge.app`.
+`xattr -dr com.apple.quarantine /Applications/Wallwright.app`.
 
 ### The Windows build produces installable artifacts
 
@@ -254,7 +254,7 @@ selftest 8: back to grid: overlay hidden again: true
 selftest 8: edit: overlay shown and full wall: true
 ```
 
-Clicks land in the right panel, confirmed with `FORGE_LOG_INPUT=1`, which logs
+Clicks land in the right panel, confirmed with `WALLWRIGHT_LOG_INPUT=1`, which logs
 which panel each event reaches:
 
 ```
@@ -351,7 +351,7 @@ only the sustained run below can answer.
 
 ### Panel CRUD works end to end
 
-`src/main.js` has no unit tests, so `FORGE_SELFTEST=1` drives the real path:
+`src/main.js` has no unit tests, so `WALLWRIGHT_SELFTEST=1` drives the real path:
 the overlay's bridge, over IPC, into the same handlers a click reaches.
 
 ```
@@ -403,14 +403,14 @@ the real state machine. The two screenshots in the README were produced with it.
 
 ### Packaging works, and it is what fixes the app name
 
-`npm run build:mac` produces `Forge.app` with `CFBundleName = Forge`, which is
+`npm run build:mac` produces `Wallwright.app` with `CFBundleName = Wallwright`, which is
 the only thing that changes the macOS menu-bar title: `app.setName()` does not
 touch it. Verified on the packaged build:
 
 - The asar contains exactly the runtime files. `src/dev/**` and `test/**` are
   excluded, so no mock server or probe ships in an exhibit.
 - First run seeds the writable config and reads it:
-  `seeded ~/Library/Application Support/Forge/wall.json from the bundled default`.
+  `seeded ~/Library/Application Support/Wallwright/wall.json from the bundled default`.
   Without this the layout editor could not save in a packaged app, because the
   bundled config sits read-only inside `app.asar`.
 
@@ -548,13 +548,13 @@ no longer active`, and that it only reloads after docking. The second path
       half: edit, press Shift+Esc, and the change must be dropped rather than
       written to config.
 - [ ] **Editing the production config.** Layout edit mode writes to whatever
-      `FORGE_CONFIG` points at. Run once against `config/wall.json`, edit, save,
+      `WALLWRIGHT_CONFIG` points at. Run once against `config/wall.json`, edit, save,
       and check `git diff` is a clean readable change to `grid` and `zoom` only,
       with no defaults injected and no key reordering.
 - [ ] **Cmd/Ctrl+F toggle.** Flips between owning the display and an 85% window.
       Confirmed working on macOS; confirm the windowed layout is still correct
       and that toggling back restores 1:1.
-- [ ] **The fatal-config path.** Point `FORGE_CONFIG` at a deliberately broken
+- [ ] **The fatal-config path.** Point `WALLWRIGHT_CONFIG` at a deliberately broken
       file. A readable error page should appear instead of a stack trace. The
       code path exists and is unit tested, but the rendered page has never
       actually been looked at.
@@ -592,7 +592,7 @@ macOS passing does not settle the target platform. This group is the real risk.
 
 - [ ] **Install the built artifact on the show PC.** The installer and zip build
       in CI but have never been run on Windows. Check the NSIS install, that the
-      config seeds to `%APPDATA%\\Forge\\wall.json`, and that the layout editor
+      config seeds to `%APPDATA%\\Wallwright\\wall.json`, and that the layout editor
       can save there without admin rights.
 - [ ] **Code signing, both platforms.** Unsigned Windows builds may be blocked
       or warned about by SmartScreen, and a signed build is easier for Honeywell
@@ -658,6 +658,36 @@ how the gitignored-dev-config test failure was caught, since `config/local*.json
 does not exist outside a dev machine. That test now skips when the file is
 absent.
 
+### The rename from Forge to Wallwright
+
+A blanket find-and-replace across `src/` did most of it correctly: IPC channels
+became `ww:*` with senders and receivers still matched, environment variables
+became `WALLWRIGHT_*` consistently, and the 80 tests stayed green throughout.
+
+It broke the one place the old name was supposed to survive. `LEGACY_APP_NAME`
+exists to name the _previous_ app so a previous install can be found; the rename
+set it to `'Wallwright'`, which silently disabled the migration and left a
+comment reading "called Wallwright before it was Wallwright". Nothing failed:
+the app started, seeded a default config, and an upgraded show PC would have
+come up with a default layout and signed-out dashboards.
+
+That migration matters because the app name decides the userData folder, which
+holds both the tuned montage and every `persist:` session. Verified after the
+fix, against a staged previous install:
+
+```
+migrated the montage from the previous Forge install
+migrated the saved logins too
+label after migration: 'TUNED ON THE OLD INSTALL'
+partitions carried across: 22
+```
+
+Note that `config/wall.json` partitions were renamed `persist:forge-N` to
+`persist:wall-N` at the same time. A partition name is a storage key, so a
+changed name is a new, empty session. That only affects a fresh install, since a
+real deployment reads its config from userData and the migration copies the old
+one across unchanged.
+
 ### Test coverage, measured
 
 `npm test` runs 80 tests; `npm run coverage` reports on what they reach.
@@ -686,7 +716,7 @@ should leave the same way.
 
 ### The self-test could not fail
 
-`FORGE_SELFTEST=1` is the only thing covering `main.js`, and for most of its life
+`WALLWRIGHT_SELFTEST=1` is the only thing covering `main.js`, and for most of its life
 it only **logged** its results. An assertion that went false printed `false` into
 a log nobody reads, and the process never exited, so a regression was invisible.
 The exit code came from `timeout` killing it.

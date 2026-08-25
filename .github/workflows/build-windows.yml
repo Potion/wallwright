@@ -95,7 +95,7 @@ jobs:
         if: ${{ !startsWith(env.TAG, 'v') }}
         uses: actions/upload-artifact@v7
         with:
-          name: forge-windows-x64
+          name: wallwright-windows-x64
           path: |
             dist/*.exe
             dist/*.zip

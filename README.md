@@ -1,6 +1,6 @@
-# Forge
+# Wallwright
 
-Forge puts live web pages on a big screen, side by side, with no browser
+Wallwright puts live web pages on a big screen, side by side, with no browser
 chrome. Each panel is a real, interactive browser view: real logins, real
 sessions, live data. Not a video feed or a screenshot, so someone standing at
 the wall can actually use the pages.
@@ -90,7 +90,7 @@ also open the selected panel directly.
 
 ## Download
 
-Installers are attached to each [release](https://github.com/Potion/hon-forge/releases):
+Installers are attached to each [release](https://github.com/Potion/hon-wallwright/releases):
 a Windows installer, a Windows zip for machines where an installer cannot be
 run, and macOS disk images for Apple Silicon and Intel.
 
@@ -99,7 +99,7 @@ first time:
 
 - **Windows** may show a SmartScreen warning.
 - **macOS** quarantines the app. Open it once with right-click then Open, or run
-  `xattr -dr com.apple.quarantine /Applications/Forge.app`.
+  `xattr -dr com.apple.quarantine /Applications/Wallwright.app`.
 
 Signing needs certificates that do not exist yet; see [Signing](#signing).
 
@@ -132,12 +132,12 @@ The same routes are a small API, so a show controller could drive the wall:
 Installed, the app keeps its config in the user data directory and reads and
 writes that copy, so a layout arranged at the wall survives a reinstall:
 
-|         |                                                 |
-| ------- | ----------------------------------------------- |
-| Windows | `%APPDATA%\Forge\wall.json`                     |
-| macOS   | `~/Library/Application Support/Forge/wall.json` |
+|         |                                                      |
+| ------- | ---------------------------------------------------- |
+| Windows | `%APPDATA%\Wallwright\wall.json`                     |
+| macOS   | `~/Library/Application Support/Wallwright/wall.json` |
 
-Setting `FORGE_CONFIG` to a path overrides it.
+Setting `WALLWRIGHT_CONFIG` to a path overrides it.
 
 ## Status
 
@@ -180,7 +180,7 @@ npm run dev
 
 # Production-shaped run against config/wall.json (fullscreen).
 npm start
-FORGE_CONFIG=./config/local-demo.json npm start
+WALLWRIGHT_CONFIG=./config/local-demo.json npm start
 
 npm test      # 80 tests: config, layout geometry, control server and page
 npm run coverage # the same, with a coverage report
@@ -196,17 +196,17 @@ In dev, `Cmd/Ctrl+Shift+I` opens devtools for the active panel and
 
 ### Dev flags
 
-With `FORGE_DEV=1`:
+With `WALLWRIGHT_DEV=1`:
 
-| variable                | effect                                           |
-| ----------------------- | ------------------------------------------------ |
-| `FORGE_START_EDIT=1`    | boot straight into the layout editor             |
-| `FORGE_SELECT=<id>`     | select that panel, so the inspector is open      |
-| `FORGE_SELFTEST=1`      | run the panel CRUD smoke test, logging each step |
-| `FORGE_CAPTURE_OUT=...` | capture the wall to a PNG and exit               |
-| `FORGE_LOG_INPUT=1`     | log which panel each click and keypress reaches  |
+| variable                     | effect                                           |
+| ---------------------------- | ------------------------------------------------ |
+| `WALLWRIGHT_START_EDIT=1`    | boot straight into the layout editor             |
+| `WALLWRIGHT_SELECT=<id>`     | select that panel, so the inspector is open      |
+| `WALLWRIGHT_SELFTEST=1`      | run the panel CRUD smoke test, logging each step |
+| `WALLWRIGHT_CAPTURE_OUT=...` | capture the wall to a PNG and exit               |
+| `WALLWRIGHT_LOG_INPUT=1`     | log which panel each click and keypress reaches  |
 
-`FORGE_SELFTEST` exists because nothing in `src/main.js` has unit tests: it
+`WALLWRIGHT_SELFTEST` exists because nothing in `src/main.js` has unit tests: it
 imports electron at module scope. It drives the real path instead, through the
 overlay's bridge and over IPC into the same handlers a click reaches: panel CRUD,
 overlay visibility in every mode, preset save and recall, and the timers that
@@ -233,12 +233,12 @@ toolbar sits at the bottom of the screen for the same reason.
 ## Screenshotting the wall
 
 ```sh
-FORGE_CONFIG=./config/my-wall.json \
-FORGE_CAPTURE_OUT=./wall.png \
+WALLWRIGHT_CONFIG=./config/my-wall.json \
+WALLWRIGHT_CAPTURE_OUT=./wall.png \
 npm run capture
 
 # ... and the editor, with a panel selected
-FORGE_START_EDIT=1 FORGE_SELECT=demo-2 ... npm run capture
+WALLWRIGHT_START_EDIT=1 WALLWRIGHT_SELECT=demo-2 ... npm run capture
 ```
 
 Captures each panel from its own `webContents` plus the overlay, and composites
@@ -247,9 +247,9 @@ it works where `screencapture` cannot run at all: a terminal without that
 permission, a CI runner, a headless show PC. The images at the top of this file
 were made with it.
 
-`FORGE_CAPTURE_SETTLE` (default 7000ms) is how long to wait after load before
+`WALLWRIGHT_CAPTURE_SETTLE` (default 7000ms) is how long to wait after load before
 capturing; raise it for pages with charts or maps that draw late.
-`FORGE_CAPTURE_DPR` (default 1) captures at a higher pixel ratio.
+`WALLWRIGHT_CAPTURE_DPR` (default 1) captures at a higher pixel ratio.
 
 ## Configure
 
@@ -289,7 +289,7 @@ writes this file.
       "url": "https://.../dashboard-1",
       "grid": { "x": 0, "y": 0, "width": 1920, "height": 1080 },
       "zoom": 1.0, // per-panel scale, independent of the others
-      "partition": "persist:forge-1", // persistent session; may be shared with another panel
+      "partition": "persist:wall-1", // persistent session; may be shared with another panel
       "allowedOrigins": [], // empty = permissive; populate to lock navigation down
       "refreshMs": 0, // reload this panel on a timer, so a dashboard cannot go stale
       "recycleMs": 0, // rebuild its renderer on a timer, to hand back memory

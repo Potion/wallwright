@@ -33,7 +33,7 @@
         "height": 1080
       },
       "zoom": 1.0,
-      "partition": "persist:forge-1",
+      "partition": "persist:wall-1",
       "allowedOrigins": []
     },
     {
@@ -47,7 +47,7 @@
         "height": 1080
       },
       "zoom": 1.0,
-      "partition": "persist:forge-2",
+      "partition": "persist:wall-2",
       "allowedOrigins": []
     },
     {
@@ -61,7 +61,7 @@
         "height": 1080
       },
       "zoom": 1.0,
-      "partition": "persist:forge-3",
+      "partition": "persist:wall-3",
       "allowedOrigins": []
     },
     {
@@ -75,7 +75,7 @@
         "height": 1080
       },
       "zoom": 1.0,
-      "partition": "persist:forge-4",
+      "partition": "persist:wall-4",
       "allowedOrigins": []
     }
   ]

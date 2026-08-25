@@ -1,3 +1,10 @@
 node_modules
 dist
 out
+
+# Local editor settings, not ours to format.
+.claude/
+
+# A print-styled document. Prettier reflows inline elements, which changes
+# spacing in the rendered PDF.
+docs/report/comparison.html

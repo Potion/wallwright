@@ -74,8 +74,8 @@ test('a non-string url is still rejected', () => {
 test('default partitions do not collide', () => {
   assert.deepStrictEqual(validateConfig(good()), []);
   const c = withDefaults(good());
-  assert.strictEqual(c.views[0].partition, 'persist:forge-1');
-  assert.strictEqual(c.views[1].partition, 'persist:forge-2');
+  assert.strictEqual(c.views[0].partition, 'persist:wall-1');
+  assert.strictEqual(c.views[1].partition, 'persist:wall-2');
 });
 
 test('missing wall dimensions are reported', () => {
@@ -133,7 +133,7 @@ test('a malformed file fails with a readable message, not a stack trace', () => 
 const os = require('node:os');
 
 function tmpConfig(body) {
-  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'forge-')), 'wall.json');
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'wallwright-')), 'wall.json');
   fs.writeFileSync(f, JSON.stringify(body, null, 2));
   return f;
 }
@@ -280,7 +280,7 @@ test('presets survive defaults, and their views get defaults too', () => {
   const c = withDefaults(withPresets());
   assert.strictEqual(c.presets.length, 1);
   assert.strictEqual(c.presets[0].views[0].zoom, 1);
-  assert.strictEqual(c.presets[0].views[0].partition, 'persist:forge-1');
+  assert.strictEqual(c.presets[0].views[0].partition, 'persist:wall-1');
 });
 
 test('saveViews writes presets alongside the live views', () => {

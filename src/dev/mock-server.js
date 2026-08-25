@@ -9,7 +9,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const PORT = Number(process.env.FORGE_MOCK_PORT || 8787);
+const PORT = Number(process.env.WALLWRIGHT_MOCK_PORT || 8787);
 const ROOT = path.join(__dirname, 'mock');
 
 const TYPES = {
@@ -23,7 +23,7 @@ const TYPES = {
 function handleLogin(req, res, url) {
   const user = url.searchParams.get('user') || 'operator';
   res.writeHead(302, {
-    'Set-Cookie': `forge_mock_session=${encodeURIComponent(user)}; Path=/; Max-Age=86400; SameSite=Lax`,
+    'Set-Cookie': `ww_mock_session=${encodeURIComponent(user)}; Path=/; Max-Age=86400; SameSite=Lax`,
     Location: url.searchParams.get('next') || '/dash-1.html',
   });
   res.end();
@@ -45,12 +45,12 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/whoami') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ user: readCookie(req, 'forge_mock_session') }));
+    return res.end(JSON.stringify({ user: readCookie(req, 'ww_mock_session') }));
   }
 
   if (url.pathname === '/logout') {
     res.writeHead(302, {
-      'Set-Cookie': 'forge_mock_session=; Path=/; Max-Age=0',
+      'Set-Cookie': 'ww_mock_session=; Path=/; Max-Age=0',
       Location: '/dash-1.html',
     });
     return res.end();

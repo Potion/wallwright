@@ -13,7 +13,7 @@
 const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Forge control</title>
+<title>Wallwright control</title>
 <style>
   :root { color-scheme: dark; }
   body { margin:0; padding:20px; background:#0d1117; color:#e6edf3;
@@ -38,7 +38,7 @@ const PAGE = `<!doctype html>
     border-radius:7px; margin-bottom:14px; }
 </style>
 
-<h1>Forge <span id="mode"></span></h1>
+<h1>Wallwright <span id="mode"></span></h1>
 <div class="sub" id="sub"></div>
 <div id="err"></div>
 <div class="row" id="presets"></div>

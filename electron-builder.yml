@@ -1,5 +1,5 @@
-appId: com.potion.forge
-productName: Forge
+appId: com.potion.wallwright
+productName: Wallwright
 copyright: Potion
 
 directories:
@@ -35,7 +35,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Forge
+  shortcutName: Wallwright
 
 # Signing is unconfigured because there is no certificate yet. Once there is,
 # set CSC_LINK and CSC_KEY_PASSWORD in the CI secrets and electron-builder picks

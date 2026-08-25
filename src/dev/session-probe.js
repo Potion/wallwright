@@ -12,7 +12,7 @@
 
 const { app, BaseWindow, WebContentsView } = require('electron');
 
-const BASE = process.env.FORGE_MOCK_BASE || 'http://localhost:8787';
+const BASE = process.env.WALLWRIGHT_MOCK_BASE || 'http://localhost:8787';
 const PARTITION = 'persist:session-probe';
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));

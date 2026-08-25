@@ -1,4 +1,4 @@
-# Forge LED wall - design spec
+# Wallwright LED wall - design spec
 
 ## Goal
 
@@ -108,7 +108,7 @@ saves the whole panel list back to the config file, Shift+Esc discards.
 
 ## Config schema
 
-`config/wall.json` (path overridable via `FORGE_CONFIG`):
+`config/wall.json` (path overridable via `WALLWRIGHT_CONFIG`):
 
 - `wall.width`, `wall.height`, `wall.backgroundColor`, `wall.displayLabel`
 - `idleReturnMs` (0 disables auto-return)

@@ -13,9 +13,10 @@ const electron = require(path.join(ROOT, 'node_modules', 'electron'));
 
 const env = {
   ...process.env,
-  FORGE_DEV: '1',
-  FORGE_SELFTEST: '1',
-  FORGE_CONFIG: process.env.FORGE_CONFIG || path.join(ROOT, 'config', 'selftest.json'),
+  WALLWRIGHT_DEV: '1',
+  WALLWRIGHT_SELFTEST: '1',
+  WALLWRIGHT_CONFIG:
+    process.env.WALLWRIGHT_CONFIG || path.join(ROOT, 'config', 'selftest.json'),
 };
 
 const r = spawnSync(electron, ['.'], { stdio: 'inherit', cwd: ROOT, env });

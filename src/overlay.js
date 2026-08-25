@@ -16,18 +16,18 @@ let guideLayer = null;
 let bandEl = null; // rubber band while drawing a new panel
 let selectedId = null;
 
-window.forge.onState((s) => {
+window.wallwright.onState((s) => {
   current = s;
   if (s.mode !== 'edit') namingPreset = false;
   render();
 });
 
-window.forge.onLayoutEcho(({ id, grid, zoom }) => {
+window.wallwright.onLayoutEcho(({ id, grid, zoom }) => {
   const el = readouts.get(id);
   if (el) el.textContent = fmt(grid, zoom);
 });
 
-window.forge.onSelect((id) => {
+window.wallwright.onSelect((id) => {
   selectedId = id;
   render();
   // A panel that was just created has no URL, so put the caret where the work
@@ -76,7 +76,7 @@ function renderGrid() {
     hs.className = 'hotspot';
     place(hs, v.grid);
     hs.setAttribute('aria-label', 'Activate ' + (v.label || v.id));
-    hs.addEventListener('click', () => window.forge.activate(v.id));
+    hs.addEventListener('click', () => window.wallwright.activate(v.id));
     root.appendChild(hs);
   });
 }
@@ -87,7 +87,7 @@ function renderActive() {
   const back = document.createElement('button');
   back.className = 'back';
   back.textContent = 'Back to grid';
-  back.addEventListener('click', () => window.forge.back());
+  back.addEventListener('click', () => window.wallwright.back());
   root.appendChild(back);
 }
 
@@ -118,7 +118,7 @@ function renderEdit() {
     const st = current.stage;
     const w = Math.round(st.width / 3);
     const h = Math.round(st.height / 3);
-    window.forge.addPanel({
+    window.wallwright.addPanel({
       x: Math.round(st.x + (st.width - w) / 2),
       y: Math.round(st.y + (st.height - h) / 2),
       width: w,
@@ -212,7 +212,7 @@ function renderPresets() {
     const commit = () => {
       const name = input.value.trim();
       namingPreset = false;
-      if (name) window.forge.savePreset(name);
+      if (name) window.wallwright.savePreset(name);
       else render();
     };
     input.addEventListener('keydown', (e) => {
@@ -244,13 +244,13 @@ function renderPresets() {
     // The number is the shortcut that recalls it without opening the editor.
     use.textContent = i < 9 ? `${i + 1}. ${p.name}` : p.name;
     use.title = i < 9 ? `Recall with Ctrl/Cmd+Shift+${i + 1}` : 'Recall';
-    use.addEventListener('click', () => window.forge.applyPreset(p.id));
+    use.addEventListener('click', () => window.wallwright.applyPreset(p.id));
 
     const del = document.createElement('button');
     del.className = 'preset-del';
     del.textContent = '\u00d7';
     del.title = `Delete "${p.name}"`;
-    del.addEventListener('click', () => window.forge.deletePreset(p.id));
+    del.addEventListener('click', () => window.wallwright.deletePreset(p.id));
 
     chip.append(use, del);
     wrap.appendChild(chip);
@@ -289,7 +289,7 @@ function renderInspector() {
     return;
   }
 
-  const commit = (patch) => window.forge.updatePanel(v.id, patch);
+  const commit = (patch) => window.wallwright.updatePanel(v.id, patch);
 
   const field = (labelText, el) => {
     const wrap = document.createElement('label');
@@ -366,14 +366,14 @@ function renderInspector() {
   const open = document.createElement('button');
   open.className = 'insp-open';
   open.textContent = 'Open fullscreen';
-  open.addEventListener('click', () => window.forge.promote(v.id));
+  open.addEventListener('click', () => window.wallwright.promote(v.id));
 
   const del = document.createElement('button');
   del.className = 'insp-del';
   del.textContent = 'Delete panel';
   del.addEventListener('click', () => {
     selectedId = null;
-    window.forge.deletePanel(v.id);
+    window.wallwright.deletePanel(v.id);
   });
 
   box.append(
@@ -597,7 +597,7 @@ function startCreate(e) {
       }
       return;
     }
-    window.forge.addPanel({
+    window.wallwright.addPanel({
       x: Math.round(rect.x),
       y: Math.round(rect.y),
       width: Math.round(rect.w),
@@ -627,7 +627,7 @@ function startDrag(e, view, panel, handle) {
   const aspect = base.w / base.h;
 
   panel.classList.add('dragging');
-  window.forge.dragStart(view.id);
+  window.wallwright.dragStart(view.id);
 
   let pending = null;
   let frame = 0;
@@ -635,7 +635,7 @@ function startDrag(e, view, panel, handle) {
   const flush = () => {
     frame = 0;
     if (!pending) return;
-    window.forge.layout({
+    window.wallwright.layout({
       id: view.id,
       kind,
       // Which edge the gesture drives, so the main process can leave the other
@@ -705,7 +705,7 @@ function startDrag(e, view, panel, handle) {
     flush();
     drawGuides({ x: [], y: [] });
     panel.classList.remove('dragging');
-    window.forge.dragEnd();
+    window.wallwright.dragEnd();
   };
 
   window.addEventListener('pointermove', onMove);
@@ -759,7 +759,10 @@ root.addEventListener('pointerdown', (e) => {
 // only the Back-button corner; the pages report their own activity through
 // content-preload.js.
 ['mousemove', 'mousedown', 'keydown', 'wheel'].forEach((ev) =>
-  window.addEventListener(ev, () => window.forge.activity(), { passive: true, capture: true })
+  window.addEventListener(ev, () => window.wallwright.activity(), {
+    passive: true,
+    capture: true,
+  })
 );
 
 window.addEventListener('keydown', (e) => {
@@ -777,7 +780,7 @@ window.addEventListener('keydown', (e) => {
   // has to be handled here too, not just in the content views.
   if (e.key.toLowerCase() === 'f' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
     e.preventDefault();
-    window.forge.toggleFullscreen();
+    window.wallwright.toggleFullscreen();
     return;
   }
 
@@ -785,14 +788,14 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     const id = selectedId;
     selectedId = null;
-    window.forge.deletePanel(id);
+    window.wallwright.deletePanel(id);
     return;
   }
 
   if (e.key !== 'Escape') return;
-  if (current.mode === 'edit') window.forge.editExit({ discard: e.shiftKey });
+  if (current.mode === 'edit') window.wallwright.editExit({ discard: e.shiftKey });
   // Not back(): the single/double/off policy lives in the main process, so the
   // overlay reports the keypress rather than deciding what it means. Select
   // mode goes through the same route, where Esc cancels without promoting.
-  else if (current.mode === 'active' || current.mode === 'select') window.forge.escape();
+  else if (current.mode === 'active' || current.mode === 'select') window.wallwright.escape();
 });

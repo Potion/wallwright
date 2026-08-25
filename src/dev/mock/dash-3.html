@@ -24,12 +24,12 @@
     <script>
       document.getElementById('sso').onclick = () => {
         document.getElementById('result').textContent = 'popup opened, waiting...';
-        window.open('/idp.html', 'forge-idp', 'width=520,height=640');
+        window.open('/idp.html', 'ww-idp', 'width=520,height=640');
       };
       // The popup posts back here, mirroring a real IdP redirect handshake.
       window.addEventListener('message', (e) => {
-        if (e.data && e.data.forgeIdp) {
-          document.getElementById('result').textContent = 'signed in as ' + e.data.forgeIdp;
+        if (e.data && e.data.wwIdp) {
+          document.getElementById('result').textContent = 'signed in as ' + e.data.wwIdp;
         }
       });
     </script>
