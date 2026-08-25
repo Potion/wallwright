@@ -73,6 +73,10 @@ function openDiagLog() {
 }
 
 const BUNDLED_CONFIG = path.join(__dirname, '..', 'config', 'wall.json');
+// The source image electron-builder turns into the platform icons at packaging
+// time. Nothing reads it at runtime in a shipped build, which is why a dev run
+// otherwise shows the Electron logo.
+const DEV_ICON = path.join(__dirname, '..', 'build', 'icon.png');
 
 // Resolved at startup rather than at module load, because it depends on
 // app.isPackaged and on userData, and because it can create a file.
@@ -415,6 +419,11 @@ function createWall() {
     height: goingFullscreen ? display.bounds.height : config.wall.height,
     frame: false,
     backgroundColor: config.wall.backgroundColor,
+    // Development only. A packaged build gets its icon from the bundle, which
+    // electron-builder generates from build/icon.png; unpackaged, the window and
+    // taskbar show the Electron binary's own icon unless told otherwise, and
+    // build/ is not shipped so this path only exists in a checkout.
+    ...(app.isPackaged ? {} : { icon: DEV_ICON }),
   });
 
   // Applied after construction, not as constructor options. See
@@ -2184,6 +2193,15 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
+    // Same reason as the window icon above: in development the Dock shows
+    // Electron's icon, because the app is running inside Electron's own bundle.
+    if (!app.isPackaged && app.dock && fs.existsSync(DEV_ICON)) {
+      try {
+        app.dock.setIcon(DEV_ICON);
+      } catch (e) {
+        warn(`could not set the dev dock icon: ${e.message}`);
+      }
+    }
     openDiagLog();
     try {
       configPath = resolveConfigPath();
