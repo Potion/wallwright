@@ -9,7 +9,7 @@
     "start": "electron .",
     "mock": "node src/dev/mock-server.js",
     "dev": "node src/dev/dev.js",
-    "test": "node --test test/config.test.js test/layout.test.js",
+    "test": "node --test \"test/**/*.test.js\"",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
     "probe": "electron src/dev/probe.js",
@@ -19,7 +19,8 @@
     "build:mac": "electron-builder --mac --publish never",
     "build:mac:dir": "electron-builder --mac --dir --publish never",
     "capture": "node src/dev/capture.js",
-    "probe:session": "node src/dev/session-probe-run.js"
+    "probe:session": "node src/dev/session-probe-run.js",
+    "coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\""
   },
   "engines": {
     "node": ">=18"

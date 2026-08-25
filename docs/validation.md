@@ -658,17 +658,62 @@ how the gitignored-dev-config test failure was caught, since `config/local*.json
 does not exist outside a dev machine. That test now skips when the file is
 absent.
 
-### Gaps in the automated tests
+### Test coverage, measured
 
-Worth knowing what the 34 passing tests do and do not cover.
+`npm test` runs 80 tests; `npm run coverage` reports on what they reach.
 
-- Covered: config validation and defaults, `saveLayout` round-tripping, and all
-  the clamp and snap geometry in `src/layout.js`.
-- Not covered: everything in `src/main.js`. It imports electron at module scope
-  and has module-level side effects, so the state machine, the Esc policy, the
-  watchdog, and `pickWallDisplay()` have no unit tests. They are only exercised
-  by running the app. If any of those grow, extracting them the way
-  `src/layout.js` was extracted is the cheap way to get them under test.
+| module                  | lines | line % | branch % |
+| ----------------------- | ----- | ------ | -------- |
+| `src/layout.js`         | 105   | 100    | 100      |
+| `src/control-page.js`   | 170   | 100    | 100      |
+| `src/control-server.js` | 107   | 100    | 87       |
+| `src/config.js`         | 286   | 91     | 74       |
+
+That is high, but it covers **19% of the shipped source**. The other 81% has no
+unit tests at all:
+
+| module                                     | lines | why not                                             |
+| ------------------------------------------ | ----- | --------------------------------------------------- |
+| `src/main.js`                              | 1954  | imports electron at module scope, with side effects |
+| `src/overlay.js`                           | 799   | a renderer; needs a DOM and the bridge              |
+| `src/preload.js`, `src/content-preload.js` | 48    | thin electron bridges                               |
+
+The pattern that works is extraction: the snapping geometry moved out to
+`src/layout.js` and went straight to 100%, and `src/control-server.js` was
+written to take its actions as an argument so it could be driven over real HTTP
+with a stand-in. Anything in `main.js` that grows enough to be worth testing
+should leave the same way.
+
+### The self-test could not fail
+
+`FORGE_SELFTEST=1` is the only thing covering `main.js`, and for most of its life
+it only **logged** its results. An assertion that went false printed `false` into
+a log nobody reads, and the process never exited, so a regression was invisible.
+The exit code came from `timeout` killing it.
+
+It now has 20 real assertions, prints `ok` or `FAIL` per line, names what failed,
+and exits non-zero. Verified by deliberately breaking one:
+
+```
+selftest 7: FAIL overlay still frontmost
+selftest FAILED (1): 7: overlay still frontmost
+exit code 1
+```
+
+Because it exits with a code it could gate a build, though it needs a real
+display, so it belongs on the self-hosted runners rather than in the Linux CI
+job.
+
+What it covers: panel add, URL and label change, session sharing, zoom, delete,
+overlay visibility across all four modes, preset save, recall and delete
+including panel reuse, refresh on a timer, the in-use guard, resumption once
+quiet, renderer recycling, and that views stay aligned with config and the
+overlay stays frontmost throughout.
+
+What nothing covers: `pickWallDisplay()`, the Esc policy, fullscreen handling,
+the watchdog's backoff, layout scaling, and the whole of `src/overlay.js`
+including the drag, snap and inspector interactions. Those are only ever
+exercised by hand.
 
 ## Decided: Esc returns to the grid on a single press
 

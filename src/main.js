@@ -1457,7 +1457,15 @@ ipcMain.on('forge:updatePanel', (_e, msg) => {
 //
 //   FORGE_DEV=1 FORGE_SELFTEST=1 npm start
 function selfTest() {
+  // step() reports; check() decides. The first version only logged, so an
+  // assertion that went false printed "false" into a log nobody reads and the
+  // run still looked fine. A smoke test that cannot fail is not a test.
+  const failures = [];
   const step = (n, msg) => log(`selftest ${n}: ${msg}`);
+  const check = (n, label, ok) => {
+    log(`selftest ${n}: ${ok ? 'ok  ' : 'FAIL'} ${label}`);
+    if (!ok) failures.push(`${n}: ${label}`);
+  };
   const ids = () => config.views.map((v) => v.id).join(',');
   const run = (js) => overlay.webContents.executeJavaScript(js, true);
   const soon = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -1481,7 +1489,11 @@ function selfTest() {
       `window.forge.updatePanel(${JSON.stringify(added.id)}, { url: 'https://example.com/', label: 'Added by selftest' })`
     );
     await soon(700);
-    step(3, `after url set: url="${added.url}" label="${added.label}"`);
+    check(
+      3,
+      'url and label applied',
+      added.url === 'https://example.com/' && added.label === 'Added by selftest'
+    );
 
     // The interesting one: sharing a session rebuilds the view, because a
     // partition can only be chosen when a WebContentsView is created.
@@ -1494,22 +1506,22 @@ function selfTest() {
       .filter((v) => v.partition === target.partition)
       .map((v) => v.id);
     step(4, `after sharing session: ${target.partition} used by ${sharers.join(' + ')}`);
-    step(4, `view count still matches config: ${contentViews.length === config.views.length}`);
+    check(4, 'view count still matches config', contentViews.length === config.views.length);
 
     await run(`window.forge.updatePanel(${JSON.stringify(added.id)}, { zoom: 0.5 })`);
     await soon(300);
-    step(5, `after zoom: ${added.zoom}`);
+    check(5, 'zoom applied', added.zoom === 0.5);
 
     await run(`window.forge.deletePanel(${JSON.stringify(added.id)})`);
     await soon(600);
     step(6, `after delete: ${config.views.length} panels: ${ids()}`);
-    step(6, `views and config still aligned: ${contentViews.length === config.views.length}`);
-    step(6, `back to the starting count: ${config.views.length === before}`);
+    check(6, 'views and config still aligned', contentViews.length === config.views.length);
+    check(6, 'back to the starting count', config.views.length === before);
 
     // Overlay must still be frontmost after all that churn, or the wall stops
     // responding to clicks.
     const kids = win.contentView.children;
-    step(7, `overlay still frontmost: ${kids[kids.length - 1] === overlay}`);
+    check(7, 'overlay still frontmost', kids[kids.length - 1] === overlay);
 
     // Whether the overlay is showing is exactly what decides if the panels can
     // be interacted with, so it is worth asserting per mode rather than
@@ -1522,23 +1534,23 @@ function selfTest() {
 
     dockGrid({ animate: false });
     await soon(300);
-    step(8, `grid: overlay hidden (panels interactive): ${vis() === false}`);
+    check(8, 'grid: overlay hidden, so panels are interactive', vis() === false);
 
     enterSelect();
     await soon(300);
-    step(8, `select: overlay shown and full wall: ${vis() && full()}`);
+    check(8, 'select: overlay shown, full wall', vis() && full());
 
     activate(0);
     await soon(400);
-    step(8, `active: overlay shown, shrunk to the back button: ${vis() && !full()}`);
+    check(8, 'active: overlay shown, shrunk to the back button', vis() && !full());
 
     dockGrid({ animate: false });
     await soon(300);
-    step(8, `back to grid: overlay hidden again: ${vis() === false}`);
+    check(8, 'back to grid: overlay hidden again', vis() === false);
 
     enterEdit();
     await soon(300);
-    step(8, `edit: overlay shown and full wall: ${vis() && full()}`);
+    check(8, 'edit: overlay shown, full wall', vis() && full());
     exitEdit({ save: false });
     await soon(300);
 
@@ -1558,12 +1570,16 @@ function selfTest() {
     await run(`window.forge.applyPreset('selftest-a')`);
     await soon(800);
     step(9, `after recall: ${ids()}`);
-    step(9, `matches the saved montage: ${ids() === beforeIds}`);
-    step(9, `views and config aligned: ${contentViews.length === config.views.length}`);
+    check(9, 'recall matches the saved montage', ids() === beforeIds);
+    check(
+      9,
+      'views and config aligned after recall',
+      contentViews.length === config.views.length
+    );
 
     await run(`window.forge.deletePreset('selftest-a')`);
     await soon(400);
-    step(9, `after delete: ${config.presets.length} presets`);
+    check(9, 'preset deleted', config.presets.length === 0);
     exitEdit({ save: false });
     await soon(300);
 
@@ -1578,18 +1594,22 @@ function selfTest() {
     startUpkeep();
 
     await soon(2600);
-    step(10, `idle panel refreshed on its timer: ${lastRefresh.has(upkeepPanel.id)}`);
+    check(10, 'idle panel refreshed on its timer', lastRefresh.has(upkeepPanel.id));
 
     // Now claim it is being used, and confirm the timer leaves it alone.
     const refreshedAt = lastRefresh.get(upkeepPanel.id);
     touched.set(upkeepPanel.id, Date.now());
     await soon(2600);
-    step(10, `in-use panel left alone: ${lastRefresh.get(upkeepPanel.id) === refreshedAt}`);
+    check(10, 'in-use panel left alone', lastRefresh.get(upkeepPanel.id) === refreshedAt);
 
     // And that it resumes once the panel goes quiet again.
     touched.set(upkeepPanel.id, Date.now() - config.recentUseMs - 1000);
     await soon(2600);
-    step(10, `resumes once quiet: ${lastRefresh.get(upkeepPanel.id) !== refreshedAt}`);
+    check(
+      10,
+      'refresh resumes once the panel is quiet',
+      lastRefresh.get(upkeepPanel.id) !== refreshedAt
+    );
 
     // Recycling swaps the view for a new one, which is how the renderer process
     // is actually handed back.
@@ -1599,17 +1619,30 @@ function selfTest() {
     lastRecycle.delete(upkeepPanel.id);
     touched.delete(upkeepPanel.id);
     await soon(2600);
-    step(10, `recycle replaced the view: ${contentViews[0] !== viewBeforeRecycle}`);
-    step(10, `views and config still aligned: ${contentViews.length === config.views.length}`);
+    check(10, 'recycle replaced the view', contentViews[0] !== viewBeforeRecycle);
+    check(
+      10,
+      'views and config aligned after recycle',
+      contentViews.length === config.views.length
+    );
     const kids2 = win.contentView.children;
-    step(10, `overlay still frontmost after recycling: ${kids2[kids2.length - 1] === overlay}`);
+    check(10, 'overlay still frontmost after recycling', kids2[kids2.length - 1] === overlay);
 
     upkeepPanel.recycleMs = 0;
     startUpkeep();
     checkMemory();
 
-    log('selftest done');
-  })().catch((e) => warn('selftest failed:', e.message));
+    if (failures.length) {
+      warn(`selftest FAILED (${failures.length}): ${failures.join('; ')}`);
+    } else {
+      log('selftest passed');
+    }
+    // Exit with a code, so this can gate anything rather than only being read.
+    app.exit(failures.length ? 1 : 0);
+  })().catch((e) => {
+    warn('selftest threw:', e.message);
+    app.exit(1);
+  });
 }
 
 // Dev-only: render the wall and write a single PNG of it, then quit.

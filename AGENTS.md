@@ -130,7 +130,14 @@ and the decisions that need Jeff before some of it can be finalized.
   every later index; resolve it from the spec object with
   `config.views.indexOf(v)` at call time.
 - `src/main.js` has no unit tests, so after changing panel lifecycle behaviour
-  run `FORGE_DEV=1 FORGE_SELFTEST=1 npm start` and read the log.
+  run `FORGE_DEV=1 FORGE_SELFTEST=1 npm start`. It exits non-zero on failure, so
+  check the code, not just the log.
+- New logic that could live without electron should. Extraction is what got
+  `src/layout.js` and `src/control-server.js` to full coverage; anything left in
+  `main.js` is testable only by the self-test.
+- Add a `check()` to the self-test for behaviour you would otherwise verify by
+  eye, and make sure it can actually fail. It once only logged, so nothing ever
+  went red.
 - The control surface is unauthenticated by design and binds to loopback. If
   that ever changes, it needs auth first, not a comment.
 - Anything that reloads a panel on a timer must skip panels in use. `inUse()` is

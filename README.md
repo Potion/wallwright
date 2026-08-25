@@ -182,7 +182,8 @@ npm run dev
 npm start
 FORGE_CONFIG=./config/local-demo.json npm start
 
-npm test      # config and layout geometry
+npm test      # 80 tests: config, layout geometry, control server and page
+npm run coverage # the same, with a coverage report
 npm run lint
 npm run probe # check the Electron view APIs on this platform
 npm run probe:fs # check which fullscreen path covers the display
@@ -206,8 +207,14 @@ With `FORGE_DEV=1`:
 
 `FORGE_SELFTEST` exists because nothing in `src/main.js` has unit tests: it
 imports electron at module scope. It drives the real path instead, through the
-overlay's bridge and over IPC into the same handlers a click reaches, covering
-add, URL change, session sharing, zoom and delete.
+overlay's bridge and over IPC into the same handlers a click reaches: panel CRUD,
+overlay visibility in every mode, preset save and recall, and the timers that
+refresh and recycle panels. It prints `ok` or `FAIL` per assertion and **exits
+non-zero** if any fail, so it can gate a build. It needs a real display.
+
+`npm run coverage` shows the unit tests reach about a fifth of the shipped
+source at close to 100%; the rest is electron-bound and covered only by the
+self-test and by hand. `docs/validation.md` has the breakdown.
 
 ## Platform notes
 
