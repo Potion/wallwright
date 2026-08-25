@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Soak control panel</title>
+    <link rel="stylesheet" href="mock.css" />
+  </head>
+  <body>
+    <!--
+      The control arm of the soak. Nothing here moves: no timers, no animation, no
+      network, no DOM churn. If this panel's renderer grows over three days, the
+      growth is in Electron or in Wallwright, not in a page - and that is the only
+      result that would indict the product rather than somebody's dashboard.
+
+      Deliberately not empty: an empty panel renders the app's built-in placeholder
+      instead, which is a different code path.
+    -->
+    <main>
+      <h1>Static control</h1>
+      <p>
+        This panel is the experiment's control. It has no timers, no animation, no network
+        requests and no DOM changes after load. Its renderer should hold a flat memory line for
+        the length of the run.
+      </p>
+      <p class="muted">
+        If it does not, the growth is in the engine or in the app, not in the content.
+      </p>
+    </main>
+  </body>
+</html>

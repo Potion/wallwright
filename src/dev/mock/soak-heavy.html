@@ -1,0 +1,219 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Soak heavy panel</title>
+    <link rel="stylesheet" href="mock.css" />
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+      #stage {
+        position: relative;
+        width: 100%;
+        height: 100vh;
+        background: #06080b;
+      }
+      canvas {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      #hud {
+        position: absolute;
+        left: 16px;
+        top: 16px;
+        z-index: 3;
+        font:
+          600 28px/1.35 ui-monospace,
+          Menlo,
+          monospace;
+        color: #7ee787;
+        text-shadow: 0 2px 8px #000;
+      }
+      #hud b {
+        color: #f04e23;
+      }
+      #rows {
+        position: absolute;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        width: 40%;
+        z-index: 2;
+        overflow: hidden;
+        font:
+          12px/1.25 ui-monospace,
+          Menlo,
+          monospace;
+        color: #8b949e;
+        background: rgba(13, 17, 23, 0.72);
+        padding: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <!--
+      The bounded-heavy arm. Load without a leak, by construction:
+
+        WebGL   one rotating textured cube, textures allocated once at load
+        2D      a few hundred primitives redrawn every frame
+        DOM     ten rows appended every 50ms, removed from the head so the count is
+                pinned at 500. Nothing retains a detached node and no array grows
+        net     one fetch every 5s, locally
+
+      So if THIS panel's renderer climbs, the growth is the engine under load rather
+      than the content, which is a different finding from a third-party page leaking.
+
+      The HUD is large on purpose: over a multi-day run the only telemetry available
+      without touching the machine is a screenshot, and a frozen renderer that never
+      crashes is invisible in memory data and obvious in a counter that stopped.
+    -->
+    <div id="stage">
+      <canvas id="gl"></canvas>
+      <canvas id="two"></canvas>
+      <div id="rows"></div>
+      <div id="hud">
+        <div><b>SOAK HEAVY</b></div>
+        <div id="clock">--</div>
+        <div>up <span id="up">0</span>s &middot; frame <span id="frames">0</span></div>
+        <div>heap <span id="heap">n/a</span></div>
+        <div>
+          rows <span id="rowcount">0</span> &middot; fetches <span id="fetches">0</span>
+        </div>
+      </div>
+    </div>
+    <script>
+      const t0 = Date.now();
+      let frames = 0;
+      let fetches = 0;
+
+      // ---- WebGL: one cube, textures allocated once ----
+      const glc = document.getElementById('gl');
+      const gl = glc.getContext('webgl');
+      let glOk = !!gl;
+      let prog, buf, tex;
+      if (glOk) {
+        const vs = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(
+          vs,
+          'attribute vec2 p;varying vec2 v;uniform float a;' +
+            'void main(){v=p;float c=cos(a),s=sin(a);' +
+            'gl_Position=vec4(p.x*c-p.y*s,p.x*s+p.y*c,0.,1.);}'
+        );
+        gl.compileShader(vs);
+        const fs = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(
+          fs,
+          'precision mediump float;varying vec2 v;uniform sampler2D t;' +
+            'void main(){gl_FragColor=texture2D(t,v*0.5+0.5);}'
+        );
+        gl.compileShader(fs);
+        prog = gl.createProgram();
+        gl.attachShader(prog, vs);
+        gl.attachShader(prog, fs);
+        gl.linkProgram(prog);
+        gl.useProgram(prog);
+        buf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.bufferData(
+          gl.ARRAY_BUFFER,
+          new Float32Array([-0.6, -0.6, 0.6, -0.6, -0.6, 0.6, 0.6, 0.6]),
+          gl.STATIC_DRAW
+        );
+        const loc = gl.getAttribLocation(prog, 'p');
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+        // Allocated exactly once. A texture per frame is how a WebGL page leaks.
+        const px = new Uint8Array(64 * 64 * 4);
+        for (let i = 0; i < px.length; i += 4) {
+          px[i] = (i / 4) % 255;
+          px[i + 1] = 60;
+          px[i + 2] = 30;
+          px[i + 3] = 255;
+        }
+        tex = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 64, 64, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      }
+
+      // ---- 2D: a few hundred primitives a frame ----
+      const c2 = document.getElementById('two');
+      const ctx = c2.getContext('2d');
+
+      function fit() {
+        for (const c of [glc, c2]) {
+          c.width = c.clientWidth;
+          c.height = c.clientHeight;
+        }
+        if (glOk) gl.viewport(0, 0, glc.width, glc.height);
+      }
+      window.addEventListener('resize', fit);
+      fit();
+
+      function frame() {
+        frames++;
+        const t = (Date.now() - t0) / 1000;
+        if (glOk) {
+          gl.clearColor(0.02, 0.03, 0.04, 1);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+          gl.uniform1f(gl.getUniformLocation(prog, 'a'), t * 0.6);
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        }
+        ctx.clearRect(0, 0, c2.width, c2.height);
+        for (let i = 0; i < 220; i++) {
+          const a = t * 0.7 + i * 0.31;
+          ctx.strokeStyle = i % 3 ? 'rgba(240,78,35,0.35)' : 'rgba(0,229,255,0.25)';
+          ctx.beginPath();
+          ctx.arc(
+            c2.width / 2 + Math.cos(a) * (60 + i * 1.7),
+            c2.height / 2 + Math.sin(a * 1.1) * (40 + i * 1.1),
+            8 + (i % 11),
+            0,
+            Math.PI * 2
+          );
+          ctx.stroke();
+        }
+        document.getElementById('frames').textContent = frames;
+        document.getElementById('up').textContent = Math.round(t);
+        document.getElementById('clock').textContent = new Date().toISOString();
+        if (performance.memory) {
+          document.getElementById('heap').textContent =
+            Math.round(performance.memory.usedJSHeapSize / 1048576) + 'MB';
+        }
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+
+      // ---- DOM churn, pinned at 500 rows ----
+      const rows = document.getElementById('rows');
+      setInterval(() => {
+        for (let i = 0; i < 10; i++) {
+          const d = document.createElement('div');
+          d.textContent =
+            new Date().toISOString() + '  ' + Math.random().toString(36).slice(2, 12);
+          rows.appendChild(d);
+        }
+        // Removed from the head, so the count is bounded and nothing is retained.
+        while (rows.childElementCount > 500) rows.removeChild(rows.firstChild);
+        document.getElementById('rowcount').textContent = rows.childElementCount;
+      }, 50);
+
+      // ---- one local fetch every 5s ----
+      setInterval(() => {
+        fetch('/whoami')
+          .then((r) => r.json())
+          .then(() => {
+            fetches++;
+            document.getElementById('fetches').textContent = fetches;
+          })
+          .catch(() => {});
+      }, 5000);
+    </script>
+  </body>
+</html>

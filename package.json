@@ -23,6 +23,7 @@
     "probe:activity": "node src/dev/activity-probe-run.js",
     "coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\"",
     "selftest": "node src/dev/selftest-run.js",
+    "soak": "node src/dev/soak.js",
     "report": "node src/dev/reports.js"
   },
   "engines": {

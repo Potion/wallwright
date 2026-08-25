@@ -583,6 +583,54 @@ Compositing is compositing at any geometry, so this run stands. A memory soak at
 0.281 scale would not represent a 4K wall's raster and GPU load, so the geometry
 has to be settled before T0 rather than after.
 
+### Pre-registration: the 72-hour soak, thresholds fixed before T0
+
+Written down before the run so the thresholds cannot be chosen after seeing the
+curve. A threshold picked afterwards is not a threshold.
+
+**Machine.** HQ-PROTO-MINI-2, i7-14700, 31.6GB, Windows 11 Pro build 26200.
+Display is a 4K panel mounted in **portrait**, 2160x3840, at 200% scaling, so the
+app gets a 1080x1920 logical window. `config/soak-72h.json` is authored at
+1080x1920 so `wall.scale` is 1.0 and no layout scaling distorts the panels.
+
+**Why that is still representative of a wall.** At 200% scaling Chromium
+rasterises the window at device pixel ratio 2, so the real raster is 2160x3840 =
+**8.29 megapixels**. A 3840x2160 wall is **8.29 megapixels**. The pixel count that
+drives raster memory and GPU load is identical; only the aspect and the panel
+arrangement differ. What does not transfer is the layout shape, and nothing here
+speaks to the real Honeywell dashboards.
+
+**The four arms**, chosen so a leak is attributable rather than merely visible:
+
+| panel     | what it is                                                                                                                                                                                        | if it grows                                                                                   |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `control` | `soak-static.html`: no timers, no animation, no network, no DOM changes after load                                                                                                                | the growth is in Electron or in Wallwright. **The only result that would indict the product** |
+| `heavy`   | `soak-heavy.html`: WebGL cube with textures allocated once, ~220 canvas primitives a frame, DOM pinned at 500 rows by removing from the head, one local fetch every 5s. Leak-free by construction | the growth is the engine under load, not the content                                          |
+| `grafana` | `play.grafana.org`, a real dashboard                                                                                                                                                              | probably the page. Informative, not actionable                                                |
+| `earth`   | `earth.nullschool.net`, WebGL plus live data                                                                                                                                                      | as above                                                                                      |
+
+**Countermeasures are OFF**: `memoryLimitMb: 0`, no `refreshMs`, no `recycleMs`.
+You cannot measure a leak while something is periodically resetting it, and the
+ladder was already proven separately.
+
+**Pass:** slope over the **final 24 hours** at or under **15 MB/hour**, which is
+roughly 5GB over three weeks on a 31.6GB machine. Judged on the final window, not
+the whole run, because Chromium legitimately climbs for hours before it settles, so
+an early fit measures warm-up. The median cross-check must agree in sign and rough
+magnitude; if it does not, the fit is being driven by a spike and neither number is
+trusted. `src/dev/soak-stats.js` refuses to print a verdict at all from fewer than
+30 samples or too short a window, which the harness shake-out earned: seven samples
+over thirty seconds fitted 802 MB/hour while the medians read zero.
+
+**Also fails, whatever the memory did:** any unexpected exit of the main process,
+any panel crash that does not recover inside 60s, any sustained watchdog reload
+cadence, any URL drift, or the `control` arm climbing.
+
+**Invalidating conditions**, agreed in advance: a reboot, a locked or blanked
+screen, any RDP session, any human input, or the mock server dying. Each is
+detectable in the record afterwards, and a run that hits one is reported as partial
+rather than quietly stitched together.
+
 ### Panel CRUD works end to end
 
 `src/main.js` has no unit tests, so `WALLWRIGHT_SELFTEST=1` drives the real path:
