@@ -15,6 +15,18 @@
   "transitionMs": 220,
   "escToGrid": "single",
   "escDoubleMs": 600,
+  "_memoryBaseline": {
+    "status": "NOT MEASURED YET - memoryLimitMb stays 0 until it is",
+    "soak": "fill in: date, hours, machine, panel lineup",
+    "p95_24h": 0,
+    "peak_72h": 0,
+    "driftMbPerHour": 0,
+    "rule": "memoryLimitMb = roundUp250(max(1.35*p95_24h, 1.15*peak_72h)); memoryHardLimitMb = roundUp250(max(2*p95_24h, memoryLimitMb+750)). See memoryLimitFromBaseline() in src/upkeep.js.",
+    "why": "A limit inside the normal operating band is worse than no limit: it rebuilds a panel on every check. Measured with a limit under the baseline, memory went from 1513MB to 1885MB while recycling every five seconds. See docs/validation.md.",
+    "measured_so_far": "four live public dashboards on the dev machine, macOS: 1513MB total (Tab 1143, Browser 169, GPU 131, Utility 70). Not the show PC, not the real dashboards, one instantaneous sample."
+  },
+  "memoryCheckMs": 60000,
+  "memoryLimitMb": 0,
   "backButton": {
     "x": 24,
     "y": 24,

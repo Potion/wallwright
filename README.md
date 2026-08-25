@@ -115,8 +115,14 @@ walking to the wall or opening a remote desktop session:
   anyone touched it
 - **where a panel actually is**, flagged in red when it has drifted from its
   configured URL
+- how much memory each panel is using, the split across the browser, renderer
+  and GPU processes, and the peak since launch
+- cumulative counts that survive a weekend: crashes, watchdog reloads and
+  rebuilds per panel. A panel that crashed and recovered overnight still says so
+- whether the wall is over its memory limit, and whether a panel has been given
+  up on and is showing an error
 - recall a saved montage, change a panel's URL, open one fullscreen, reload one
-  or all of them
+  or all of them, or rebuild one
 
 It is **unauthenticated**, and it can drive the wall. It binds to `127.0.0.1` by
 default for that reason. Setting `control.host` to anything else puts an
@@ -124,8 +130,14 @@ unauthenticated remote control on the network, which is a decision to make on
 purpose; the app logs a warning when you do.
 
 The same routes are a small API, so a show controller could drive the wall:
-`GET /api/status`, and `POST` to `/api/preset`, `/api/panel`, `/api/promote` and
-`/api/reload`.
+`GET /api/status`, and `POST` to `/api/preset`, `/api/panel`, `/api/promote`,
+`/api/reload` and `/api/recycle`.
+
+`/api/reload` reloads a panel's page; `/api/recycle` rebuilds its view, which is
+the only thing that hands the renderer process back to the operating system. The
+difference matters: a reload keeps `sessionStorage` and a rebuild does not, so
+`/api/recycle` is also how you find out whether a given dashboard survives being
+recycled before turning `recycleMs` on for it.
 
 ## Where the montage is stored
 
@@ -278,7 +290,19 @@ writes this file.
   "idleResetUrls": false, // on idle, also put panels back to their configured URLs
   "recentUseMs": 60000, // how long a touched panel is protected from a watchdog reload
   "memoryCheckMs": 60000, // how often to log process memory (0 = never)
-  "memoryLimitMb": 0, // past this, recycle the least recently used idle panel (0 = off)
+  "memoryLimitMb": 0, // past this, start recycling idle panels (0 = report only)
+  "memoryHardLimitMb": 0, // past this, sweep the whole wall (0 = off)
+  "minRecycleIntervalMs": 60000, // a panel cannot be rebuilt more often than this
+  "memoryReduceMinMb": 50, // what counts as a rebuild having reclaimed something
+  "memoryGiveUpAfter": 3, // rebuilds without reclaiming before it stops trying
+  "maxDeferMs": 900000, // upkeep may be put off this long, then it proceeds anyway
+  "memoryRelaunch": false, // last resort: restart the app. Off, and see AGENTS.md
+  "watchdog": {
+    // A failing panel is retried five times, then its view is rebuilt, then it
+    // shows why it failed and retries every ten minutes.
+    "maxAttempts": 5,
+    "retryMs": 600000,
+  },
   "control": { "port": 0, "host": "127.0.0.1" }, // 0 = no control surface
   "backButton": { "x": 24, "y": 24, "width": 176, "height": 56 },
   "views": [
