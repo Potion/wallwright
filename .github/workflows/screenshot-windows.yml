@@ -1,0 +1,71 @@
+name: Screenshot Windows
+
+# Answers the last open architectural question: does the transparent overlay
+# composite over the live panels on Windows?
+#
+# Everything else about Windows is already covered. The probes confirm the view
+# APIs and the fullscreen paths, and the self-test confirms main.js behaves. All
+# of that proves the app RUNS. None of it proves the wall LOOKS right, because
+# nothing has ever looked at it.
+#
+# The app's own capture tool cannot answer this either: it composites the panels
+# and the overlay onto a canvas itself, which is precisely the step being tested.
+# Only a screen grab taken by the operating system shows what the OS actually
+# composited, which is why this uses one.
+on:
+  workflow_dispatch:
+
+jobs:
+  screenshot:
+    runs-on: [self-hosted, Windows]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - run: npm ci
+
+      - name: Run the wall and grab the screen
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+
+          # Edit mode on purpose. The overlay is invisible in grid mode by
+          # design, so a grid screenshot proves nothing either way. In edit mode
+          # it draws panel frames, handles and a toolbar. If those appear ON TOP
+          # of the panel content, compositing works. If the screen is blank or
+          # the panels are hidden behind an opaque layer, it does not.
+          $env:WALLWRIGHT_DEV = '1'
+          $env:WALLWRIGHT_START_EDIT = '1'
+          $env:WALLWRIGHT_CONFIG = 'config/screenshot.json'
+
+          $electron = (node -e "console.log(require('electron'))")
+          Write-Host "electron: $electron"
+          $proc = Start-Process -FilePath $electron -ArgumentList '.' -PassThru
+
+          try {
+            Start-Sleep -Seconds 20  # let it start, go fullscreen and settle
+
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            Write-Host "screen: $($bounds.Width)x$($bounds.Height)"
+            $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+            $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            New-Item -ItemType Directory -Force -Path shot | Out-Null
+            $bmp.Save("$PWD\shot\windows-wall.png", [System.Drawing.Imaging.ImageFormat]::Png)
+            $gfx.Dispose(); $bmp.Dispose()
+            Write-Host "saved shot\windows-wall.png"
+          }
+          finally {
+            if ($proc -and -not $proc.HasExited) { Stop-Process -Id $proc.Id -Force }
+          }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-wall-screenshot
+          path: shot/*.png
+          if-no-files-found: error

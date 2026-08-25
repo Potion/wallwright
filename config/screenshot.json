@@ -1,0 +1,34 @@
+{
+  "_comment": "Config for the Windows visual check. Fullscreen, because that is the real path, and every panel has an empty url so it renders the built-in placeholder and needs no network. The point is not the page content: it is whether the transparent overlay composites over the panels.",
+  "wall": {
+    "width": 1280,
+    "height": 720,
+    "backgroundColor": "#000000",
+    "kiosk": true,
+    "fullscreen": true,
+    "fitToDisplay": true
+  },
+  "idleReturnMs": 0,
+  "showHotspotHint": true,
+  "transitionMs": 0,
+  "escToGrid": "single",
+  "backButton": { "x": 24, "y": 24, "width": 176, "height": 56 },
+  "views": [
+    {
+      "id": "left",
+      "label": "Left panel",
+      "url": "",
+      "grid": { "x": 0, "y": 0, "width": 640, "height": 720 },
+      "zoom": 1.0,
+      "partition": "persist:shot-left"
+    },
+    {
+      "id": "right",
+      "label": "Right panel",
+      "url": "",
+      "grid": { "x": 640, "y": 0, "width": 640, "height": 720 },
+      "zoom": 1.0,
+      "partition": "persist:shot-right"
+    }
+  ]
+}
