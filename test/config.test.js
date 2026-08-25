@@ -394,3 +394,78 @@ test('memoryCheckMs of 0 is legal and means the check is off', () => {
   assert.deepStrictEqual(validateConfig(c), []);
   assert.strictEqual(withDefaults(c).memoryCheckMs, 0);
 });
+
+test('the upkeep and ladder settings are validated as a family', () => {
+  // The table in config.js exists so that adding a knob cannot mean forgetting to
+  // check it, which is exactly how memoryCheckMs stayed unchecked.
+  const keys = [
+    'maxDeferMs',
+    'memoryHardLimitMb',
+    'memoryForceAfterMs',
+    'memoryHardForChecks',
+    'minRecycleIntervalMs',
+    'memoryReduceMinMb',
+    'memoryGiveUpAfter',
+    'minUptimeMs',
+    'maxRelaunches',
+    'presenceGraceMs',
+  ];
+  for (const key of keys) {
+    const c = good();
+    c[key] = -1;
+    assert.match(validateConfig(c).join('\n'), new RegExp(key), `${key} rejects -1`);
+    const s = good();
+    s[key] = '900';
+    assert.match(validateConfig(s).join('\n'), new RegExp(key), `${key} rejects a string`);
+    const ok = good();
+    ok[key] = 0;
+    assert.deepStrictEqual(validateConfig(ok), [], `${key} accepts 0 as off`);
+  }
+});
+
+test('memoryRelaunch is a boolean, and defaults to off', () => {
+  const c = good();
+  c.memoryRelaunch = 'yes';
+  assert.match(validateConfig(c).join('\n'), /memoryRelaunch/);
+  assert.strictEqual(withDefaults(good()).memoryRelaunch, false);
+});
+
+test('the watchdog block is validated and merged over the defaults', () => {
+  const bad = good();
+  bad.watchdog = { maxAttempts: 'five' };
+  assert.match(validateConfig(bad).join('\n'), /watchdog.maxAttempts/);
+
+  const notAnObject = good();
+  notAnObject.watchdog = 7;
+  assert.match(validateConfig(notAnObject).join('\n'), /watchdog must be an object/);
+
+  const partial = good();
+  partial.watchdog = { maxAttempts: 2 };
+  const w = withDefaults(partial).watchdog;
+  assert.strictEqual(w.maxAttempts, 2, 'the override wins');
+  assert.strictEqual(w.maxDelayMs, 30000, 'the rest still defaults');
+  assert.strictEqual(w.escalateToRecycle, true);
+});
+
+test('neverRecycle is per panel, boolean, and round-trips only when set', () => {
+  const c = good();
+  c.views[0].neverRecycle = 'sometimes';
+  assert.match(validateConfig(c).join('\n'), /neverRecycle/);
+
+  const ok = good();
+  ok.views[0].neverRecycle = true;
+  assert.deepStrictEqual(validateConfig(ok), []);
+  const d = withDefaults(ok);
+  assert.strictEqual(d.views[0].neverRecycle, true);
+  assert.strictEqual(d.views[1].neverRecycle, false, 'defaults to off');
+
+  const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'wallwright-')), 'wall.json');
+  fs.writeFileSync(f, JSON.stringify(ok));
+  saveViews(f, d.views);
+  const written = JSON.parse(fs.readFileSync(f, 'utf8'));
+  assert.strictEqual(written.views[0].neverRecycle, true);
+  assert.ok(
+    !('neverRecycle' in written.views[1]),
+    'the default is not written back as if it had been authored'
+  );
+});

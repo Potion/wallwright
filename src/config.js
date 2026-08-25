@@ -23,6 +23,30 @@ function loadConfig(file) {
   return withDefaults(parsed);
 }
 
+// Durations and counts that share one rule: a finite number, zero or more, where
+// zero disables. Kept as a table so adding a knob cannot mean forgetting to
+// validate it, which is how memoryCheckMs ended up unchecked while every setting
+// around it was covered.
+const NON_NEGATIVE = {
+  maxDeferMs: 'how long upkeep may be deferred before it proceeds anyway; 0 = forever',
+  memoryHardLimitMb: 'the point past which the whole wall is swept; 0 = no hard limit',
+  memoryForceAfterMs: 'how long memory pressure must persist before overriding in-use',
+  memoryHardForChecks: 'consecutive checks over the hard limit before sweeping',
+  minRecycleIntervalMs: 'the cooldown between rebuilds of one panel',
+  memoryReduceMinMb: 'what counts as a recycle having reclaimed something',
+  memoryGiveUpAfter: 'recycles without reclaiming before giving up; 0 = never give up',
+  minUptimeMs: 'no relaunch before this, so a bad limit cannot become a restart loop',
+  maxRelaunches: 'how many times the ladder may restart the app',
+  presenceGraceMs: 'recent pointer motion blocks a relaunch for this long',
+};
+
+const WATCHDOG_NON_NEGATIVE = {
+  baseDelayMs: 'first retry delay, doubling from there',
+  maxDelayMs: 'the cap on that backoff',
+  maxAttempts: 'reloads before escalating to a rebuild; 0 = unlimited',
+  retryMs: 'how long an unrecoverable panel waits before trying again; 0 = never',
+};
+
 // Returns a list of human-readable problems. A bad config must fail here with a
 // readable message rather than throwing a stack trace on a show floor.
 function validateConfig(c) {
@@ -95,6 +119,12 @@ function validateConfig(c) {
     if (v.allowedOrigins !== undefined && !Array.isArray(v.allowedOrigins)) {
       p.push(`${at}.allowedOrigins must be an array of origins`);
     }
+    // Exempts a panel from every automatic rebuild. For a dashboard that keeps
+    // its token in sessionStorage, where a recycle is a logout, that is a
+    // decision to make here rather than discover on the wall at 3am.
+    if (v.neverRecycle !== undefined && typeof v.neverRecycle !== 'boolean') {
+      p.push(`${at}.neverRecycle must be true or false`);
+    }
   });
 
   if (
@@ -125,6 +155,36 @@ function validateConfig(c) {
     !(Number.isFinite(c.memoryCheckMs) && c.memoryCheckMs >= 0)
   ) {
     p.push('memoryCheckMs must be a number >= 0 (0 disables the check)');
+  }
+  // The upkeep and memory-ladder settings. A table rather than a dozen
+  // near-identical blocks: every one of them is a duration or a count, and the
+  // check is the same. 0 means "off" for all of them, which is why the shipped
+  // config can leave them out entirely.
+  for (const [key, note] of Object.entries(NON_NEGATIVE)) {
+    if (c[key] !== undefined && !(Number.isFinite(c[key]) && c[key] >= 0)) {
+      p.push(`${key} must be a number >= 0 (${note})`);
+    }
+  }
+  if (c.memoryRelaunch !== undefined && typeof c.memoryRelaunch !== 'boolean') {
+    p.push('memoryRelaunch must be true or false');
+  }
+  if (c.watchdog !== undefined) {
+    if (typeof c.watchdog !== 'object' || c.watchdog === null) {
+      p.push('watchdog must be an object');
+    } else {
+      for (const [key, note] of Object.entries(WATCHDOG_NON_NEGATIVE)) {
+        const v = c.watchdog[key];
+        if (v !== undefined && !(Number.isFinite(v) && v >= 0)) {
+          p.push(`watchdog.${key} must be a number >= 0 (${note})`);
+        }
+      }
+      if (
+        c.watchdog.escalateToRecycle !== undefined &&
+        typeof c.watchdog.escalateToRecycle !== 'boolean'
+      ) {
+        p.push('watchdog.escalateToRecycle must be true or false');
+      }
+    }
   }
   if (c.control !== undefined) {
     if (typeof c.control !== 'object' || c.control === null) {
@@ -224,6 +284,38 @@ function withDefaults(c) {
     // considered to have ballooned. 0 disables the check entirely.
     memoryCheckMs: c.memoryCheckMs ?? 60000,
     memoryLimitMb: c.memoryLimitMb ?? 0,
+    // Upkeep may be put off while a panel is in use, but not indefinitely: with
+    // no ceiling, "never touch a panel someone is using" can become "never touch
+    // this panel", and under memory pressure the wall has no way back.
+    maxDeferMs: c.maxDeferMs ?? 900000,
+    // The rest of the ladder. All inert until memoryLimitMb is set, which waits
+    // on a measured baseline: see docs/validation.md and memoryLimitFromBaseline
+    // in src/upkeep.js. A limit inside the normal operating band is worse than
+    // none, because it rebuilds a panel on every check.
+    memoryHardLimitMb: c.memoryHardLimitMb ?? 0,
+    memoryForceAfterMs: c.memoryForceAfterMs ?? 300000,
+    memoryHardForChecks: c.memoryHardForChecks ?? 2,
+    minRecycleIntervalMs: c.minRecycleIntervalMs ?? 60000,
+    memoryReduceMinMb: c.memoryReduceMinMb ?? 50,
+    memoryGiveUpAfter: c.memoryGiveUpAfter ?? 3,
+    // Off. Reachable only after a full sweep has proved the growth is not in the
+    // renderers, and even then a wall that vanishes mid-demo is a worse failure
+    // than a wall using a lot of RAM. There is no supervisor to bring it back.
+    memoryRelaunch: c.memoryRelaunch ?? false,
+    minUptimeMs: c.minUptimeMs ?? 600000,
+    maxRelaunches: c.maxRelaunches ?? 3,
+    presenceGraceMs: c.presenceGraceMs ?? 60000,
+    watchdog: {
+      baseDelayMs: 1000,
+      maxDelayMs: 30000,
+      // Past this the ladder escalates to a rebuild, then to a slow retry. It
+      // used to be unbounded, so a permanently broken URL reloaded every 30
+      // seconds for as long as the exhibit ran.
+      maxAttempts: 5,
+      retryMs: 600000,
+      escalateToRecycle: true,
+      ...(c.watchdog || {}),
+    },
     // A small HTTP surface for administrators: status, and the same actions the
     // wall keyboard can take. Off unless a port is set, and bound to loopback
     // unless told otherwise, because it is unauthenticated.
@@ -246,6 +338,7 @@ function withDefaults(c) {
     views: c.views.map((v, i) => ({
       zoom: 1,
       partition: `persist:wall-${i + 1}`,
+      neverRecycle: false,
       ...v,
     })),
   };
@@ -288,6 +381,7 @@ function serializeView(v) {
   out.partition = v.partition;
   if (v.refreshMs) out.refreshMs = v.refreshMs;
   if (v.recycleMs) out.recycleMs = v.recycleMs;
+  if (v.neverRecycle) out.neverRecycle = true;
   if (Array.isArray(v.allowedOrigins) && v.allowedOrigins.length) {
     out.allowedOrigins = v.allowedOrigins;
   }
