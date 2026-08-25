@@ -713,11 +713,19 @@ screen count:        1
  console        1  Conn             <- a real desktop, out of reach
 ```
 
+It is worse than that, and the second half explains why re-registering the runner
+alone would not help: **nobody is signed in**. `query user` returns "No User
+exists for \*" and `explorer.exe` is not running, so there is no desktop
+anywhere on the machine. The console session is sitting at the sign-in screen,
+and autologon is disabled.
+
 Two consequences. The probes and the self-test all ran against that 1024x768
 pseudo-display, so they establish that `main.js` behaves and the view APIs work
-on Windows, and say nothing about what the wall looks like. And the fix is to
-register the runner to run interactively in the console session, after which the
-existing workflow captures the wall with no change to it.
+on Windows, and say nothing about what the wall looks like. And the fix has two
+parts, automatic sign-in and an interactive runner, which is a change to shared
+infrastructure rather than to this project. `docs/windows-runner.md` has the
+procedure, the trade-off, and the cheaper alternative of simply running the app
+on any Windows machine with a display.
 
 ### Test coverage, measured
 

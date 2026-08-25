@@ -347,6 +347,10 @@ Four GitHub Actions workflows:
   runners bill at 2x on a private repo.
 - **Build macOS** (`build-mac.yml`) - same triggers. macOS runners bill at 10x,
   so this one especially is not on every push.
+- **Screenshot Windows** (`screenshot-windows.yml`) - manual. Photographs the
+  wall on a Windows machine, which is the only way to confirm the overlay
+  composites there. It cannot run while the runner is a service with nobody
+  signed in; see `docs/windows-runner.md`.
 - **Probe Windows** (`probe-windows.yml`) - manual. Runs the two Electron probes
   on a Windows runner to answer open platform questions in
   `docs/validation.md`. A runner is not the show PC, so treat it as a signal
