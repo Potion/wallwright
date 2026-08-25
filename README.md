@@ -377,3 +377,6 @@ and each uploads its own artifacts.
 - `config/wall.json` - layout and content config.
 - `electron-builder.yml` - packaging. `build/icon.png` is the source image.
 - `docs/validation.md` - what has been observed running, and what has not.
+- `docs/identity.md` - the name, the mark, the palette, and where branding is
+  allowed to appear. `npm run icon` regenerates `build/icon.png` from
+  `src/dev/make-icon.js`.
