@@ -608,32 +608,12 @@ macOS passing does not settle the target platform. This group is the real risk.
       from a quarantined download, which is the path anyone else will take.
 - [ ] **Auto-launch on boot and crash restart.** Not built. Required for
       unattended operation.
-- [ ] **Overlay alpha compositing on Windows.** Not answered yet, and the reason
-      is fixable. An automated screen grab on the self-hosted Windows runner
-      fails with "the handle is invalid". The machine is not the problem: it has
-      a console session, connected. The runner is the problem. It runs as a
-      service in **session 0**, which Windows isolates from the interactive
-      desktop, so it cannot see or capture session 1. The diagnostic step in
-      `screenshot-windows.yml` reports this directly:
-
-      ```
-                  UserInteractive:     False
-                  process session id:  0
-                  screen count:        1
-                    WinDisc 1024x768 primary=True     <- disconnected pseudo-display
-
-                   SESSIONNAME   ID  STATE
-                  >services       0  Disc
-                   console        1  Conn             <- a real desktop, out of reach
-                  ```
-
-                  Two consequences. The Windows self-test and the probes all ran against that
-                  1024x768 pseudo-display, so they prove logic and API behaviour, not
-                  rendering. And the fix is infrastructure, not code: run the runner
-                  interactively in the console session instead of as a service, and the
-                  existing workflow captures the wall unchanged. Failing that, someone runs
-                  `npm start` on a Windows machine and looks at it.
-
+- [ ] **Overlay alpha compositing on Windows.** Still open, and the blocker is
+      infrastructure rather than code. See "Why CI cannot photograph the wall"
+      above: the runner is a service in session 0 and cannot reach the desktop.
+      Either run the runner interactively in the console session, and the
+      existing workflow captures the wall unchanged, or run `npm start` on a
+      Windows machine and look at it.
 - [ ] **Re-run the probes on the real show PC.** CI answered them on a 1024x768
       virtual display. Confirm on the actual hardware and wall resolution.
 - [ ] **Display targeting.** Set `wall.displayLabel` or `wall.displayId` to the
@@ -712,6 +692,32 @@ Note that `config/wall.json` partitions were renamed `persist:forge-N` to
 changed name is a new, empty session. That only affects a fresh install, since a
 real deployment reads its config from userData and the migration copies the old
 one across unchanged.
+
+### Why CI cannot photograph the wall
+
+An automated screen grab on the self-hosted Windows runner fails with "the
+handle is invalid". The machine is not the problem. It has a console session,
+connected. The runner is: it runs as a service in Windows **session 0**, which is
+isolated from the interactive desktop, so it can neither see nor capture session
+
+1. The diagnostic step in `screenshot-windows.yml` reports it directly:
+
+```
+UserInteractive:     False
+process session id:  0
+screen count:        1
+  WinDisc 1024x768 primary=True     <- disconnected pseudo-display
+
+ SESSIONNAME   ID  STATE
+>services       0  Disc
+ console        1  Conn             <- a real desktop, out of reach
+```
+
+Two consequences. The probes and the self-test all ran against that 1024x768
+pseudo-display, so they establish that `main.js` behaves and the view APIs work
+on Windows, and say nothing about what the wall looks like. And the fix is to
+register the runner to run interactively in the console session, after which the
+existing workflow captures the wall with no change to it.
 
 ### Test coverage, measured
 
