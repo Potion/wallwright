@@ -266,10 +266,12 @@
     but it is not a commitment. <span class="tag tag-v">verified as a claim, not as behaviour</span>
   </li>
   <li>
-    Wallwright's overlay compositing on Windows. An automated check was attempted and
-    cannot work: the build runner is registered as a Windows service, so it has no
-    desktop to photograph. This can only be settled by running the app on a Windows
-    machine with someone logged in. It remains the largest open risk in the project.
+    Wallwright's overlay compositing on Windows. An automated check was attempted. The
+    build machine has a connected desktop, but the runner runs as a service in Windows
+    session 0, which is isolated from it, so it cannot photograph the screen. The fix
+    is to run the runner in the console session rather than as a service; short of
+    that, someone runs the app on a Windows machine and looks at it. It remains the
+    largest open risk in the project.
   </li>
 </ul>
 

@@ -3,11 +3,15 @@ name: Screenshot Windows
 # Tries to answer the last open architectural question: does the transparent
 # overlay composite over the live panels on Windows?
 #
-# IT CANNOT RUN ON THE CURRENT RUNNER. The self-hosted Windows runner is
-# registered as a service, so it has no interactive desktop and CopyFromScreen
-# fails with "the handle is invalid". Kept because it works unchanged on any
-# Windows machine with someone logged in, which is where this question has to be
-# settled anyway.
+# IT CANNOT RUN WHILE THE RUNNER IS A SERVICE. The machine has a connected
+# console session; the runner does not live in it. A service runs in Windows
+# session 0, which is isolated from the interactive desktop, so CopyFromScreen
+# fails with "the handle is invalid" and every screen query sees a 1024x768
+# disconnected pseudo-display instead of the real one.
+#
+# Register the runner to run interactively in the console session and this
+# workflow captures the wall unchanged. The diagnostic step below prints exactly
+# which situation the machine is in.
 #
 # Everything else about Windows is already covered. The probes confirm the view
 # APIs and the fullscreen paths, and the self-test confirms main.js behaves. All
@@ -95,7 +99,7 @@ jobs:
             }
             catch {
               # "The handle is invalid" means there is no desktop to copy from.
-              Write-Host "::error::This runner has no interactive desktop, so the screen cannot be captured. A Windows runner registered as a service has no session attached. Compositing can only be checked on a Windows machine with someone logged in: the show PC, or any desktop with a display."
+              Write-Host "::error::Cannot capture the screen. See the diagnostic step above: if the session id is 0 the runner is a service and is isolated from the desktop, even though the machine has one. Run the runner interactively in the console session, or check compositing by hand on a Windows machine."
               throw
             }
             New-Item -ItemType Directory -Force -Path shot | Out-Null
