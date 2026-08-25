@@ -72,10 +72,20 @@ with a packaged build, editor chrome and an inspector drawn over live page conte
 See "Overlay compositing on Windows: WORKS" in `docs/validation.md`. None of the
 `SPEC.md` fallbacks are needed, and the build-versus-buy question stays closed.
 
-**What is unverified now is longevity, not architecture.** Nothing has run for more
-than a few hours, and the memory countermeasure ships switched off because the
-number that would engage it has to come from a measured baseline. That is the soak,
-and it is the next thing.
+**What is unverified now is longevity, not architecture.** The memory
+countermeasure ships switched off because the number that would engage it has to
+come from a measured baseline.
+
+**A 72-hour soak is IN FLIGHT.** Started 2026-08-25T13:24:29Z on HQ-PROTO-MINI-2,
+ending Friday morning. `docs/soak-run.md` is the runbook: what is running, how to
+read it without disturbing it, how to harvest and tear down, and what to do with
+the numbers. Read that first if you are picking this up.
+
+Two things to know before touching that machine. It belongs to another project, and
+`FCATWallLauncher` and `FCATSoakSampler` are disabled for the duration and are
+re-enabled by the teardown script. And **do not RDP to it**: a remote session
+hijacks console session 1 and blanks the physical display, which is a
+pre-registered invalidating condition.
 
 Parked, and now largely moot: making the self-hosted runner photograph the wall.
 The question it existed to answer has been answered another way, on a machine that
@@ -86,12 +96,12 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
 
 ## Build / harden next (TODO)
 
-1. **The sustained run.** Now the highest-value open item, and the only one that
-   can set `memoryLimitMb`, which ships at 0 precisely because guessing it is worse
-   than leaving it off. Needs a sampler, a panel lineup that separates an app leak
-   from a page leak, and a machine whose geometry represents a wall: HQ-PROTO-MINI-2
-   is a portrait touch display at 200% scaling, so a soak there would run at 0.281
-   scale. See the plan and `docs/validation.md`.
+1. **Finish the soak.** It is running; see `docs/soak-run.md`. When it ends:
+   harvest before tearing down, judge the final 24 hours against the pre-registered
+   15 MB/hour, quantify the workingSetSize versus private-bytes gap at the plateau,
+   and set `memoryLimitMb` from the rule in `config/wall.json` `_memoryBaseline`
+   rather than by guessing. A limit inside the normal operating band was measured
+   taking memory _up_, from 1513 to 1885MB.
 2. **Walk the checklist in `docs/validation.md` "Still to verify".** Grouped by
    where each check can be done: (A) on the dev machine now, (B) blocked on the
    real dashboard URLs, (C) needs the show PC.
