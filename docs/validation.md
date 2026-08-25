@@ -631,6 +631,60 @@ screen, any RDP session, any human input, or the mock server dying. Each is
 detectable in the record afterwards, and a run that hits one is reported as partial
 rather than quietly stitched together.
 
+### The 72-hour run: STARTED 2026-08-25T13:24:29Z
+
+Live on HQ-PROTO-MINI-2 as of that timestamp, from git `ddafb04` (shipped source
+identical to the harness commit: everything after it touched only `src/dev`,
+config, docs and tests, and `src/dev` is excluded from the package). Artifact
+`Wallwright-0.1.1-x64.zip`, sha256 `020be292...`, hash-verified after transfer.
+
+```
+layout 1080x1920 in a 1080x1920 window, 1:1
+matched display by 1080x1920: "SL4364K"
+```
+
+`wall.scale` is exactly 1.0, so no layout scaling distorts the panels, and the app
+matched the display by resolution rather than falling back to primary.
+
+**At T0**: 1380MB total, `Tab 765, GPU 427, Browser 119, Utility 68`. Per panel,
+each in its own renderer: `control` 73MB, `heavy` 99MB, `grafana` 250MB,
+`earth` 128MB. Zero crashes, zero failed loads, zero watchdog reloads.
+
+**Three recorders**, all Scheduled Tasks rather than SSH children, because Windows
+OpenSSH kills the whole process tree on session end:
+
+| task          | every | writes                                                                                                                                                                    |
+| ------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SoakSampler` | 60s   | the app's own `/api/status`: totals, per-type split, per-panel pid and memory, every cumulative counter. CSV, per-panel CSV, raw JSONL, and a summary rewritten each poll |
+| `SoakProc`    | 60s   | the OS-side series: working set, **private bytes**, handles, threads, available MB, commit %, and a CPU delta so a throttled app shows as a cliff                         |
+| `SoakGrab`    | 30min | an OS-level screen grab at half size                                                                                                                                      |
+
+The two memory series already show why both are needed. At the same instant:
+
+```
+app  (workingSetSize, summed)  1380 MB
+OS   (PrivateMemorySize64)      835 MB
+```
+
+A 545MB gap, because `workingSetSize` counts shared pages once per process that
+maps them. **The app's own number reads about 65% high**, and anybody comparing a
+figure from the log to a figure from Task Manager needs that. The private-bytes
+series is the honest "is this machine running out" number; the app's is the trend
+it can see about itself.
+
+**Reading it remotely, without disturbing it.** Everything is over SSH and touches
+nothing: `type %APPDATA%\Wallwright\logs\wallwright.log` for the app's own record,
+`out\soak-mini2-*-summary.md` for the current slope and verdict, `out\proc-*.csv`
+for private bytes, and `out\shots\` for the visual record. **No RDP**: a remote
+session hijacks console session 1, blanks the physical display, and leaves it
+disconnected, which is one of the pre-registered invalidating conditions.
+
+The freeze detector is drawn into the canvas rather than over it in the DOM, so it
+composites on the same surface as the animation. Two consecutive grabs showing the
+same frame count is a frozen renderer, which no memory series can see. The DOM HUD
+is still present and overlaps it slightly; cosmetic, and left alone rather than
+restarting the run a third time to tidy it.
+
 ### Panel CRUD works end to end
 
 `src/main.js` has no unit tests, so `WALLWRIGHT_SELFTEST=1` drives the real path:

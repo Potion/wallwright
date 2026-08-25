@@ -179,6 +179,26 @@
           );
           ctx.stroke();
         }
+        // Drawn INTO the canvas, not over it in the DOM. On the wall the DOM
+        // overlays did not appear at all while the canvases did, which is a GPU
+        // compositing quirk not worth chasing; text on the same surface as the
+        // animation composites by construction. This is the freeze detector: two
+        // consecutive screenshots showing the same frame count is a frozen
+        // renderer, which memory data cannot see.
+        ctx.font = '600 30px ui-monospace, Menlo, monospace';
+        ctx.fillStyle = '#f04e23';
+        ctx.fillText('SOAK HEAVY', 16, 40);
+        ctx.fillStyle = '#7ee787';
+        ctx.fillText(new Date().toISOString(), 16, 78);
+        ctx.fillText(`up ${Math.round(t)}s  frame ${frames}`, 16, 116);
+        ctx.fillText(`rows ${rows.childElementCount}  fetches ${fetches}`, 16, 154);
+        if (performance.memory) {
+          ctx.fillText(
+            `heap ${Math.round(performance.memory.usedJSHeapSize / 1048576)}MB`,
+            16,
+            192
+          );
+        }
         document.getElementById('frames').textContent = frames;
         document.getElementById('up').textContent = Math.round(t);
         document.getElementById('clock').textContent = new Date().toISOString();
