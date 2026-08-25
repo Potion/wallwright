@@ -608,11 +608,15 @@ macOS passing does not settle the target platform. This group is the real risk.
       from a quarantined download, which is the path anyone else will take.
 - [ ] **Auto-launch on boot and crash restart.** Not built. Required for
       unattended operation.
-- [ ] **Overlay alpha compositing on Windows.** Now the single most important
-      open item, and the one CI cannot answer because it needs eyes on real
-      hardware. The whole architecture was chosen over capture-based approaches
-      on the assumption this works. It works on macOS; if it renders opaque on
-      Windows, implement one of the `SPEC.md` fallbacks.
+- [ ] **Overlay alpha compositing on Windows.** CI cannot answer this. An
+      automated screen grab was tried on the self-hosted Windows runner and fails
+      with "the handle is invalid": the runner is registered as a service, so it
+      has no interactive desktop to capture. The same limitation is documented in
+      touch-table-sim's release workflow. It also means the Windows self-test
+      proves logic rather than rendering. This needs a person at a Windows
+      machine with a display, running `npm start` and looking at the wall. The
+      workflow in `.github/workflows/screenshot-windows.yml` works unchanged on
+      any such machine.
 - [ ] **Re-run the probes on the real show PC.** CI answered them on a 1024x768
       virtual display. Confirm on the actual hardware and wall resolution.
 - [ ] **Display targeting.** Set `wall.displayLabel` or `wall.displayId` to the

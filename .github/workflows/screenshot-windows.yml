@@ -1,7 +1,13 @@
 name: Screenshot Windows
 
-# Answers the last open architectural question: does the transparent overlay
-# composite over the live panels on Windows?
+# Tries to answer the last open architectural question: does the transparent
+# overlay composite over the live panels on Windows?
+#
+# IT CANNOT RUN ON THE CURRENT RUNNER. The self-hosted Windows runner is
+# registered as a service, so it has no interactive desktop and CopyFromScreen
+# fails with "the handle is invalid". Kept because it works unchanged on any
+# Windows machine with someone logged in, which is where this question has to be
+# settled anyway.
 #
 # Everything else about Windows is already covered. The probes confirm the view
 # APIs and the fullscreen paths, and the self-test confirms main.js behaves. All
@@ -59,7 +65,14 @@ jobs:
             Write-Host "screen: $($bounds.Width)x$($bounds.Height)"
             $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
             $gfx = [System.Drawing.Graphics]::FromImage($bmp)
-            $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            try {
+              $gfx.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            }
+            catch {
+              # "The handle is invalid" means there is no desktop to copy from.
+              Write-Host "::error::This runner has no interactive desktop, so the screen cannot be captured. A Windows runner registered as a service has no session attached. Compositing can only be checked on a Windows machine with someone logged in: the show PC, or any desktop with a display."
+              throw
+            }
             New-Item -ItemType Directory -Force -Path shot | Out-Null
             $bmp.Save("$PWD\shot\windows-wall.png", [System.Drawing.Imaging.ImageFormat]::Png)
             $gfx.Dispose(); $bmp.Dispose()
