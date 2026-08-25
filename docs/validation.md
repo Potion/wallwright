@@ -617,22 +617,22 @@ macOS passing does not settle the target platform. This group is the real risk.
       `screenshot-windows.yml` reports this directly:
 
       ```
-          UserInteractive:     False
-          process session id:  0
-          screen count:        1
-            WinDisc 1024x768 primary=True     <- disconnected pseudo-display
+                  UserInteractive:     False
+                  process session id:  0
+                  screen count:        1
+                    WinDisc 1024x768 primary=True     <- disconnected pseudo-display
 
-           SESSIONNAME   ID  STATE
-          >services       0  Disc
-           console        1  Conn             <- a real desktop, out of reach
-          ```
+                   SESSIONNAME   ID  STATE
+                  >services       0  Disc
+                   console        1  Conn             <- a real desktop, out of reach
+                  ```
 
-          Two consequences. The Windows self-test and the probes all ran against that
-          1024x768 pseudo-display, so they prove logic and API behaviour, not
-          rendering. And the fix is infrastructure, not code: run the runner
-          interactively in the console session instead of as a service, and the
-          existing workflow captures the wall unchanged. Failing that, someone runs
-          `npm start` on a Windows machine and looks at it.
+                  Two consequences. The Windows self-test and the probes all ran against that
+                  1024x768 pseudo-display, so they prove logic and API behaviour, not
+                  rendering. And the fix is infrastructure, not code: run the runner
+                  interactively in the console session instead of as a service, and the
+                  existing workflow captures the wall unchanged. Failing that, someone runs
+                  `npm start` on a Windows machine and looks at it.
 
 - [ ] **Re-run the probes on the real show PC.** CI answered them on a 1024x768
       virtual display. Confirm on the actual hardware and wall resolution.
