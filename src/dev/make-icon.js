@@ -1,44 +1,75 @@
 // Generates build/icon.png, the source image electron-builder converts into
-// platform icons. A 2x2 grid on dark ground: the exhibit, basically.
+// platform icons.
+//
+// The mark is an authored montage rather than a 2x2 grid: one hero panel, a tall
+// sidebar, two along the bottom. Every video wall product on the market draws a
+// quad split, and a quad split is also the one layout this app exists to get away
+// from, since the point is that the montage is arranged rather than given.
+//
+// The hero panel wears the layout editor's own corner handles, which is the
+// closest thing the app has to a signature gesture: it says the wall is editable,
+// not just lit.
 //
 // Written as a generator rather than a checked-in binary blob nobody can edit.
-// Run: node src/dev/make-icon.js
+// Run: node src/dev/make-icon.js  (npm run icon)
 const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
 
 const SIZE = 512;
-const BG = [13, 17, 23]; // #0d1117
-const POPPY = [240, 78, 35]; // Hyperquake Poppy
-const DIM = [70, 26, 14];
+const BG = [13, 17, 23]; // wall black, #0d1117
+const POPPY = [240, 78, 35]; // Hyperquake Poppy, #f04e23
+const DIM = [70, 26, 14]; // an unselected panel, Poppy banked down
+const GRIP = [255, 255, 255];
 
-// Four panels, inset, with a gutter. Sizes are fractions of the canvas.
-const INSET = 0.14;
-const GUTTER = 0.045;
+// The montage, in fractions of the content box. Deliberately uneven: these are
+// the proportions a real wall ends up with once someone has arranged it.
+const INSET = 0.115;
+const PANELS = [
+  { x0: 0, y0: 0, x1: 0.575, y1: 0.575, hero: true },
+  { x0: 0.635, y0: 0, x1: 1, y1: 0.575 },
+  { x0: 0, y0: 0.635, x1: 0.26, y1: 1 },
+  { x0: 0.32, y0: 0.635, x1: 1, y1: 1 },
+];
+const GRIP_SIZE = 0.085 * SIZE;
 
 function panels() {
   const a = SIZE * INSET;
-  const g = SIZE * GUTTER;
   const span = SIZE - 2 * a;
-  const cell = (span - g) / 2;
+  const px = (f) => Math.round(a + f * span);
+  return PANELS.map((p) => ({
+    x0: px(p.x0),
+    y0: px(p.y0),
+    x1: px(p.x1),
+    y1: px(p.y1),
+    color: p.hero ? POPPY : DIM,
+    hero: !!p.hero,
+  }));
+}
+
+// A square centred on each corner of the hero panel, straddling its edge exactly
+// as the editor's grips do.
+function grips(cells) {
+  const hero = cells.find((c) => c.hero);
+  if (!hero) return [];
+  const h = Math.round(GRIP_SIZE / 2);
   const out = [];
-  for (let row = 0; row < 2; row++) {
-    for (let col = 0; col < 2; col++) {
-      out.push({
-        x0: Math.round(a + col * (cell + g)),
-        y0: Math.round(a + row * (cell + g)),
-        x1: Math.round(a + col * (cell + g) + cell),
-        y1: Math.round(a + row * (cell + g) + cell),
-        // Top-left panel reads as the promoted one.
-        color: row === 0 && col === 0 ? POPPY : DIM,
-      });
-    }
+  for (const [x, y] of [
+    [hero.x0, hero.y0],
+    [hero.x1, hero.y0],
+    [hero.x0, hero.y1],
+    [hero.x1, hero.y1],
+  ]) {
+    out.push({ x0: x - h, y0: y - h, x1: x + h, y1: y + h, color: GRIP });
   }
   return out;
 }
 
 function render() {
   const cells = panels();
+  // The scanline below takes the first rectangle that covers a pixel, so the
+  // grips go in front of the panels to paint on top of the one they belong to.
+  cells.unshift(...grips(cells));
   // One extra byte per row: the PNG filter type.
   const raw = Buffer.alloc(SIZE * (SIZE * 4 + 1));
   let p = 0;

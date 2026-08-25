@@ -15,30 +15,58 @@ const PAGE = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Wallwright control</title>
 <style>
-  :root { color-scheme: dark; }
-  body { margin:0; padding:20px; background:#0d1117; color:#e6edf3;
+  /* The same palette, with the same token names, as src/overlay.html.
+     docs/identity.md says what each one is for. */
+  :root {
+    color-scheme: dark;
+    --accent:#f04e23; --accent-rgb:240,78,35;
+    --ground:#0d1117; --surface:#161b22; --surface-raised:#21262d;
+    --text:#e6edf3; --muted:#8b949e; --line:#30363d;
+    --warn:#ffa198; --alarm:#f85149; --alarm-rgb:248,81,73;
+  }
+  body { margin:0; padding:20px; background:var(--ground); color:var(--text);
     font:15px/1.5 -apple-system,BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif; }
-  h1 { font-size:19px; margin:0 0 4px; }
-  h1 span { color:#f04e23; }
-  .sub { color:#8b949e; margin-bottom:18px; font-size:13px; }
+  /* Wordmark: mark, name, then the mode it is in. Mono and letterspaced, as on
+     the wall's own edit bar, so the two admin surfaces read as one tool. */
+  .brand { display:flex; align-items:center; gap:10px; margin-bottom:5px; }
+  .brand svg { display:block; width:22px; height:22px; flex:none; }
+  h1 { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:15px;
+    font-weight:600; letter-spacing:0.16em; text-transform:uppercase;
+    margin:0; }
+  #mode { font:13px/1.5 inherit; font-family:inherit; letter-spacing:0.08em;
+    color:var(--accent); }
+  .sub { color:var(--muted); margin-bottom:18px; font-size:13px; }
   .row { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px; }
   button { font:inherit; padding:8px 13px; border-radius:7px; cursor:pointer;
-    background:#21262d; color:#e6edf3; border:1px solid #30363d; }
-  button:hover { border-color:#f04e23; }
-  button.on { background:#f04e23; border-color:#f04e23; color:#fff; }
-  .panel { border:1px solid #30363d; border-radius:9px; padding:14px;
-    margin-bottom:11px; background:#161b22; }
+    background:var(--surface-raised); color:var(--text); border:1px solid var(--line); }
+  button:hover { border-color:var(--accent); }
+  button.on { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .panel { border:1px solid var(--line); border-radius:9px; padding:14px;
+    margin-bottom:11px; background:var(--surface); }
   .panel h2 { font-size:15px; margin:0 0 3px; }
-  .meta { color:#8b949e; font-size:12.5px; word-break:break-all; margin-bottom:9px; }
-  .warn { color:#ffa198; }
+  .meta { color:var(--muted); font-size:12.5px; word-break:break-all; margin-bottom:9px; }
+  .warn { color:var(--warn); }
   input { font:inherit; width:100%; box-sizing:border-box; padding:8px 10px;
-    margin-bottom:8px; border-radius:7px; border:1px solid #30363d;
-    background:#0d1117; color:#e6edf3; }
-  .err { background:#f851491f; border:1px solid #f85149; padding:9px 12px;
-    border-radius:7px; margin-bottom:14px; }
+    margin-bottom:8px; border-radius:7px; border:1px solid var(--line);
+    background:var(--ground); color:var(--text); }
+  .err { background:rgba(var(--alarm-rgb),0.12); border:1px solid var(--alarm);
+    padding:9px 12px; border-radius:7px; margin-bottom:14px; }
 </style>
 
-<h1>Wallwright <span id="mode"></span></h1>
+<div class="brand">
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <rect x="14.7" y="2" width="7.3" height="11.5" fill="var(--accent)" opacity="0.28"/>
+    <rect x="2" y="14.7" width="5.2" height="7.3" fill="var(--accent)" opacity="0.28"/>
+    <rect x="8.4" y="14.7" width="13.6" height="7.3" fill="var(--accent)" opacity="0.28"/>
+    <rect x="2" y="2" width="11.5" height="11.5" fill="var(--accent)"/>
+    <g fill="#ffffff">
+      <rect x="0.5" y="0.5" width="3" height="3"/><rect x="12" y="0.5" width="3" height="3"/>
+      <rect x="0.5" y="12" width="3" height="3"/><rect x="12" y="12" width="3" height="3"/>
+    </g>
+  </svg>
+  <h1>Wallwright</h1>
+  <span id="mode"></span>
+</div>
 <div class="sub" id="sub"></div>
 <div id="err"></div>
 <div class="row" id="presets"></div>

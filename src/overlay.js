@@ -103,6 +103,30 @@ const SIDES = ['n', 'e', 's', 'w'];
 // hand whether the wall is being previewed small or driven 1:1.
 const SNAP = 10;
 
+// The mark: the app icon's montage at toolbar size. One hero panel wearing the
+// editor's corner grips, a tall sidebar, two along the bottom. Kept as markup
+// rather than an image file so it inherits the palette and ships with no asset.
+const MARK = `
+  <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+    <rect x="14.7" y="2" width="7.3" height="11.5" fill="var(--accent)" opacity="0.28"/>
+    <rect x="2" y="14.7" width="5.2" height="7.3" fill="var(--accent)" opacity="0.28"/>
+    <rect x="8.4" y="14.7" width="13.6" height="7.3" fill="var(--accent)" opacity="0.28"/>
+    <rect x="2" y="2" width="11.5" height="11.5" fill="var(--accent)"/>
+    <g fill="#ffffff">
+      <rect x="0.5" y="0.5" width="3" height="3"/>
+      <rect x="12" y="0.5" width="3" height="3"/>
+      <rect x="0.5" y="12" width="3" height="3"/>
+      <rect x="12" y="12" width="3" height="3"/>
+    </g>
+  </svg>`;
+
+function renderBrand() {
+  const brand = document.createElement('div');
+  brand.className = 'brand';
+  brand.innerHTML = MARK + '<span class="brand-name">Wallwright</span>';
+  return brand;
+}
+
 function renderEdit() {
   // Drop the selection if the panel it pointed at is gone.
   if (selectedId && !current.views.some((v) => v.id === selectedId)) selectedId = null;
@@ -136,6 +160,7 @@ function renderEdit() {
     '<kbd>Shift</kbd>+<kbd>Esc</kbd> discard';
   const title = document.createElement('strong');
   title.textContent = 'Layout edit';
+  bar.prepend(renderBrand());
   bar.append(title, add, hint);
   bar.addEventListener('pointerdown', (e) => e.stopPropagation());
   root.appendChild(bar);

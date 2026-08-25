@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wallwright and Hiperwall</title>
+<style>
+  @page { size: Letter; margin: 18mm 16mm 20mm 16mm; }
+  :root {
+    --ink: #14181d; --muted: #5b6672; --rule: #d8dee5; --poppy: #f04e23;
+    --panel: #f5f7f9; --good: #1a7f4b; --bad: #b3261e; --amber: #9a6700;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: var(--ink);
+    font: 10.5pt/1.5 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  h1 { font-size: 23pt; line-height: 1.15; margin: 0 0 6pt; letter-spacing: -0.4pt; }
+  h2 { font-size: 13pt; margin: 22pt 0 8pt; padding-bottom: 4pt;
+    border-bottom: 1.5pt solid var(--poppy); break-after: avoid; }
+  h3 { font-size: 11pt; margin: 14pt 0 4pt; break-after: avoid; }
+  p { margin: 0 0 8pt; }
+  ul, ol { margin: 0 0 8pt; padding-left: 16pt; }
+  li { margin-bottom: 4pt; }
+  strong { font-weight: 600; }
+  .deck { color: var(--muted); font-size: 11pt; margin-bottom: 4pt; }
+  .byline { color: var(--muted); font-size: 8.5pt; padding-top: 8pt;
+    border-top: 0.75pt solid var(--rule); margin-bottom: 4pt; }
+  .callout { background: var(--panel); border-left: 3pt solid var(--poppy);
+    padding: 10pt 12pt; margin: 12pt 0; break-inside: avoid; }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .lead { font-weight: 600; }
+  .correction { border-left-color: var(--amber); background: #fdf7e7; }
+  table { width: 100%; border-collapse: collapse; margin: 10pt 0 12pt; font-size: 9pt; }
+  th, td { text-align: left; vertical-align: top; padding: 6pt 7pt;
+    border-bottom: 0.75pt solid var(--rule); }
+  th { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.4pt;
+    color: var(--muted); border-bottom: 1pt solid var(--ink); font-weight: 600; }
+  tr { break-inside: avoid; }
+  thead { display: table-header-group; }
+  td.name { font-weight: 600; }
+  tbody tr:nth-child(even) { background: #fafbfc; }
+  .yes { color: var(--good); font-weight: 600; }
+  .no { color: var(--bad); font-weight: 600; }
+  .unk { color: var(--muted); font-style: italic; }
+  .tag { display: inline-block; font-size: 7.5pt; font-weight: 600; letter-spacing: 0.3pt;
+    text-transform: uppercase; padding: 1.5pt 5pt; border-radius: 2pt; vertical-align: 1pt; }
+  .tag-v { background: #e3f3ea; color: var(--good); }
+  .tag-u { background: #fdecea; color: var(--bad); }
+  .sources { font-size: 8pt; color: var(--muted); }
+  .sources li { margin-bottom: 3pt; word-break: break-all; }
+  .avoid { break-inside: avoid; }
+  blockquote { margin: 8pt 0 8pt 12pt; padding-left: 10pt;
+    border-left: 2pt solid var(--rule); color: var(--ink); font-style: italic; }
+</style>
+</head>
+<body>
+
+<h1>Wallwright and Hiperwall</h1>
+<p class="deck">A head to head against the closest commercial equivalent.</p>
+<p class="byline">
+  Prepared for the Wallwright exhibit &middot; 24 August 2026 &middot;
+  <span class="tag tag-v">verified</span> marks a claim a cited source states.
+  <span class="tag tag-u">unverified</span> marks inference or something not checked.
+  Platform details are quoted from each vendor's own documentation.
+</p>
+
+<div class="callout correction avoid">
+  <p class="lead">Why Hiperwall, and not Userful</p>
+  <p>
+    An earlier report ranked Userful the best commercial fit. Userful's own
+    documentation rules it out for this job: it is
+    <strong>"a complete Linux-based operating system derived from Red Hat Enterprise
+    Linux (RHEL) 9"</strong>, running on a dedicated server and streaming content over
+    RTSP to a decoder device behind each display. The exhibit runs on a Windows PC, so
+    Userful would mean replacing the machine, its operating system and its GPU, and
+    then streaming a web page to a screen already attached to a computer that could
+    render it. <span class="tag tag-v">verified</span>
+  </p>
+  <p>
+    <strong>Hiperwall is the right comparison.</strong> It runs on Windows, on
+    commodity PCs, and it renders web pages with a real browser rather than streaming
+    video. It is the closest thing to Wallwright that can be bought.
+  </p>
+</div>
+
+<h2>What each one is</h2>
+
+<h3>Hiperwall</h3>
+<p>
+  Software on ordinary Windows machines. "All Hiperwall PCs require Windows 10 or 11
+  (32 or 64 bit) and Gigabit Ethernet", and it "runs on standard PCs connected by
+  standard Ethernet". Each display is driven by a PC running HiperView, and one PC can
+  drive several displays. <span class="tag tag-v">verified</span>
+</p>
+<p>
+  Crucially, its web support is not a screen capture. HiperSource Browser is described
+  as a real web browser based on the Chromium engine, providing a direct connection
+  between web content and the wall and <strong>bypassing the screen capture
+  approach</strong>. Keyboard and mouse control of a source comes through a separate
+  HiperKVM licence. <span class="tag tag-v">verified</span>
+</p>
+
+<h3>Wallwright</h3>
+<p>
+  A single application on the show PC. Each panel is a real browser view composited
+  onto the wall's output, and input reaches it the way it reaches a browser tab.
+  <span class="tag tag-v">verified</span>
+</p>
+<p>
+  So the two agree on the hard architectural question. Both reject streaming, both put
+  a real browser engine on the wall, and both run on Windows. The differences are
+  everywhere else.
+</p>
+
+<h2>The differences that matter</h2>
+
+<table>
+  <thead>
+    <tr><th style="width:26%">&nbsp;</th><th style="width:37%">Hiperwall</th><th style="width:37%">Wallwright</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="name">Operating system</td>
+      <td>Windows 10 or 11 <span class="tag tag-v">verified</span></td>
+      <td>Windows, and macOS for development <span class="tag tag-v">verified</span></td>
+    </tr>
+    <tr>
+      <td class="name">Rendering</td>
+      <td>Real Chromium, not screen capture <span class="tag tag-v">verified</span></td>
+      <td>Real Chromium, composited natively <span class="tag tag-v">verified</span></td>
+    </tr>
+    <tr>
+      <td class="name">Machines</td>
+      <td>A controller plus one or more HiperView PCs. Whether one PC can be both was not confirmed. <span class="tag tag-u">unverified</span></td>
+      <td>One: the show PC <span class="tag tag-v">verified</span></td>
+    </tr>
+    <tr>
+      <td class="name">Licence</td>
+      <td>Per display, and <strong>each browser tab consumes one HiperSource licence</strong>. A four panel montage needs four. <span class="tag tag-v">verified</span></td>
+      <td>None</td>
+    </tr>
+    <tr>
+      <td class="name">Interaction</td>
+      <td>Through a HiperKVM licence <span class="tag tag-v">verified</span></td>
+      <td>Native, no extra layer <span class="tag tag-v">verified</span></td>
+    </tr>
+    <tr>
+      <td class="name">Sources</td>
+      <td>Web, images, video, IP streams, remote desktops <span class="tag tag-v">verified</span></td>
+      <td>Web pages only</td>
+    </tr>
+    <tr>
+      <td class="name">Failover</td>
+      <td>HiperFailSafe, a second controller <span class="tag tag-v">verified</span></td>
+      <td>None, and on one PC cannot have one</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout avoid">
+  <p class="lead">The licensing shape is the sharpest practical difference</p>
+  <p>
+    Hiperwall licenses per display, and every browser tab consumes a HiperSource
+    licence. The exhibit's whole idea is a montage of live pages, and the editor now
+    lets someone add panels at the wall. Under that model, the natural act of adding a
+    panel has a purchase order attached to it. Wallwright's panel count is free, which
+    is not a small difference for an exhibit whose layout is meant to be changed.
+  </p>
+</div>
+
+<h2>Where Hiperwall wins</h2>
+<ul>
+  <li>
+    <strong>Non-web sources.</strong> Cameras, video, IP streams, remote desktops.
+    Wallwright does web pages and nothing else. <span class="tag tag-v">verified</span>
+  </li>
+  <li>
+    <strong>Scale.</strong> Many displays, many nodes, one wall or several. Wallwright
+    drives one output.
+  </li>
+  <li>
+    <strong>Redundancy.</strong> HiperFailSafe runs a second controller.
+    <span class="tag tag-v">verified</span>
+  </li>
+  <li>
+    <strong>Maturity and support.</strong> A maintained product with an external API,
+    outliving whoever wrote the exhibit. <span class="tag tag-v">verified</span>
+  </li>
+  <li>
+    <strong>It has done this before.</strong> Real installations, real control rooms.
+    Wallwright has never run a show.
+  </li>
+</ul>
+
+<h2>Where Wallwright wins for this exhibit</h2>
+<ul>
+  <li>
+    <strong>One machine, no licence, no per-panel cost.</strong> It runs on the PC that
+    is already driving the wall.
+  </li>
+  <li>
+    <strong>Interaction without a KVM layer.</strong> Clicking and typing are native,
+    not a licensed feature.
+  </li>
+  <li>
+    <strong>Arranging the montage on the live wall</strong>, against the real
+    dashboards at the real resolution, rather than authoring layouts in a console.
+    <span class="tag tag-u">unverified that Hiperwall cannot do this</span>
+  </li>
+  <li>
+    <strong>Several panels behind one login.</strong> Four dashboards from one
+    SSO-protected application share a session instead of needing four sign-ins. No
+    vendor documents an equivalent. <span class="tag tag-u">unverified</span>
+  </li>
+  <li>
+    <strong>Measured against this exact job.</strong> Session behaviour, memory, and
+    the interaction model were tested for this exhibit, not inferred from a datasheet.
+  </li>
+</ul>
+
+<h2>Cost, honestly</h2>
+<p>
+  Hiperwall does not publish pricing, so the comparison cannot be made in numbers.
+  <span class="tag tag-u">unverified</span> What can be said is the shape: a per display
+  licence, plus a HiperSource licence per browser tab, plus HiperKVM for interaction,
+  plus HiperFailSafe if redundancy is wanted. Against that, Wallwright costs the
+  engineering already spent and nothing recurring.
+</p>
+<p>
+  The costs that do not appear on either invoice are the ones worth weighing. Buying
+  brings support and someone else's testing. Building brings an exact fit and a
+  dependency on whoever maintains it.
+</p>
+
+<h2>Recommendation</h2>
+<p>
+  <strong>For this exhibit as scoped, Wallwright is the better fit</strong>, mainly
+  because the licensing model taxes the thing the exhibit is built to do, and because a
+  single wall of web pages does not need a controller and display nodes.
+</p>
+<p>Hiperwall becomes the right answer if any of these turn out to be true:</p>
+<ol>
+  <li>The exhibit needs camera, video or remote desktop sources.</li>
+  <li>It grows to several walls, or many displays.</li>
+  <li>Unattended reliability with failover becomes a hard requirement.</li>
+  <li>
+    Honeywell will not accept an unsigned in-house application, but will accept a
+    commercial product. Worth asking early, because it decides everything else.
+  </li>
+  <li>
+    <strong>Overlay compositing fails on Windows.</strong> This is the one unverified
+    assumption underneath Wallwright. Hiperwall has clearly solved the equivalent
+    problem, and if ours does not hold, buying gets much more attractive.
+  </li>
+</ol>
+
+<h2>What is still unverified</h2>
+<ul>
+  <li>Hiperwall pricing, in any form.</li>
+  <li>
+    Whether one Windows PC can serve as both HiperController and HiperView node, which
+    decides whether this is a one machine or two machine deployment.
+  </li>
+  <li>
+    Whether either product handles a real Honeywell SSO flow. Hiperwall's material
+    mentions users logging in to restricted sites, which is the closest anyone comes,
+    but it is not a commitment. <span class="tag tag-v">verified as a claim, not as behaviour</span>
+  </li>
+  <li>
+    Wallwright's overlay compositing on Windows. A check is running against a Windows
+    machine; until it reports, this is the largest open risk in the project.
+  </li>
+</ul>
+
+<h2>Sources</h2>
+<ol class="sources">
+  <li>Hiperwall system requirements, Windows 10 or 11 on standard PCs. https://serviceportal.sharpnecdisplays.eu/p/eeme/en/products/software/details/systemrequirements/t/Software/Displays-and-Projectors/rp/HIPERWALL-NEW.xhtml</li>
+  <li>Hiperwall, HiperSource Browser: real Chromium, bypasses screen capture. https://hiperwall.com/browser/</li>
+  <li>Hiperwall, HiperView display nodes. https://hiperwall.com/technology-stack/hiperview/</li>
+  <li>Hiperwall, control room video walls: sources, HiperKVM, licensing per tab. https://connect.hiperwall.com/control-room-video-walls</li>
+  <li>Hiperwall, Premium Suite and HiperFailSafe. https://www.hiperwall.com/hiperwall-premium-suite</li>
+  <li>Hiperwall, HiperController and the external API. https://hiperwall.com/technology-stack/hipercontroller/</li>
+  <li>Userful, server requirements: RHEL 9 derived OS, certified GPUs, RTSP to uClients. https://docs.userful.com/userful-infinity/hardware-overview/supported-servers/self-sourcing-a-userful-server.md</li>
+  <li>Wallwright design rationale: SPEC.md in the repository.</li>
+  <li>Wallwright measurements: docs/validation.md in the repository.</li>
+</ol>
+
+</body>
+</html>

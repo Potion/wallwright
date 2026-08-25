@@ -8,7 +8,7 @@ const electron = require(path.join(ROOT, 'node_modules', 'electron'));
 
 const reports = [
   ['docs/report/comparison.html', 'docs/report/wallwright-vs-commercial.pdf'],
-  ['docs/report/userful.html', 'docs/report/wallwright-vs-userful.pdf'],
+  ['docs/report/hiperwall.html', 'docs/report/wallwright-vs-hiperwall.pdf'],
 ];
 
 let failed = 0;

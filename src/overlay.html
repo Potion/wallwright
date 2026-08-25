@@ -3,6 +3,31 @@
   <head>
     <meta charset="utf-8" />
     <style>
+      /* ---- Wallwright palette ----------------------------------------------
+         One source of truth for the overlay's colours. The same tokens, with the
+         same names, are in src/control-page.js; docs/identity.md says what each
+         one is for and why. Poppy is carried over from Hyperquake rather than
+         invented, so the exhibit's own tool matches the studio that built it.
+
+         The -rgb pairs exist because the accent is used at many opacities over
+         live pages, and rgba() needs the channels rather than the hex. */
+      :root {
+        --accent: #f04e23; /* Hyperquake Poppy */
+        --accent-rgb: 240, 78, 35;
+        --text: #e6edf3;
+        --muted: #8b949e;
+        --line: #30363d;
+        --line-bright: #57606a;
+        --surface: #161b22;
+        --surface-raised: #21262d;
+        --guide: #00e5ff; /* snap guides and the rubber band, editor only */
+        --guide-rgb: 0, 229, 255;
+        --reading: #7ee787; /* a machine fact read back: the live URL */
+        --alarm: #f85149;
+        --alarm-rgb: 248, 81, 73;
+        --warn: #ffa198; /* a soft warning: destructive, but not wrong yet */
+      }
+
       html,
       body {
         margin: 0;
@@ -29,8 +54,8 @@
         box-sizing: border-box;
       }
       body.hint .hotspot:hover {
-        border: 3px solid rgba(240, 78, 35, 0.9); /* Hyperquake Poppy */
-        background: rgba(240, 78, 35, 0.06);
+        border: 3px solid rgba(var(--accent-rgb), 0.9); /* Hyperquake Poppy */
+        background: rgba(var(--accent-rgb), 0.06);
       }
 
       /* Active-mode Back button fills the shrunk corner overlay. */
@@ -48,7 +73,7 @@
         font-family: inherit;
       }
       .back:hover {
-        background: rgba(240, 78, 35, 0.9);
+        background: rgba(var(--accent-rgb), 0.9);
       }
 
       /* ---- layout edit mode ---- */
@@ -64,19 +89,19 @@
         padding: 10px 18px;
         border-radius: 10px 10px 0 0;
         background: rgba(0, 0, 0, 0.82);
-        color: #e6edf3;
+        color: var(--text);
         font-size: 14px;
         letter-spacing: 0.02em;
         white-space: nowrap;
         z-index: 10;
       }
       .editbar strong {
-        color: #f04e23;
+        color: var(--accent);
         margin-right: 8px;
       }
       .editbar kbd {
         font: inherit;
-        border: 1px solid #57606a;
+        border: 1px solid var(--line-bright);
         border-radius: 4px;
         padding: 1px 5px;
         margin: 0 1px;
@@ -92,7 +117,7 @@
       }
       .guide {
         position: absolute;
-        background: #00e5ff;
+        background: var(--guide);
       }
       .guide-v {
         width: 1px;
@@ -109,18 +134,48 @@
       .barhint {
         opacity: 0.85;
       }
+
+      /* ---- wordmark --------------------------------------------------------
+         The tool signs its own bar, and only there: the editor is the one mode
+         where an administrator is working with the app rather than through it.
+         Grid and active mode stay unbranded, because a visitor should see the
+         dashboards and not the thing hosting them.
+
+         Mono and letterspaced so it reads as a nameplate instead of competing
+         with the hints beside it. The mark is the app icon's montage drawn
+         small, hero panel and grips included. */
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding-right: 14px;
+        border-right: 1px solid var(--line);
+      }
+      .brand-mark {
+        display: block;
+        width: 20px;
+        height: 20px;
+      }
+      .brand-name {
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--text);
+      }
       .addbtn {
         font: inherit;
         font-weight: 600;
         color: #ffffff;
-        background: rgba(240, 78, 35, 0.9);
+        background: rgba(var(--accent-rgb), 0.9);
         border: 0;
         border-radius: 6px;
         padding: 5px 12px;
         cursor: pointer;
       }
       .addbtn:hover {
-        background: #f04e23;
+        background: var(--accent);
       }
 
       /* Named montages, in the edit toolbar. */
@@ -130,18 +185,18 @@
         gap: 6px;
       }
       .preset-label {
-        color: #8b949e;
+        color: var(--muted);
         margin-right: 2px;
       }
       .preset {
         display: inline-flex;
         align-items: stretch;
-        border: 1px solid #30363d;
+        border: 1px solid var(--line);
         border-radius: 6px;
         overflow: hidden;
       }
       .preset.active {
-        border-color: #f04e23;
+        border-color: var(--accent);
       }
       .preset-use,
       .preset-del,
@@ -149,38 +204,38 @@
         font: inherit;
         border: 0;
         cursor: pointer;
-        background: #21262d;
-        color: #e6edf3;
+        background: var(--surface-raised);
+        color: var(--text);
         padding: 4px 9px;
       }
       .preset-use:hover,
       .preset-save:hover {
-        background: rgba(240, 78, 35, 0.9);
+        background: rgba(var(--accent-rgb), 0.9);
       }
       .preset.active .preset-use {
-        color: #f04e23;
+        color: var(--accent);
         font-weight: 600;
       }
       .preset-del {
         padding: 4px 7px;
-        color: #8b949e;
-        border-left: 1px solid #30363d;
+        color: var(--muted);
+        border-left: 1px solid var(--line);
       }
       .preset-del:hover {
-        background: #f85149;
+        background: var(--alarm);
         color: #ffffff;
       }
       .preset-save {
-        border: 1px dashed #57606a;
+        border: 1px dashed var(--line-bright);
         border-radius: 6px;
       }
       .preset-name {
         font: inherit;
         padding: 4px 9px;
         border-radius: 6px;
-        border: 1px solid #f04e23;
-        background: #161b22;
-        color: #e6edf3;
+        border: 1px solid var(--accent);
+        background: var(--surface);
+        color: var(--text);
         min-width: 200px;
       }
 
@@ -188,8 +243,8 @@
       .band {
         position: absolute;
         box-sizing: border-box;
-        border: 2px dashed #00e5ff;
-        background: rgba(0, 229, 255, 0.1);
+        border: 2px dashed var(--guide);
+        background: rgba(var(--guide-rgb), 0.1);
         pointer-events: none;
         z-index: 8;
       }
@@ -204,18 +259,18 @@
         padding: 16px 18px;
         border-radius: 10px;
         background: rgba(0, 0, 0, 0.88);
-        color: #e6edf3;
+        color: var(--text);
         font-size: 13px;
         z-index: 11;
       }
       .insp-head {
         font-family: ui-monospace, Menlo, monospace;
         font-weight: 600;
-        color: #f04e23;
+        color: var(--accent);
         margin-bottom: 12px;
       }
       .insp-empty {
-        color: #8b949e;
+        color: var(--muted);
         line-height: 1.5;
       }
       .insp-field {
@@ -224,7 +279,7 @@
       }
       .insp-field span {
         display: block;
-        color: #8b949e;
+        color: var(--muted);
         margin-bottom: 4px;
       }
       .insp-field input,
@@ -234,17 +289,17 @@
         font: inherit;
         padding: 7px 9px;
         border-radius: 6px;
-        border: 1px solid #30363d;
-        background: #161b22;
-        color: #e6edf3;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        color: var(--text);
       }
       .insp-field input:focus,
       .insp-field select:focus {
-        outline: 2px solid rgba(240, 78, 35, 0.9);
+        outline: 2px solid rgba(var(--accent-rgb), 0.9);
         outline-offset: -1px;
       }
       .insp-note {
-        color: #8b949e;
+        color: var(--muted);
         margin: 10px 0 14px;
         line-height: 1.45;
       }
@@ -256,11 +311,11 @@
         border-radius: 6px;
         cursor: pointer;
         color: #ffffff;
-        background: rgba(240, 78, 35, 0.9);
+        background: rgba(var(--accent-rgb), 0.9);
         border: 0;
       }
       .insp-open:hover {
-        background: #f04e23;
+        background: var(--accent);
       }
       .insp-del {
         width: 100%;
@@ -268,25 +323,25 @@
         padding: 8px;
         border-radius: 6px;
         cursor: pointer;
-        color: #ffa198;
+        color: var(--warn);
         background: transparent;
-        border: 1px solid #f8514933;
+        border: 1px solid rgba(var(--alarm-rgb), 0.2);
       }
       .insp-del:hover {
-        background: #f851491f;
-        border-color: #f85149;
+        background: rgba(var(--alarm-rgb), 0.12);
+        border-color: var(--alarm);
       }
 
       .epanel {
         position: absolute;
         box-sizing: border-box;
-        border: 2px solid rgba(240, 78, 35, 0.85);
-        background: rgba(240, 78, 35, 0.05);
+        border: 2px solid rgba(var(--accent-rgb), 0.85);
+        background: rgba(var(--accent-rgb), 0.05);
         cursor: move;
       }
       .epanel.dragging {
         border-color: #ffffff;
-        background: rgba(240, 78, 35, 0.14);
+        background: rgba(var(--accent-rgb), 0.14);
       }
       /* Selected reads brighter and solid, so it is obvious which panel the
          inspector is editing. */
@@ -295,7 +350,7 @@
         box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
       }
       .epanel.selected .elabel {
-        background: rgba(240, 78, 35, 0.92);
+        background: rgba(var(--accent-rgb), 0.92);
       }
       .elabel {
         position: absolute;
@@ -306,7 +361,7 @@
         align-items: baseline;
         padding: 6px 10px;
         background: rgba(0, 0, 0, 0.78);
-        color: #e6edf3;
+        color: var(--text);
         font-size: 13px;
         white-space: nowrap;
         pointer-events: none;
@@ -316,7 +371,7 @@
       }
       .eread {
         font-family: ui-monospace, Menlo, monospace;
-        color: #7ee787;
+        color: var(--reading);
       }
 
       .grip {
@@ -324,7 +379,7 @@
         width: 18px;
         height: 18px;
         background: #ffffff;
-        border: 2px solid rgba(240, 78, 35, 0.95);
+        border: 2px solid rgba(var(--accent-rgb), 0.95);
         box-sizing: border-box;
       }
       /* Corners: proportional scale. */

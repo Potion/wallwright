@@ -43,8 +43,13 @@ jobs:
           $env:WALLWRIGHT_START_EDIT = '1'
           $env:WALLWRIGHT_CONFIG = 'config/screenshot.json'
 
-          $electron = (node -e "console.log(require('electron'))")
+          # Written to a file rather than read from stdout: requiring electron can
+          # print its own chatter, and PowerShell then hands Start-Process an
+          # array instead of a path.
+          node -e "require('fs').writeFileSync('electron-path.txt', require('electron'))"
+          $electron = (Get-Content electron-path.txt -Raw).Trim()
           Write-Host "electron: $electron"
+          if (-not (Test-Path $electron)) { throw "electron not found at $electron" }
           $proc = Start-Process -FilePath $electron -ArgumentList '.' -PassThru
 
           try {

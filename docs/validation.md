@@ -164,8 +164,12 @@ which still has to be judged by eye on the real wall, and it says nothing about
 | `Forge-0.1.0-arm64.dmg` | 114 MB |
 | `Forge-0.1.0-x64.dmg`   | 116 MB |
 
-Inside: `Wallwright.app` with the drag-to-Applications layout,
-`CFBundleName = Wallwright`, `CFBundleIdentifier = com.potion.forge`, thin arm64.
+Inside: `Forge.app` with the drag-to-Applications layout,
+`CFBundleName = Forge`, `CFBundleIdentifier = com.potion.forge`, thin arm64.
+
+Those are the names this build actually carried: 0.1.0 predates the rename, and
+this row records what was observed rather than what the app is called now. The
+post-rename bundle is verified separately below.
 
 Unsigned, and `identity: null` in `electron-builder.yml` now says so explicitly
 rather than letting electron-builder hunt the keychain and report unrelated Jamf
