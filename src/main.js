@@ -32,6 +32,7 @@ const { clampGrid, snapGrid } = require('./layout');
 const { createControlServer } = require('./control-server');
 const { statusPage } = require('./control-page');
 const { createDiagLog } = require('./diag-log');
+const { createCounters } = require('./counters');
 
 // The app was called Forge before it was Wallwright. The name decides the
 // userData folder, so renaming it orphans the tuned layout and every login;
@@ -158,6 +159,18 @@ const startedAt = Date.now();
 const popups = new Set(); // BrowserWindows opened by SSO flows
 let editDrag = null; // { i, baseGrid, baseZoom } while a layout drag is in flight
 const watchdog = new Map(); // view id -> { attempts, pending, deferred }
+// Counts and peaks that only go up, for the whole life of the process. Everything
+// else reported by /api/status is instantaneous, which answers nothing about a
+// weekend. Declared here rather than beside the memory code because the watchdog
+// and the panel lifecycle write to it too.
+const counters = createCounters({ warn });
+// The last 20 recycles, with what each one reclaimed. Reported by /api/status so
+// a sampler can see whether recycling is working without parsing the log.
+const recycleProbes = [];
+// Short in the self-test, which cannot afford to wait 30 seconds, and set from
+// measurement rather than taste: see the probe answers in docs/validation.md.
+const RECYCLE_PROBE_MS = Number(process.env.WALLWRIGHT_RECYCLE_PROBE_MS || 3000);
+const RECYCLE_PROBE_LATE_MS = Number(process.env.WALLWRIGHT_RECYCLE_PROBE_LATE_MS || 30000);
 const touched = new Map(); // view id -> ms of the last input in that panel
 
 // Console and file, not one or the other. `npm run dev` and `npm run selftest`
@@ -545,6 +558,7 @@ function addPanel(rect) {
         '4K wall expect this to show in GPU and memory.'
     );
   }
+  counters.bump('panelsCreated', id);
   log(`added ${id}`);
   return v;
 }
@@ -565,6 +579,12 @@ function deletePanel(id) {
   if (w && w.pending) clearTimeout(w.pending);
   watchdog.delete(id);
   touched.delete(id);
+  // These two were the only maps left behind. It is kilobytes, but the reason to
+  // clean them is correctness rather than memory: uniqueId() can hand out a
+  // deleted id again, and a stale entry here defeats dueFor()'s startedAt
+  // fallback, so the new panel with the old name refreshes at once or never.
+  lastRefresh.delete(id);
+  lastRecycle.delete(id);
 
   // A promoted panel that gets deleted has to leave active mode, and indices
   // after the removed one have all shifted.
@@ -572,6 +592,7 @@ function deletePanel(id) {
     if (state.activeIndex === i) state = { mode: 'grid', activeIndex: -1 };
     else if (state.activeIndex > i) state.activeIndex -= 1;
   }
+  counters.bump('panelsDeleted', id);
   log(`deleted ${id}`);
 }
 
@@ -652,6 +673,7 @@ function dueFor(map, v, everyMs) {
 
 function refreshPanel(i) {
   const v = config.views[i];
+  counters.bump('timerRefreshes', v.id);
   lastRefresh.set(v.id, Date.now());
   log(`refreshing ${v.id}`);
   contentViews[i].webContents.reload();
@@ -660,14 +682,76 @@ function refreshPanel(i) {
 // Rebuild the view, which is the only way to hand the renderer process back.
 function recyclePanel(i) {
   const v = config.views[i];
+  counters.bump('recycles', v.id);
   lastRecycle.set(v.id, Date.now());
   lastRefresh.set(v.id, Date.now());
   log(`recycling ${v.id} to reclaim its renderer`);
   const old = contentViews[i];
+  const before = memorySnapshot();
+  const oldPid = osPidOf(old);
   win.contentView.removeChildView(old);
   if (!old.webContents.isDestroyed()) old.webContents.close();
   contentViews[i] = createContentView(v);
   bringToTop(overlay);
+  probeRecycle({
+    id: v.id,
+    oldPid,
+    beforeMb: before.totalMb,
+    beforePanelMb: oldPid ? before.byPid.get(oldPid) || null : null,
+    at: Date.now(),
+  });
+}
+
+function osPidOf(view) {
+  try {
+    const wc = view && view.webContents;
+    return wc && !wc.isDestroyed() ? wc.getOSProcessId() : null;
+  } catch {
+    return null;
+  }
+}
+
+// Did recycling actually reclaim anything?
+//
+// Nothing in this codebase has ever checked, which made "the countermeasure
+// fired" and "the countermeasure worked" indistinguishable in a log. A single
+// before/after would not answer it either: webContents.close() tears the process
+// down asynchronously, the OS reclaims lazily, and createContentView() has
+// already started a replacement loading the same URL. So sample twice, and report
+// both numbers.
+//
+// The load-bearing field is `gone`. A pid that has left getAppMetrics() is direct
+// evidence the process was handed back; a pid still present after 30 seconds is a
+// leaked renderer, and that is worth finding out from a soak rather than from a
+// wall that dies in week three.
+function probeRecycle(probe) {
+  const record = { ...probe, afterMb: null, lateMb: null, gone: null, newPid: null };
+  recycleProbes.push(record);
+  if (recycleProbes.length > 20) recycleProbes.shift();
+
+  setTimeout(() => {
+    const snap = memorySnapshot();
+    record.afterMb = Math.round(snap.totalMb);
+    record.gone = probe.oldPid ? !snap.byPid.has(probe.oldPid) : null;
+  }, RECYCLE_PROBE_MS);
+
+  setTimeout(() => {
+    const snap = memorySnapshot();
+    record.lateMb = Math.round(snap.totalMb);
+    if (probe.oldPid) record.gone = !snap.byPid.has(probe.oldPid);
+    const i = config.views.findIndex((v) => v.id === probe.id);
+    record.newPid = i >= 0 ? osPidOf(contentViews[i]) : null;
+    record.reclaimedMb = Math.round(probe.beforeMb) - record.lateMb;
+    log(
+      `recycled ${probe.id}: ${Math.round(probe.beforeMb)}MB -> ${record.afterMb}MB ` +
+        `after ${Math.round(RECYCLE_PROBE_MS / 1000)}s, ${record.lateMb}MB after ` +
+        `${Math.round(RECYCLE_PROBE_LATE_MS / 1000)}s ` +
+        `(${record.reclaimedMb >= 0 ? '-' : '+'}${Math.abs(record.reclaimedMb)}MB net); ` +
+        `old pid ${probe.oldPid} gone=${record.gone}; new pid ${record.newPid}`
+    );
+  }, RECYCLE_PROBE_LATE_MS);
+
+  return record;
 }
 
 function runUpkeep() {
@@ -687,17 +771,39 @@ function startUpkeep() {
   upkeepTimer = setInterval(runUpkeep, 1000);
 }
 
+// One reading of process memory, used by the check below, by the status page and
+// by the recycle probe. It was written out twice before, in two slightly
+// different ways, and only one of them was wrapped against getAppMetrics
+// throwing.
+//
+// workingSetSize is resident memory per process, and shared pages are counted
+// once per process that maps them, so the total reads high. That is fine for
+// watching a trend, and it is why the soak also records private bytes from
+// outside the app: see docs/validation.md before comparing this number to
+// anything.
+function memorySnapshot() {
+  const byType = new Map();
+  const byPid = new Map();
+  let totalMb = 0;
+  try {
+    for (const m of app.getAppMetrics()) {
+      const mb = (m.memory && m.memory.workingSetSize ? m.memory.workingSetSize : 0) / 1024;
+      totalMb += mb;
+      byType.set(m.type, (byType.get(m.type) || 0) + mb);
+      if (m.pid) byPid.set(m.pid, mb);
+    }
+  } catch {
+    /* metrics unavailable */
+  }
+  return { totalMb, byType, byPid };
+}
+
 // Memory. Reported rather than acted on by default: an exhibit that restarts
 // itself unpredictably is worse than one that uses a lot of RAM, and knowing the
 // real numbers has to come before tuning anything.
 function checkMemory() {
-  let total = 0;
-  const byType = new Map();
-  for (const m of app.getAppMetrics()) {
-    const mb = (m.memory && m.memory.workingSetSize ? m.memory.workingSetSize : 0) / 1024;
-    total += mb;
-    byType.set(m.type, (byType.get(m.type) || 0) + mb);
-  }
+  const { totalMb: total, byType } = memorySnapshot();
+  counters.highWater('memoryMb', Math.round(total));
   const parts = [...byType.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([t, mb]) => `${t} ${Math.round(mb)}MB`)
@@ -705,6 +811,7 @@ function checkMemory() {
   log(`memory: ${Math.round(total)}MB total (${parts})`);
 
   if (!config.memoryLimitMb || total <= config.memoryLimitMb) return;
+  counters.bump('memoryLimitHits');
   warn(`memory is over the ${config.memoryLimitMb}MB limit`);
   // Recycle the least recently used idle panel, one per check, so a spike does
   // not rebuild the whole wall at once.
@@ -712,7 +819,11 @@ function checkMemory() {
     .map((v, i) => ({ v, i }))
     .filter(({ v }) => !inUse(v))
     .sort((a, b) => (touched.get(a.v.id) || 0) - (touched.get(b.v.id) || 0));
-  if (!candidates.length) return log('every panel is in use; leaving them alone');
+  if (!candidates.length) {
+    counters.bump('memoryAllInUse');
+    return log('every panel is in use; leaving them alone');
+  }
+  counters.bump('memoryRecycles', config.views[candidates[0].i].id);
   recyclePanel(candidates[0].i);
 }
 
@@ -751,6 +862,7 @@ function findPreset(id) {
 function applyPreset(id) {
   const preset = findPreset(id);
   if (!preset) return warn(`no preset "${id}"`);
+  counters.bump('presetApplies');
 
   const wanted = clonePresetViews(preset.views);
   const keptViews = [];
@@ -781,6 +893,8 @@ function applyPreset(id) {
     if (w && w.pending) clearTimeout(w.pending);
     watchdog.delete(v.id);
     touched.delete(v.id);
+    lastRefresh.delete(v.id);
+    lastRecycle.delete(v.id);
   });
 
   config.views = wanted;
@@ -1297,12 +1411,16 @@ function hardenView(view, v) {
 
   // Watchdog: reload on crash / failed main-frame load, with backoff.
   wc.on('render-process-gone', (_e, details) => {
+    counters.bump('crashes', v.id);
     warn(`${v.id} render process gone:`, details && details.reason);
     scheduleReload(view, v);
   });
   wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     // -3 is ERR_ABORTED, which a normal redirect or a cancelled load produces.
     if (!isMainFrame || code === -3) return;
+    // Counted after that return, so the number means real failures rather than
+    // every cancelled navigation.
+    counters.bump('failedLoads', v.id);
     warn(`${v.id} failed to load ${url}: ${desc} (${code})`);
     scheduleReload(view, v);
   });
@@ -1310,6 +1428,7 @@ function hardenView(view, v) {
   // dashboard is not a crashed one, and reloading would drop the session.
   wc.on('unresponsive', () => warn(`${v.id} is unresponsive (not reloading)`));
   wc.on('did-finish-load', () => {
+    counters.bump('loads', v.id);
     const w = watchdog.get(v.id);
     if (w) w.attempts = 0;
   });
@@ -1333,6 +1452,10 @@ function scheduleReload(view, v) {
   const promoted = state.mode === 'active' && state.activeIndex === config.views.indexOf(v);
   const recent = Date.now() - (touched.get(v.id) || 0) < config.recentUseMs;
   if (promoted || recent) {
+    // Counted on every deferral, not only the first: the `if (!w.deferred)`
+    // below suppresses the log line, not the event, and how often the safety
+    // rule fired is exactly what a soak wants to know.
+    counters.bump('watchdogDeferrals', v.id);
     if (!w.deferred) {
       log(`deferring reload of ${v.id}: ${promoted ? 'it is promoted' : 'in use just now'}`);
     }
@@ -1341,10 +1464,15 @@ function scheduleReload(view, v) {
   }
 
   w.attempts += 1;
+  counters.bump('watchdogScheduled', v.id);
+  counters.highWater('reloadAttempts', w.attempts, v.id);
   const delay = Math.min(30000, 1000 * 2 ** w.attempts);
   log(`reloading ${v.id} in ${delay}ms (attempt ${w.attempts})`);
   w.pending = setTimeout(() => {
     w.pending = null;
+    // Counted here rather than where it was scheduled, so it means reloads that
+    // actually happened.
+    counters.bump('watchdogReloads', v.id);
     try {
       view.webContents.loadURL(v.url);
     } catch {
@@ -1845,26 +1973,48 @@ let controlServer = null;
 // Everything an administrator can see about the wall without standing at it.
 function wallStatus() {
   const now = Date.now();
-  let memoryMb = 0;
-  try {
-    for (const m of app.getAppMetrics()) {
-      memoryMb += (m.memory && m.memory.workingSetSize ? m.memory.workingSetSize : 0) / 1024;
-    }
-  } catch {
-    /* metrics unavailable */
-  }
+  const mem = memorySnapshot();
+  const ledger = counters.snapshot();
+  const byType = {};
+  for (const [t, mb] of mem.byType) byType[t] = Math.round(mb);
 
   return {
+    // Identifies the run. A sampler compares this across polls to tell "still
+    // the same process" from "it died and came back", which an uptime that went
+    // backwards only implies.
+    runId: RUN_ID,
+    startedAtIso: new Date(startedAt).toISOString(),
+    appVersion: app.getVersion(),
+    electronVersion: process.versions.electron,
+    chromeVersion: process.versions.chrome,
+    platform: `${process.platform}-${process.arch}`,
+    logFile: diag.path(),
     mode: state.mode,
     activePanel: state.activeIndex >= 0 ? config.views[state.activeIndex].id : null,
     activePreset: activePresetId,
     uptimeSec: Math.round((now - startedAt) / 1000),
-    memoryMb: Math.round(memoryMb),
+    memoryMb: Math.round(mem.totalMb),
+    // Sampled at memoryCheckMs, so this is a 60-second peak rather than a true
+    // maximum. Deliberately not given its own faster timer: the sampler polls
+    // more often than the check does anyway.
+    memoryPeakMb: ledger.peaks.memoryMb || 0,
+    // The split that says whether growth is in the pages (Tab) or in the app
+    // itself (Browser, GPU). It only ever existed in a log line before.
+    memoryByType: byType,
+    counters: ledger.totals,
+    timers: {
+      memoryCheckMs: config.memoryCheckMs,
+      upkeepRunning: !!upkeepTimer,
+      memoryWatchRunning: !!memoryTimer,
+    },
+    recycles: recycleProbes.slice(-20),
     wall: { width: config.wall.width, height: config.wall.height, scale: round3(layout.scale) },
     presets: config.presets.map((p) => ({ id: p.id, name: p.name || p.id })),
     panels: config.views.map((v, i) => {
       const wc = contentViews[i] && contentViews[i].webContents;
       const w = watchdog.get(v.id) || {};
+      const c = counters.forStatus(v.id);
+      const pid = osPidOf(contentViews[i]);
       return {
         id: v.id,
         label: v.label || '',
@@ -1880,6 +2030,29 @@ function wallStatus() {
         reloadAttempts: w.attempts || 0,
         reloadDeferred: !!w.deferred,
         lastUsedSecAgo: touched.has(v.id) ? Math.round((now - touched.get(v.id)) / 1000) : null,
+        pid,
+        // Attributing memory to a panel needs the pid join to be sound. Several
+        // panels can share one renderer process, in which case this figure would
+        // be the process total for each of them rather than each panel's share,
+        // so `pidShared` says when not to trust it. See the probe answers in
+        // docs/validation.md.
+        memoryMb: pid && mem.byPid.has(pid) ? Math.round(mem.byPid.get(pid)) : null,
+        pidShared: pid
+          ? contentViews.filter((other) => other && osPidOf(other) === pid).length > 1
+          : null,
+        // Cumulative, unlike everything above. reloadAttempts resets on every
+        // successful load, so without these a panel that crashed and recovered
+        // four hundred times reads zero.
+        crashes: c.crashes,
+        everCrashed: c.crashes > 0,
+        lastCrashAt: c.lastCrashAt,
+        failedLoads: c.failedLoads,
+        loads: c.loads,
+        watchdogReloads: c.watchdogReloads,
+        watchdogDeferrals: c.watchdogDeferrals,
+        timerRefreshes: c.timerRefreshes,
+        recycleCount: c.recycles,
+        reloadAttemptsPeak: c.reloadAttemptsPeak,
       };
     }),
   };
