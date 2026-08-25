@@ -353,6 +353,142 @@ spike does not rebuild the whole wall at once.
 Still to confirm: what memory actually does over days rather than minutes, which
 only the sustained run below can answer.
 
+### Instrumenting the memory countermeasure, and what it found
+
+Built to make the sustained run below possible at all, and it found three defects
+before that run has even started. Measured on the dev machine against
+`config/local-demo.json`, four live public dashboards, with `memoryLimitMb` set
+deliberately under the observed baseline so the ladder engaged immediately.
+
+**Four live dashboards cost 1513MB.** The only previous figure was 699MB for two
+panels against local mocks, which was not a baseline for anything. Split at that
+moment: `Tab 1143MB, Browser 169MB, GPU 131MB, Utility 70MB`. Still macOS, still
+not the show PC, and `workingSetSize` counts shared pages once per process, so
+treat it as a trend rather than an accounting of unique bytes.
+
+**The candidate ordering was wrong, and the log proves it:**
+
+```
+14 recycles in 40 seconds, every one of them demo-1
+```
+
+Ranking ascending on the last-touched timestamp looks like least-recently-used and
+is not. A panel nobody has touched has no timestamp, so every untouched panel
+shared the key 0 and a stable sort took the lowest index every time. Panel 1 was
+rebuilt fourteen times while panels 2 to 4 were never considered, and untouched is
+the normal state of an exhibit wall. Ranking is now by resident memory, which is
+what the action is for, with ties breaking towards whatever has gone longest
+without a rebuild. Same conditions afterwards: **five recycles, one per panel.**
+
+**Recycling faster than a page loads costs memory rather than saving it:**
+
+```
+memory: 1513MB -> 1885MB -> 1804MB   (while recycling every five seconds)
+```
+
+The replacement renderer is up before the old one is gone, so the wall pays for
+both. This is the evidence behind `minRecycleIntervalMs` and behind expressing
+`memoryLimitMb` as a derivation from a measured baseline rather than a guess: a
+limit inside the normal operating band rebuilds a panel on every check, forever.
+
+**A rebuild resets a heavy panel, it does not shrink it.** From a manual
+`POST /api/recycle` against a live dashboard:
+
+```
+old pid 92184 -> new pid 92205, gone=true
+1478MB -> 1252MB after 2s, 1485MB after 6s (-7MB net)
+```
+
+The renderer really was handed back, and the replacement then took the memory
+straight back. A single sample at +2s would have claimed a 226MB win that does not
+exist, which is why the probe takes two and reports both. `gone` is the field that
+matters: an old process id still present in `getAppMetrics()` is a leaked renderer.
+
+With the limit set below the baseline, the ladder now gives up rather than churning:
+
+```
+the last recycle reclaimed 1MB, under the 50MB that counts (2 in a row)
+no further action available: 3 recycles have not reclaimed 50MB
+```
+
+Said once, not every minute. That is also the signal that the growth is not in the
+renderers at all, which is the only thing that justifies the rungs above it.
+
+### The watchdog never backed off, and had not since it was written
+
+```
+counters: loads 141, failedLoads 141
+```
+
+Identical, because `did-finish-load` fires for Chromium's error page too. Every
+failure therefore looked like a recovery, reset the attempt counter, and the
+exponential backoff never advanced past its first step. Reading the code, the
+backoff caps at 30 seconds and the obvious conclusion is that a broken panel
+retries every 30 seconds forever; that was optimistic by two orders of magnitude.
+Measured against a refused port, it was **four times a second**, indefinitely.
+
+Fixed by distinguishing a failed navigation from a successful one per navigation
+rather than by timing, and by not counting the diagnostic pages the app puts up
+itself - loading the "could not be loaded" page counted as recovery, which cleared
+the state and cancelled the retry that page had just promised the reader.
+
+The bounded ladder, verified end to end with compressed timings:
+
+```
+dead failed to load http://127.0.0.1:1/: ERR_UNSAFE_PORT (-312)
+reloading dead in 400ms (attempt 1, round 1)
+reloading dead in 400ms (attempt 2, round 1)
+reloading dead in 400ms (attempt 3, round 1)
+dead: 3 reloads failed, rebuilding the view
+reloading dead in 400ms (attempt 1, round 2)
+...
+dead: giving up after 2 rounds (ERR_UNSAFE_PORT (-312))
+dead: trying again after a pause
+```
+
+At the shipped `retryMs` of ten minutes that is roughly 36 attempts an hour rather
+than 14,500. A url-less panel is now left alone entirely, with zero watchdog
+activity, rather than calling `loadURL('')` into a swallowed exception forever.
+
+### What counts as activity, measured
+
+A claim worth correcting, because it was made in a commit message before it was
+tested. The argument for separating pointer motion from interaction rested on
+Chromium dispatching synthetic mouse-move events when content moves beneath a
+stationary cursor - which would mean a mouse left resting on a live dashboard
+reports activity indefinitely, and on a wall with no cursor auto-hide that would
+be the normal state.
+
+`npm run probe:activity` parks a cursor, sends nothing else, and counts what
+arrives over twelve seconds. **It does not reproduce that behaviour:**
+
+| page                           | moves/second while unattended | sustained stream |
+| ------------------------------ | ----------------------------- | ---------------- |
+| animated (mock ticker)         | 0.08                          | no               |
+| scrolled under a parked cursor | 0.08                          | no               |
+| static (control)               | 0.08                          | no               |
+
+One event in twelve seconds, identically on a page with nothing happening, on one
+animating, and on one being scrolled under the cursor on purpose - scrolling being
+the documented trigger. There is no stream, so **a stationary cursor cannot hold a
+panel in-use for longer than `recentUseMs` after the last real motion.**
+
+Two caveats on the method. The probe parks a synthetic cursor via
+`sendInputEvent` in an offscreen window, which is not the same as a physical
+cursor resting over a visible wall, so this narrows the claim rather than closing
+it. And the single event in every case, including the static control, is
+unexplained; it arrives during the watch window rather than with the parking
+event, and it is the same everywhere, so it is treated as noise rather than as
+signal.
+
+The change it was used to justify stands on other grounds, which the earlier
+commit message understated. Pointer motion is a weaker claim on a panel than a
+click or a keypress: an operator moving the mouse across the wall to reach one
+panel should not defer upkeep on every panel the cursor crosses. And throttling
+those events to one a second is worth it regardless, since unthrottled motion
+across several panels was the highest-frequency thing this app did and carried
+almost no information.
+
 ### Panel CRUD works end to end
 
 `src/main.js` has no unit tests, so `WALLWRIGHT_SELFTEST=1` drives the real path:
