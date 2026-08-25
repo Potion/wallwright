@@ -50,11 +50,15 @@ Released as **v0.1.1** with Windows and macOS artifacts, built on Potion's
 self-hosted runners. `npm test` is 80 tests, `npm run selftest` is 20 end to end
 assertions, and both gate every build. CI is green.
 
-The app is **Wallwright**, the repository is `Potion/hon-wallwright`, and the npm
-package is `hon-wallwright`. An earlier note here said the repository would stay
-`hon-forge` to avoid breaking clones and release URLs; that turned out to be a
-non-issue, because GitHub permanently redirects both after a rename. A stale clone
-keeps pushing to the old URL and it still works.
+The app is **Wallwright**, the repository is `Potion/wallwright`, and the npm
+package is `wallwright`. The `hon-` prefix is gone with the rest of the Honeywell
+naming: the exhibit is for Honeywell, but nothing in the app is specific to them,
+and the prefix implied otherwise.
+
+An earlier note here said the repository would stay `hon-forge` to avoid breaking
+clones and release URLs; that turned out to be a non-issue, because GitHub
+permanently redirects both after a rename. A stale clone keeps pushing to the old
+URL and it still works.
 
 **The releases were renumbered on 2026-08-24.** What shipped as v0.2.0 and v0.3.0
 is now v0.1.0 and v0.1.1, and every `Forge-*` installer has been deleted from

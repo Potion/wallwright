@@ -90,7 +90,7 @@ also open the selected panel directly.
 
 ## Download
 
-Installers are attached to each [release](https://github.com/Potion/hon-wallwright/releases):
+Installers are attached to each [release](https://github.com/Potion/wallwright/releases):
 a Windows installer, a Windows zip for machines where an installer cannot be
 run, and macOS disk images for Apple Silicon and Intel.
 
