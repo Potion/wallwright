@@ -55,14 +55,10 @@ const PAGE = `<!doctype html>
 
 <div class="brand">
   <svg viewBox="0 0 24 24" aria-hidden="true">
-    <rect x="14.7" y="2" width="7.3" height="11.5" fill="var(--accent)" opacity="0.28"/>
-    <rect x="2" y="14.7" width="5.2" height="7.3" fill="var(--accent)" opacity="0.28"/>
-    <rect x="8.4" y="14.7" width="13.6" height="7.3" fill="var(--accent)" opacity="0.28"/>
+    <rect x="14.7" y="2" width="7.3" height="11.5" fill="var(--accent)" opacity="0.4"/>
+    <rect x="2" y="14.7" width="5.2" height="7.3" fill="var(--accent)" opacity="0.4"/>
+    <rect x="8.4" y="14.7" width="13.6" height="7.3" fill="var(--accent)" opacity="0.4"/>
     <rect x="2" y="2" width="11.5" height="11.5" fill="var(--accent)"/>
-    <g fill="#ffffff">
-      <rect x="0.5" y="0.5" width="3" height="3"/><rect x="12" y="0.5" width="3" height="3"/>
-      <rect x="0.5" y="12" width="3" height="3"/><rect x="12" y="12" width="3" height="3"/>
-    </g>
   </svg>
   <h1>Wallwright</h1>
   <span id="mode"></span>

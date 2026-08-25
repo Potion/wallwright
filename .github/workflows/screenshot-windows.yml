@@ -34,6 +34,31 @@ jobs:
 
       - run: npm ci
 
+      # Before assuming anything about why a capture fails: is there a desktop,
+      # and is this process in the session that owns it? A runner can be on a
+      # machine with a perfectly good desktop and still be unable to see it,
+      # because a service runs in session 0 and the desktop is in session 1.
+      - name: Diagnose the session
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          Write-Host "user:                $([Environment]::UserName)"
+          Write-Host "UserInteractive:     $([Environment]::UserInteractive)"
+          Write-Host "process session id:  $((Get-Process -Id $PID).SessionId)"
+          Write-Host "screen count:        $([System.Windows.Forms.Screen]::AllScreens.Count)"
+          foreach ($s in [System.Windows.Forms.Screen]::AllScreens) {
+            Write-Host "  $($s.DeviceName) $($s.Bounds.Width)x$($s.Bounds.Height) primary=$($s.Primary)"
+          }
+          Write-Host "--- sessions on this machine (qwinsta) ---"
+          try { qwinsta } catch { Write-Host "qwinsta unavailable: $_" }
+          Write-Host "--- runner service, if it is one ---"
+          try {
+            Get-CimInstance Win32_Service |
+              Where-Object { $_.Name -like '*actions*' -or $_.PathName -like '*actions-runner*' } |
+              Select-Object Name, StartName, State, PathName | Format-List
+          } catch { Write-Host "service query failed: $_" }
+
       - name: Run the wall and grab the screen
         shell: pwsh
         run: |

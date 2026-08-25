@@ -103,21 +103,20 @@ const SIDES = ['n', 'e', 's', 'w'];
 // hand whether the wall is being previewed small or driven 1:1.
 const SNAP = 10;
 
-// The mark: the app icon's montage at toolbar size. One hero panel wearing the
-// editor's corner grips, a tall sidebar, two along the bottom. Kept as markup
-// rather than an image file so it inherits the palette and ships with no asset.
+// The mark: the app icon's montage, one hero panel and three around it. Kept as
+// markup rather than an image file so it inherits the palette and ships with no
+// asset.
+//
+// The icon carries the editor's corner grips on the hero panel; this size does
+// not. At 20px four white squares read as dirt on the glass rather than as
+// handles, and the montage silhouette is what has to survive. See
+// docs/identity.md.
 const MARK = `
   <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
-    <rect x="14.7" y="2" width="7.3" height="11.5" fill="var(--accent)" opacity="0.28"/>
-    <rect x="2" y="14.7" width="5.2" height="7.3" fill="var(--accent)" opacity="0.28"/>
-    <rect x="8.4" y="14.7" width="13.6" height="7.3" fill="var(--accent)" opacity="0.28"/>
+    <rect x="14.7" y="2" width="7.3" height="11.5" fill="var(--accent)" opacity="0.4"/>
+    <rect x="2" y="14.7" width="5.2" height="7.3" fill="var(--accent)" opacity="0.4"/>
+    <rect x="8.4" y="14.7" width="13.6" height="7.3" fill="var(--accent)" opacity="0.4"/>
     <rect x="2" y="2" width="11.5" height="11.5" fill="var(--accent)"/>
-    <g fill="#ffffff">
-      <rect x="0.5" y="0.5" width="3" height="3"/>
-      <rect x="12" y="0.5" width="3" height="3"/>
-      <rect x="0.5" y="12" width="3" height="3"/>
-      <rect x="12" y="12" width="3" height="3"/>
-    </g>
   </svg>`;
 
 function renderBrand() {
