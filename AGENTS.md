@@ -46,14 +46,21 @@ and the decisions that need Jeff before some of it can be finalized.
 
 ## Where this was left
 
-Released as **v0.3.0** with Windows and macOS artifacts, built on Potion's
+Released as **v0.1.1** with Windows and macOS artifacts, built on Potion's
 self-hosted runners. `npm test` is 80 tests, `npm run selftest` is 20 end to end
 assertions, and both gate every build. CI is green.
 
-The app is **Wallwright**. The repository is still `Potion/hon-forge` and the npm
-package is still `hon-forge`, deliberately: renaming the repo breaks clones and
-existing release URLs. Artifacts from v0.3.0 and earlier are named `Forge-*`;
-anything built since is `Wallwright-*`.
+The app is **Wallwright**, the repository is `Potion/hon-wallwright`, and the npm
+package is `hon-wallwright`. An earlier note here said the repository would stay
+`hon-forge` to avoid breaking clones and release URLs; that turned out to be a
+non-issue, because GitHub permanently redirects both after a rename. A stale clone
+keeps pushing to the old URL and it still works.
+
+**The releases were renumbered on 2026-08-24.** What shipped as v0.2.0 and v0.3.0
+is now v0.1.0 and v0.1.1, and every `Forge-*` installer has been deleted from
+both. Nothing had been downloaded, so it was free to do, and `CHANGELOG.md`
+records it so nobody does it a second time. Anything built from here on is
+`Wallwright-*`.
 
 **One thing is genuinely unverified and it is the important one.** Overlay
 compositing on Windows. Everything CI can prove about Windows is proven: the
