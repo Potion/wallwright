@@ -60,25 +60,22 @@
   Prepared for the Wallwright exhibit &middot; 24 August 2026 &middot;
   <span class="tag tag-v">verified</span> marks a claim a cited source states.
   <span class="tag tag-u">unverified</span> marks inference or something not checked.
-  Platform details are quoted from each vendor's own documentation.
+  Hiperwall's platform details are quoted from Hiperwall's own documentation.
 </p>
 
 <div class="callout correction avoid">
-  <p class="lead">Why Hiperwall, and not Userful</p>
+  <p class="lead">Why Hiperwall is the comparison</p>
   <p>
-    An earlier report ranked Userful the best commercial fit. Userful's own
-    documentation rules it out for this job: it is
-    <strong>"a complete Linux-based operating system derived from Red Hat Enterprise
-    Linux (RHEL) 9"</strong>, running on a dedicated server and streaming content over
-    RTSP to a decoder device behind each display. The exhibit runs on a Windows PC, so
-    Userful would mean replacing the machine, its operating system and its GPU, and
-    then streaming a web page to a screen already attached to a computer that could
-    render it. <span class="tag tag-v">verified</span>
+    Most of this market rules itself out on one requirement: the exhibit runs on a
+    Windows PC, and much of the field is Linux appliances streaming video to a decoder
+    behind each display. Hiperwall is the exception, and the closest thing to
+    Wallwright that can be bought. It runs on Windows, on ordinary PCs, and it renders
+    web pages with a real browser engine rather than a video stream.
+    <span class="tag tag-v">verified</span>
   </p>
   <p>
-    <strong>Hiperwall is the right comparison.</strong> It runs on Windows, on
-    commodity PCs, and it renders web pages with a real browser rather than streaming
-    video. It is the closest thing to Wallwright that can be bought.
+    That makes it the useful comparison. The two agree on the architecture, so the
+    question is not which approach is right; it is what the differences cost.
   </p>
 </div>
 
@@ -144,11 +141,6 @@
       <td>Native, no extra layer <span class="tag tag-v">verified</span></td>
     </tr>
     <tr>
-      <td class="name">Sources</td>
-      <td>Web, images, video, IP streams, remote desktops <span class="tag tag-v">verified</span></td>
-      <td>Web pages only</td>
-    </tr>
-    <tr>
       <td class="name">Failover</td>
       <td>HiperFailSafe, a second controller <span class="tag tag-v">verified</span></td>
       <td>None, and on one PC cannot have one</td>
@@ -169,10 +161,6 @@
 
 <h2>Where Hiperwall wins</h2>
 <ul>
-  <li>
-    <strong>Non-web sources.</strong> Cameras, video, IP streams, remote desktops.
-    Wallwright does web pages and nothing else. <span class="tag tag-v">verified</span>
-  </li>
   <li>
     <strong>Scale.</strong> Many displays, many nodes, one wall or several. Wallwright
     drives one output.
@@ -239,7 +227,6 @@
 </p>
 <p>Hiperwall becomes the right answer if any of these turn out to be true:</p>
 <ol>
-  <li>The exhibit needs camera, video or remote desktop sources.</li>
   <li>It grows to several walls, or many displays.</li>
   <li>Unattended reliability with failover becomes a hard requirement.</li>
   <li>
@@ -283,7 +270,6 @@
   <li>Hiperwall, control room video walls: sources, HiperKVM, licensing per tab. https://connect.hiperwall.com/control-room-video-walls</li>
   <li>Hiperwall, Premium Suite and HiperFailSafe. https://www.hiperwall.com/hiperwall-premium-suite</li>
   <li>Hiperwall, HiperController and the external API. https://hiperwall.com/technology-stack/hipercontroller/</li>
-  <li>Userful, server requirements: RHEL 9 derived OS, certified GPUs, RTSP to uClients. https://docs.userful.com/userful-infinity/hardware-overview/supported-servers/self-sourcing-a-userful-server.md</li>
   <li>Wallwright design rationale: SPEC.md in the repository.</li>
   <li>Wallwright measurements: docs/validation.md in the repository.</li>
 </ol>
