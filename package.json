@@ -21,7 +21,8 @@
     "capture": "node src/dev/capture.js",
     "probe:session": "node src/dev/session-probe-run.js",
     "coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\"",
-    "selftest": "node src/dev/selftest-run.js"
+    "selftest": "node src/dev/selftest-run.js",
+    "report": "electron src/dev/make-pdf.js docs/report/comparison.html docs/report/forge-vs-commercial.pdf"
   },
   "engines": {
     "node": ">=18"

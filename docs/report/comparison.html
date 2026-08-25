@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Forge and the commercial alternatives</title>
+<style>
+  @page { size: Letter; margin: 18mm 16mm 20mm 16mm; }
+
+  :root {
+    --ink: #14181d;
+    --muted: #5b6672;
+    --rule: #d8dee5;
+    --poppy: #f04e23;
+    --panel: #f5f7f9;
+    --good: #1a7f4b;
+    --bad: #b3261e;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    color: var(--ink);
+    font: 10.5pt/1.5 "Helvetica Neue", Helvetica, Arial, sans-serif;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  h1 { font-size: 23pt; line-height: 1.15; margin: 0 0 6pt; letter-spacing: -0.4pt; }
+  h2 {
+    font-size: 13pt; margin: 22pt 0 8pt; padding-bottom: 4pt;
+    border-bottom: 1.5pt solid var(--poppy); break-after: avoid;
+  }
+  h3 { font-size: 11pt; margin: 14pt 0 4pt; break-after: avoid; }
+  p { margin: 0 0 8pt; }
+  ul, ol { margin: 0 0 8pt; padding-left: 16pt; }
+  li { margin-bottom: 4pt; }
+  strong { font-weight: 600; }
+  a { color: inherit; text-decoration: none; }
+
+  .deck { color: var(--muted); font-size: 11pt; margin-bottom: 4pt; }
+  .byline {
+    color: var(--muted); font-size: 8.5pt; padding-top: 8pt;
+    border-top: 0.75pt solid var(--rule); margin-bottom: 4pt;
+  }
+
+  .callout {
+    background: var(--panel); border-left: 3pt solid var(--poppy);
+    padding: 10pt 12pt; margin: 12pt 0; break-inside: avoid;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .lead { font-weight: 600; }
+
+  table { width: 100%; border-collapse: collapse; margin: 10pt 0 12pt; font-size: 9pt; }
+  th, td {
+    text-align: left; vertical-align: top; padding: 6pt 7pt;
+    border-bottom: 0.75pt solid var(--rule);
+  }
+  th {
+    font-size: 8pt; text-transform: uppercase; letter-spacing: 0.4pt;
+    color: var(--muted); border-bottom: 1pt solid var(--ink); font-weight: 600;
+  }
+  td.name { font-weight: 600; white-space: nowrap; }
+  /* A row split across a page break loses the cell it was halfway through. */
+  tr { break-inside: avoid; }
+  thead { display: table-header-group; }
+  tbody tr:nth-child(even) { background: #fafbfc; }
+
+  .yes { color: var(--good); font-weight: 600; }
+  .no { color: var(--bad); font-weight: 600; }
+  .unk { color: var(--muted); font-style: italic; }
+
+  .tag {
+    display: inline-block; font-size: 7.5pt; font-weight: 600; letter-spacing: 0.3pt;
+    text-transform: uppercase; padding: 1.5pt 5pt; border-radius: 2pt; vertical-align: 1pt;
+  }
+  .tag-v { background: #e3f3ea; color: var(--good); }
+  .tag-u { background: #fdecea; color: var(--bad); }
+
+  .sources { font-size: 8pt; color: var(--muted); }
+  .sources li { margin-bottom: 3pt; word-break: break-all; }
+
+  .avoid { break-inside: avoid; }
+  .page-break { break-before: page; }
+</style>
+</head>
+<body>
+
+<h1>Forge and the commercial alternatives</h1>
+<p class="deck">Does the Next Gen Control Room LED wall need software we could have bought?</p>
+<p class="byline">
+  Prepared for the Forge exhibit &middot; 24 August 2026 &middot;
+  Sources listed at the end. Claims are marked
+  <span class="tag tag-v">verified</span> where a cited source states them and
+  <span class="tag tag-u">unverified</span> where they are inference or were not checked.
+</p>
+
+<div class="callout">
+  <p class="lead">The short answer</p>
+  <p>
+    Yes, products exist that do this, and they are mature. None of them is a drop-in
+    for what this exhibit needs, and the cheap end of the market cannot do it at all.
+    The single question that decides a buy is whether any vendor can put a
+    <strong>logged-in Honeywell dashboard</strong> on the wall and keep it usable. No
+    vendor documents that, so it can only be settled by a demo against a real
+    dashboard. If a purchase is on the table, ask that first.
+  </p>
+</div>
+
+<h2>What the exhibit actually needs</h2>
+<p>
+  Five requirements, in the order that they constrain the choice:
+</p>
+<ol>
+  <li>
+    <strong>Live, interactive web pages.</strong> Not a video feed of a dashboard. An
+    operator at the wall must be able to click and type, including through a single
+    sign-on flow, with the session surviving.
+  </li>
+  <li>
+    <strong>Several pages laid out on one wall</strong>, each positioned and scaled
+    independently, with no browser chrome.
+  </li>
+  <li>
+    <strong>Rearrangeable on site</strong>, against the real dashboards, at the real
+    wall resolution, without editing config files at the venue.
+  </li>
+  <li>
+    <strong>Controllable from a tablet or phone</strong>, so an administrator is not
+    tied to a keyboard at the wall.
+  </li>
+  <li>
+    <strong>One wall, one PC.</strong> A single 3840&times;2160 output. Not a
+    multi-room, multi-display estate.
+  </li>
+</ol>
+<p>
+  Requirement 1 eliminates most of the market. Requirement 5 makes most of the rest
+  oversized.
+</p>
+
+<h2>The options</h2>
+
+<h3>The enterprise control room tier</h3>
+<p>
+  Four vendors sell software that genuinely does this. They are aimed at command
+  centres and network operations rooms, and they are architected as
+  <em>video wall controllers</em>: a server, or several, driving many displays.
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:19%">Product</th>
+      <th style="width:29%">Strength for this job</th>
+      <th style="width:29%">Cost and shape</th>
+      <th style="width:23%">Concern</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="name">Userful</td>
+      <td>
+        Web application sources, and operators can drive mouse and keyboard from a
+        desktop or smartphone. The whole platform is managed from a browser or phone.
+        <span class="tag tag-v">verified</span>
+      </td>
+      <td>
+        <strong>$500 per display, per year.</strong> Subscription, so no capital
+        approval. <span class="tag tag-v">verified</span>
+      </td>
+      <td>Server based. Sized for estates far larger than one wall.</td>
+    </tr>
+    <tr>
+      <td class="name">Polywall</td>
+      <td>
+        A real shipping iOS app, plus Lens for remote wall access. Sources include
+        URLs with dashboards and applications, and desktops with IP-KVM.
+        <span class="tag tag-v">verified</span>
+      </td>
+      <td>
+        One licence covers every wall in a room.
+        <span class="tag tag-v">verified</span>
+        Pricing is not published. <span class="tag tag-u">unverified</span>
+      </td>
+      <td>
+        Deploys as Server, Visualizer, Worker and Agent nodes. A large footprint for
+        one PC.
+      </td>
+    </tr>
+    <tr>
+      <td class="name">Hiperwall</td>
+      <td>
+        HiperSource Browser is a real Chromium browser that bypasses the screen
+        capture approach entirely. HiperKVM adds keyboard and mouse control.
+        <span class="tag tag-v">verified</span>
+      </td>
+      <td>
+        Licensed per display, and <strong>each browser tab consumes one HiperSource
+        licence</strong>. <span class="tag tag-v">verified</span>
+      </td>
+      <td>
+        Cost scales with panel count, which is the thing you would want freedom to
+        grow.
+      </td>
+    </tr>
+    <tr>
+      <td class="name">VuWall</td>
+      <td>
+        Video wall management and KVM operations, strong AV-over-IP and security
+        integrations. <span class="tag tag-v">verified</span>
+      </td>
+      <td>Not published. <span class="tag tag-u">unverified</span></td>
+      <td>
+        Oriented to AV infrastructure and security operations. More plumbing than this
+        exhibit needs.
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<p>
+  Barco Overture and Datapath were not evaluated.
+  <span class="tag tag-u">unverified</span>
+</p>
+
+<h3>The lightweight tier, and why it does not qualify</h3>
+<p>
+  Free tools exist that look like an exact match and are not. The closest, GRID KIOSK,
+  describes itself as a browser-based multi-pane website dashboard for kiosk use. It
+  embeds pages with <strong>iframes</strong>, and its own documentation warns that
+  sites may refuse to load because of <code>X-Frame-Options</code> or
+  <code>Content-Security-Policy</code>. <span class="tag tag-v">verified</span>
+</p>
+<p>
+  That is fatal here, not inconvenient. Enterprise applications routinely forbid being
+  framed, and single sign-on commonly breaks inside an iframe. This is the same
+  reasoning that ruled iframes out of Forge's own design before any code was written.
+  Multis, the other candidate, runs one browser per <em>monitor</em> rather than
+  panels on one screen, which is a different problem.
+  <span class="tag tag-v">verified</span>
+</p>
+
+<h2>How Forge compares</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th style="width:34%">Capability</th>
+      <th style="width:22%">Forge</th>
+      <th style="width:44%">Commercial tier</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Live interactive web pages, natively rendered</td>
+      <td class="yes">Yes</td>
+      <td>Yes, in all four</td>
+    </tr>
+    <tr>
+      <td>Handles an SSO login on the wall</td>
+      <td class="yes">Yes, measured</td>
+      <td class="unk">Not documented by any vendor</td>
+    </tr>
+    <tr>
+      <td>Several panels share one login</td>
+      <td class="yes">Yes</td>
+      <td class="unk">Not offered or documented</td>
+    </tr>
+    <tr>
+      <td>Rearrange the montage at the wall, on live pages</td>
+      <td class="yes">Yes</td>
+      <td class="unk">Layouts are authored in a console, not on the live wall</td>
+    </tr>
+    <tr>
+      <td>Named layout presets</td>
+      <td class="yes">Yes</td>
+      <td>Yes, the most consistently offered feature in the category</td>
+    </tr>
+    <tr>
+      <td>Control from a tablet or phone</td>
+      <td>Web page served by the wall</td>
+      <td>Yes, and Polywall ships a native iOS app</td>
+    </tr>
+    <tr>
+      <td>Health and status reporting</td>
+      <td>Per panel, over HTTP</td>
+      <td>Yes, and more mature</td>
+    </tr>
+    <tr>
+      <td>Redundancy and failover</td>
+      <td class="no">No</td>
+      <td>Yes, via a second server</td>
+    </tr>
+    <tr>
+      <td>Camera, RTSP, HDMI and KVM sources</td>
+      <td class="no">No, web only</td>
+      <td>Yes</td>
+    </tr>
+    <tr>
+      <td>Multi-display and multi-room estates</td>
+      <td class="no">No, one output</td>
+      <td>Yes, this is what they are built for</td>
+    </tr>
+    <tr>
+      <td>Vendor support contract</td>
+      <td class="no">No</td>
+      <td>Yes</td>
+    </tr>
+    <tr>
+      <td>Recurring licence cost</td>
+      <td class="yes">None</td>
+      <td>Per display, per year, and sometimes per browser tab</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>
+  The honest reading of that table: <strong>Forge is not filling a gap in the
+  market.</strong> It is narrower than any of these products, and it lacks
+  redundancy, non-web sources and a support contract. What it has instead is an exact
+  fit to a one-wall, web-only, SSO-protected exhibit, with two behaviours no vendor
+  offers: arranging the montage on the live wall, and pointing several panels at one
+  login.
+</p>
+
+<div class="callout avoid">
+  <p class="lead">Would buying have been cheaper?</p>
+  <p>
+    On licence cost alone, yes. Userful at $500 a year for one display is less than
+    the engineering time already spent. The costs that do not appear on the invoice
+    are a vendor dependency, a server deployment on the show PC, and an IT approval
+    conversation about a third-party platform rather than an in-house application. On
+    current evidence those are larger here than the licence, but that is a judgement,
+    not a measurement.
+  </p>
+</div>
+
+<h2>What has actually been proven about Forge</h2>
+<p>
+  Everything below was measured on the running application, not assumed.
+  <span class="tag tag-v">verified</span>
+</p>
+<ul>
+  <li>
+    <strong>Interactive panels need no coordinate translation.</strong> Each panel is a
+    native browser view, so input is routed and scaled to it by the browser engine,
+    zoom included.
+  </li>
+  <li>
+    <strong>A login survives more than expected.</strong> Cookies live in the session
+    partition, not the renderer, so a session survives a reload, a fresh navigation,
+    and even the view being destroyed and rebuilt. What a reload costs is the
+    interaction in progress. This corrected a long-held assumption in the project's
+    own design notes.
+  </li>
+  <li>
+    <strong>Memory is the real long-run risk.</strong> Two panels and the overlay
+    measured 699 MB, and 1414 MB was observed during testing. Panels can now be
+    refreshed and their renderers recycled on a timer, never while in use.
+  </li>
+  <li>
+    <strong>Windows behaves.</strong> The application's own end-to-end self-test passes
+    on a Windows runner: panel management, mode handling, presets and the upkeep
+    timers.
+  </li>
+  <li>
+    <strong>80 unit tests</strong> cover configuration, layout geometry and the control
+    server at close to full line coverage, plus 20 end-to-end assertions that gate
+    every build.
+  </li>
+</ul>
+
+<h2>What is not yet proven</h2>
+<div class="callout avoid">
+  <p class="lead">One open risk outweighs the rest</p>
+  <p>
+    Forge draws a transparent overlay above the live pages, and the whole architecture
+    was chosen on the assumption that this composites correctly. That is
+    <strong>confirmed on macOS and unverified on Windows</strong>, which is what the
+    show PC runs. If it fails there, documented fallbacks exist, but they are more
+    awkward. <strong>Installing the current build on the show PC and looking at it is
+    the highest-value hour available.</strong> It is also the point at which a buy
+    decision becomes much easier to argue.
+  </p>
+</div>
+<ul>
+  <li>Builds are unsigned on both platforms, pending certificates.</li>
+  <li>Auto-launch on boot and crash restart are not built.</li>
+  <li>Behaviour over days rather than minutes, particularly memory, is untested.</li>
+  <li>
+    No vendor has been asked whether their product handles a real Honeywell SSO flow.
+  </li>
+</ul>
+
+<h2>Recommendation</h2>
+<ol>
+  <li>
+    <strong>Test the Windows overlay first.</strong> It costs an hour and it either
+    removes the largest technical risk or turns a buy into the obvious answer.
+  </li>
+  <li>
+    <strong>Ask whether the venue already has a wall processor.</strong> If a Userful,
+    Barco or similar box is already specified for the build, its browser source may be
+    free at the margin and vendor supported. That changes the calculus entirely and is
+    a question for the AV integrator, not a procurement exercise.
+  </li>
+  <li>
+    <strong>If buying, evaluate Userful first</strong>, on published pricing and the
+    documented combination of web sources with phone and tablet control. Take Polywall
+    second, for the native iOS app, and get a quote early since pricing is private.
+  </li>
+  <li>
+    <strong>Make an SSO demo the first vendor question.</strong> Not a feature list. A
+    real Honeywell dashboard, signed in, on their wall.
+  </li>
+  <li>
+    <strong>Raise the optics.</strong> This exhibit showcases Honeywell's own Next Gen
+    Control Room. Userful, Hiperwall and VuWall all market themselves to control rooms.
+    Running one inside Honeywell's control room story may be fine, or may be exactly
+    wrong. That is a question for whoever owns the narrative.
+  </li>
+</ol>
+
+<h2>Sources</h2>
+<ol class="sources">
+  <li>Userful, video wall software. https://www.userful.com/video-wall</li>
+  <li>Userful, beyond video wall processors. https://www.userful.com/video-wall-processor</li>
+  <li>Userful pricing, SHI listing. https://www.shi.com/product/32215340/userful-Professional-Video-Wall-Deployment-Solution</li>
+  <li>Hiperwall, HiperSource Browser. https://hiperwall.com/browser/</li>
+  <li>Hiperwall, control room video walls. https://connect.hiperwall.com/control-room-video-walls</li>
+  <li>Hiperwall, Premium Suite. https://www.hiperwall.com/hiperwall-premium-suite</li>
+  <li>Hiperwall, HiperController. https://hiperwall.com/technology-stack/hipercontroller/</li>
+  <li>Polywall, control room solutions. https://polywall.net/solutions/control-room</li>
+  <li>Polywall Mobile, Apple App Store. https://apps.apple.com/us/app/polywall-mobile/id990564135</li>
+  <li>Polywall Lens, remote access. https://polywall.net/product/lens</li>
+  <li>VuWall, control rooms. https://vuwall.com/applications/control-rooms/</li>
+  <li>GRID KIOSK. https://github.com/complicatiion/grid-kiosk</li>
+  <li>Multis. https://github.com/ddresch/multis</li>
+  <li>Forge measurements: docs/validation.md in the hon-forge repository.</li>
+</ol>
+
+</body>
+</html>
