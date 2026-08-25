@@ -1,7 +1,7 @@
 {
   "name": "hon-wallwright",
   "productName": "Wallwright",
-  "version": "0.3.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Wallwright: a montage of live, interactive web pages laid out on one large LED wall, arrangeable at the wall itself. Electron + WebContentsView.",
   "main": "src/main.js",
