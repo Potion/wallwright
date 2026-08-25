@@ -56,6 +56,32 @@ jobs:
           }
           Write-Host "--- sessions on this machine (qwinsta) ---"
           try { qwinsta } catch { Write-Host "qwinsta unavailable: $_" }
+          Write-Host "--- is anyone actually logged in? ---"
+          # qwinsta shows a console session exists; it does not show whether a
+          # user is signed into it. explorer.exe is the shell: if it is running,
+          # someone is logged in, and its session id is the one with a desktop.
+          try { query user } catch { Write-Host "query user: none logged on" }
+          $shells = Get-Process -Name explorer -ErrorAction SilentlyContinue
+          if ($shells) {
+            foreach ($e in $shells) { Write-Host "explorer.exe in session $($e.SessionId)" }
+          } else {
+            Write-Host "explorer.exe is NOT running: no interactive desktop exists yet"
+          }
+
+          Write-Host "--- how the runner is started ---"
+          try {
+            Get-CimInstance Win32_Service |
+              Where-Object { $_.PathName -like '*actions-runner*' -or $_.Name -like '*actions.runner*' } |
+              Select-Object Name, StartName, State, StartMode | Format-List
+          } catch { Write-Host "service query failed: $_" }
+
+          Write-Host "--- autologon configuration ---"
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+          foreach ($n in 'AutoAdminLogon', 'DefaultUserName', 'DefaultDomainName') {
+            $v = (Get-ItemProperty -Path $key -Name $n -ErrorAction SilentlyContinue).$n
+            Write-Host "  $n = $v"
+          }
+
           Write-Host "--- runner service, if it is one ---"
           try {
             Get-CimInstance Win32_Service |
