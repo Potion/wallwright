@@ -332,3 +332,12 @@ test('when nothing is eligible it says what actually blocked it', () => {
   assert.match(plan.reason, /2 recycled too recently/);
   assert.match(plan.reason, /still loading/);
 });
+
+test('the watchdog is not blocked by the load it is reacting to', () => {
+  // isLoading() is still true when did-fail-load fires. Treating that as "leave
+  // this alone" deferred recovery permanently: one failure and the panel was
+  // never retried, which is worse than the unbounded retrying it replaced.
+  const failing = panel({ loading: true });
+  assert.strictEqual(ineligibleReason(failing, opts()), 'still loading');
+  assert.strictEqual(ineligibleReason(failing, opts({ allowLoading: true })), null);
+});

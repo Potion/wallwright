@@ -68,7 +68,7 @@ function summarizeMetrics(metrics) {
 //
 // `reason` is returned rather than logged so the caller can say why nothing
 // happened, which is the difference between a quiet wall and an inexplicable one.
-function ineligibleReason(p, { now, recentUseMs, minRecycleIntervalMs, force }) {
+function ineligibleReason(p, { now, recentUseMs, minRecycleIntervalMs, force, allowLoading }) {
   // Promotion is never overridden, at any rung. Somebody is standing at the wall
   // looking at this panel, and the idle timer will dock it soon enough anyway.
   if (p.promoted) return 'promoted';
@@ -76,7 +76,12 @@ function ineligibleReason(p, { now, recentUseMs, minRecycleIntervalMs, force }) 
   // Mid-load is both unkind and pointless: it may be an SSO redirect chain, and a
   // page that has not finished loading has not reached the memory that recycling
   // would reclaim.
-  if (p.loading) return 'still loading';
+  //
+  // allowLoading exists for the watchdog, where the same fact means the opposite
+  // thing. isLoading() is still true at the moment did-fail-load fires, so
+  // treating it as "leave this alone" deferred the recovery of a panel that had
+  // just failed, permanently. Measured: one failure and the panel never retried.
+  if (p.loading && !allowLoading) return 'still loading';
   // The popup belongs to this panel's session. Rebuilding the opener orphans the
   // login it is in the middle of.
   if (p.popupOpen) return 'an SSO popup is open';

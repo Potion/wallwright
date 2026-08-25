@@ -623,6 +623,7 @@ function deletePanel(id) {
 
   const w = watchdog.get(id);
   if (w && w.pending) clearTimeout(w.pending);
+  if (w && w.slowTimer) clearTimeout(w.slowTimer);
   watchdog.delete(id);
   touched.delete(id);
   // These two were the only maps left behind. It is kilobytes, but the reason to
@@ -746,7 +747,14 @@ function eligible(v, i, op, { force = false } = {}) {
   const reason = ineligibleReason(p, {
     now,
     recentUseMs: config.recentUseMs,
-    minRecycleIntervalMs: op === 'refresh' ? 0 : config.minRecycleIntervalMs,
+    // The cooldown exists to stop rebuild stampedes, so it applies to rebuilds
+    // only. Applying it to a reload meant the watchdog could not recover a panel
+    // for a minute after escalating to a rebuild, which is exactly when it needs
+    // to: measured, the panel stopped retrying and stayed on the error page.
+    minRecycleIntervalMs: op === 'recycle' ? config.minRecycleIntervalMs : 0,
+    // The watchdog is reacting to a load that already failed, and isLoading() is
+    // still true at that moment. Deferring on it would mean never recovering.
+    allowLoading: op === 'reload',
     force,
   });
   if (!reason) {
@@ -763,10 +771,12 @@ function eligible(v, i, op, { force = false } = {}) {
     now,
     maxDeferMs: config.maxDeferMs,
   });
-  // Only "in use" expires. A loading page or an open SSO popup is a reason to
-  // wait rather than a claim on the panel, and forcing through either would
-  // interrupt exactly what the rule exists to protect.
-  if (expired && reason === 'in use') {
+  // Every reason expires except a policy one. The alternative was measured twice
+  // in one afternoon: a reason that cannot expire, on a deferral that is only
+  // re-checked when the wall docks, is a panel that never recovers. Fifteen
+  // minutes of "still loading" is not a login in progress, and a popup open that
+  // long has been abandoned.
+  if (expired && reason !== 'neverRecycle is set') {
     const waited = Math.round((now - deferredSince.get(key)) / 1000);
     deferredSince.delete(key);
     warn(`${v.id}: ${op} deferred for ${waited}s, proceeding anyway`);
@@ -1133,6 +1143,7 @@ function applyPreset(id) {
   spareSpecs.forEach((v) => {
     const w = watchdog.get(v.id);
     if (w && w.pending) clearTimeout(w.pending);
+    if (w && w.slowTimer) clearTimeout(w.slowTimer);
     watchdog.delete(v.id);
     touched.delete(v.id);
     lastRefresh.delete(v.id);
@@ -1663,73 +1674,218 @@ function hardenView(view, v) {
     // Counted after that return, so the number means real failures rather than
     // every cancelled navigation.
     counters.bump('failedLoads', v.id);
-    warn(`${v.id} failed to load ${url}: ${desc} (${code})`);
+    const w = wd(v.id);
+    // Marks this navigation as failed, so the did-finish-load that follows for
+    // Chromium's error page is not mistaken for recovery. Measured: loads and
+    // failedLoads were identical, 141 each, because every error page counted as a
+    // successful load and reset the ladder - which is why a broken panel retried
+    // at the base delay forever instead of backing off.
+    w.sawFailure = true;
+    const text = `${desc} (${code})`;
+    // The same failure repeating is one fact, not fifty. An unattended wall can
+    // otherwise fill its log with one message and push out everything else.
+    if (w.lastError === text) {
+      w.suppressed += 1;
+      if (w.suppressed % 10 === 0) {
+        warn(`${v.id} still failing: ${text}, ${w.suppressed} times`);
+      }
+    } else {
+      w.lastError = text;
+      w.suppressed = 0;
+      warn(`${v.id} failed to load ${url}: ${text}`);
+    }
     scheduleReload(view, v);
   });
   // 'unresponsive' is deliberately NOT a reload trigger: a slow enterprise
   // dashboard is not a crashed one, and reloading would drop the session.
   wc.on('unresponsive', () => warn(`${v.id} is unresponsive (not reloading)`));
-  wc.on('did-finish-load', () => {
-    counters.bump('loads', v.id);
+  // Cleared per navigation, so a failure recorded for one load cannot suppress
+  // recovery from the next.
+  wc.on('did-start-loading', () => {
     const w = watchdog.get(v.id);
-    if (w) w.attempts = 0;
+    if (w) w.sawFailure = false;
+  });
+  wc.on('did-finish-load', () => {
+    const w = watchdog.get(v.id);
+    if (!w) return;
+    // An error page finishes loading too, and so does the diagnostic page this
+    // app puts up itself. Only a load of the real URL that did not fail counts as
+    // the panel having come back.
+    if (w.sawFailure) {
+      w.sawFailure = false;
+      return;
+    }
+    if (w.showingDiagnostic) {
+      w.showingDiagnostic = false;
+      return;
+    }
+    counters.bump('loads', v.id);
+    // Clears the whole ladder, not only the attempt count: a panel that has come
+    // back should not be one failure away from being declared unrecoverable.
+    w.attempts = 0;
+    w.round = 0;
+    w.gaveUp = false;
+    w.lastError = null;
+    w.suppressed = 0;
+    if (w.slowTimer) {
+      clearTimeout(w.slowTimer);
+      w.slowTimer = null;
+    }
   });
 }
 
 function wd(id) {
-  if (!watchdog.has(id)) watchdog.set(id, { attempts: 0, pending: null, deferred: false });
+  if (!watchdog.has(id)) {
+    watchdog.set(id, {
+      attempts: 0,
+      pending: null,
+      deferred: false,
+      // How many times the whole ladder has been walked. Round 2 is the last one:
+      // past that the panel is declared unrecoverable rather than retried forever.
+      round: 0,
+      gaveUp: false,
+      slowTimer: null,
+      lastError: null,
+      suppressed: 0,
+      sawFailure: false,
+      // True while the panel is showing a page this app generated rather than the
+      // configured one. Without it, loading the "could not be loaded" page counts
+      // as the panel having recovered, which clears the ladder and cancels the
+      // retry that page has just promised the reader.
+      showingDiagnostic: false,
+    });
+  }
   return watchdog.get(id);
+}
+
+// What a panel that cannot be recovered shows.
+//
+// Not a blank rectangle and not Chromium's error page: on a wall, both read as
+// "this thing is broken", while a dark panel with the accent heading reads as
+// deliberate. It also makes a dead panel diagnosable by somebody standing in
+// front of the wall with no access to a log, which is the realistic support
+// situation for an exhibit.
+function unrecoverableURL(v, w) {
+  const retry = config.watchdog.retryMs
+    ? `Retrying every ${Math.round(config.watchdog.retryMs / 60000)} minutes.`
+    : 'Not retrying.';
+  const html = `<body style="margin:0;height:100vh;display:flex;align-items:center;
+    justify-content:center;background:#0d1117;color:#8b949e;
+    font:15px/1.6 -apple-system,Helvetica,Arial,sans-serif;text-align:center">
+    <div style="max-width:80%">
+    <div style="color:#f04e23;font-weight:600;font-size:19px;margin-bottom:12px">
+    ${escapeHtml(v.label || v.id)} could not be loaded</div>
+    <div style="font-family:ui-monospace,Menlo,monospace;color:#e6edf3;
+    word-break:break-all;margin-bottom:12px">${escapeHtml(v.url || '(no URL set)')}</div>
+    <div>${escapeHtml(w.lastError || 'unknown error')}</div>
+    <div style="margin-top:12px">Gave up after ${w.round + 1} rounds
+    at ${escapeHtml(new Date().toLocaleTimeString())}. ${retry}</div>
+    </div></body>`;
+  return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+}
+
+// Load whatever this panel should be showing. The one place that decides, so the
+// watchdog cannot disagree with every other load path about what an empty URL
+// means - it used to call loadURL('') and throw into a swallowed catch, then do it
+// again thirty seconds later, forever.
+function loadPanel(view, v) {
+  try {
+    view.webContents.loadURL(v.url || placeholderURL(v));
+  } catch {
+    /* window torn down */
+  }
 }
 
 function scheduleReload(view, v) {
   const w = wd(v.id);
-  if (w.pending) return; // one in-flight reload per view
+  if (w.pending || w.gaveUp) return; // one in-flight reload per view
+  const i = config.views.indexOf(v);
+
+  // A panel with no URL has nothing to recover. It shows the placeholder, and the
+  // placeholder cannot fail, so retrying is pure noise.
+  if (!v.url) return;
 
   // Never reload a panel somebody is using. The session itself would survive
   // (see src/dev/session-probe.js), but the interaction in progress would not:
   // credentials half typed, an SSO redirect chain mid-flight, an SPA's current
-  // view. That used to mean only the promoted panel, but with an interactive
-  // grid someone can be signing in without promoting anything, so recent input
-  // counts too.
-  const promoted = state.mode === 'active' && state.activeIndex === config.views.indexOf(v);
-  const recent = Date.now() - (touched.get(v.id) || 0) < config.recentUseMs;
-  if (promoted || recent) {
+  // view. Routed through eligible() so this agrees with upkeep and with the
+  // memory ladder, and so a panel that is always busy is not deferred forever.
+  const verdict = eligible(v, i, 'reload');
+  if (!verdict.ok) {
     // Counted on every deferral, not only the first: the `if (!w.deferred)`
     // below suppresses the log line, not the event, and how often the safety
     // rule fired is exactly what a soak wants to know.
     counters.bump('watchdogDeferrals', v.id);
-    if (!w.deferred) {
-      log(`deferring reload of ${v.id}: ${promoted ? 'it is promoted' : 'in use just now'}`);
-    }
+    if (!w.deferred) log(`deferring reload of ${v.id}: ${verdict.reason}`);
     w.deferred = true;
     return;
+  }
+
+  const cfg = config.watchdog;
+  // Out of attempts for this round. Escalate once to a rebuild, because a fresh
+  // renderer fixes failures a reload cannot - a wedged GPU context, a renderer
+  // dying on its own corrupt state - and the sessionStorage a rebuild costs is
+  // already gone: the panel is showing an error, not a session.
+  if (cfg.maxAttempts && w.attempts >= cfg.maxAttempts) {
+    if (cfg.escalateToRecycle && w.round === 0) {
+      w.round = 1;
+      w.attempts = 0;
+      warn(`${v.id}: ${cfg.maxAttempts} reloads failed, rebuilding the view`);
+      if (i >= 0) recyclePanel(i);
+      return;
+    }
+    return giveUpOn(view, v, w);
   }
 
   w.attempts += 1;
   counters.bump('watchdogScheduled', v.id);
   counters.highWater('reloadAttempts', w.attempts, v.id);
-  const delay = Math.min(30000, 1000 * 2 ** w.attempts);
-  log(`reloading ${v.id} in ${delay}ms (attempt ${w.attempts})`);
+  const delay = Math.min(cfg.maxDelayMs, cfg.baseDelayMs * 2 ** w.attempts);
+  log(`reloading ${v.id} in ${delay}ms (attempt ${w.attempts}, round ${w.round + 1})`);
   w.pending = setTimeout(() => {
     w.pending = null;
     // Counted here rather than where it was scheduled, so it means reloads that
     // actually happened.
     counters.bump('watchdogReloads', v.id);
-    try {
-      view.webContents.loadURL(v.url);
-    } catch {
-      /* window torn down */
-    }
+    loadPanel(view, v);
   }, delay);
+}
+
+// Stop the fast ladder and say so on the wall. Then try again on a slow timer
+// rather than never: a dashboard behind a maintenance window, or a network that
+// comes back, should heal without anybody driving to the venue. Retrying every ten
+// minutes instead of every thirty seconds takes the log from roughly 120 lines an
+// hour to 6, and the renderer churn to nearly nothing.
+function giveUpOn(view, v, w) {
+  w.gaveUp = true;
+  w.showingDiagnostic = true;
+  warn(`${v.id}: giving up after ${w.round + 1} rounds (${w.lastError || 'unknown error'})`);
+  try {
+    view.webContents.loadURL(unrecoverableURL(v, w));
+  } catch {
+    /* window torn down */
+  }
+  if (w.slowTimer) clearTimeout(w.slowTimer);
+  if (!config.watchdog.retryMs) return;
+  w.slowTimer = setTimeout(() => {
+    w.slowTimer = null;
+    w.gaveUp = false;
+    w.round = 0;
+    w.attempts = 0;
+    log(`${v.id}: trying again after a pause`);
+    const i = config.views.indexOf(v);
+    if (i >= 0) loadPanel(contentViews[i], v);
+  }, config.watchdog.retryMs);
 }
 
 function runDeferredReloads() {
   config.views.forEach((v, i) => {
     const w = watchdog.get(v.id);
     if (!w || !w.deferred) return;
-    // Still in use: leave it deferred rather than reloading under them. The
-    // idle timer and the next dock will both come back around.
-    if (Date.now() - (touched.get(v.id) || 0) < config.recentUseMs) return;
+    // Still in use: leave it deferred rather than reloading under them. The idle
+    // timer and the next dock both come back around, and maxDeferMs means this
+    // cannot go on indefinitely.
+    if (!eligible(v, i, 'reload').ok) return;
     w.deferred = false;
     scheduleReload(contentViews[i], v);
   });
