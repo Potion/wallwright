@@ -115,6 +115,17 @@ function validateConfig(c) {
   ) {
     p.push('memoryLimitMb must be a number >= 0 (0 = no limit)');
   }
+  // This one was missing while every setting around it was checked, and it is the
+  // worst one to leave open: withDefaults uses `?? 60000`, so a quoted "60000"
+  // passes straight through and silently works, and "abc" becomes NaN, which
+  // setInterval treats as 1. That is a memory check every millisecond, for the
+  // length of a soak, each one writing a line to the log file.
+  if (
+    c.memoryCheckMs !== undefined &&
+    !(Number.isFinite(c.memoryCheckMs) && c.memoryCheckMs >= 0)
+  ) {
+    p.push('memoryCheckMs must be a number >= 0 (0 disables the check)');
+  }
   if (c.control !== undefined) {
     if (typeof c.control !== 'object' || c.control === null) {
       p.push('control must be an object');

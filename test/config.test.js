@@ -372,3 +372,25 @@ test('a bad memoryLimitMb is reported', () => {
   c.memoryLimitMb = -10;
   assert.match(validateConfig(c).join(), /memoryLimitMb/);
 });
+
+test('a bad memoryCheckMs is reported', () => {
+  // The dangerous cases are not obviously-wrong numbers but wrong *types*:
+  // withDefaults uses `?? 60000`, so a string survives it, and NaN reaching
+  // setInterval means a check every millisecond.
+  for (const bad of ['60000', -1, NaN, null, {}]) {
+    const c = good();
+    c.memoryCheckMs = bad;
+    assert.match(
+      validateConfig(c).join('\n'),
+      /memoryCheckMs/,
+      `${JSON.stringify(bad)} should be rejected`
+    );
+  }
+});
+
+test('memoryCheckMs of 0 is legal and means the check is off', () => {
+  const c = good();
+  c.memoryCheckMs = 0;
+  assert.deepStrictEqual(validateConfig(c), []);
+  assert.strictEqual(withDefaults(c).memoryCheckMs, 0);
+});

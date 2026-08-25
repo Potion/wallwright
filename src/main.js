@@ -25,16 +25,24 @@ const {
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
 const { loadConfig, saveViews } = require('./config');
 const { clampGrid, snapGrid } = require('./layout');
 const { createControlServer } = require('./control-server');
 const { statusPage } = require('./control-page');
+const { createDiagLog } = require('./diag-log');
 
 // The app was called Forge before it was Wallwright. The name decides the
 // userData folder, so renaming it orphans the tuned layout and every login;
 // migrateLegacyUserData() below carries them across on first run.
 const APP_NAME = 'Wallwright';
 const LEGACY_APP_NAME = 'Forge';
+
+// Names this run of the process. It appears in the log banner and in
+// /api/status, which is how a sampler tells "still the same run" from "it died
+// and came back" without inferring it from an uptime that went backwards.
+const RUN_ID = crypto.randomBytes(4).toString('hex');
 
 // Set before anything reads userData, because this decides where the `persist:`
 // session partitions live. Left at the default they would sit under an
@@ -46,6 +54,22 @@ const LEGACY_APP_NAME = 'Forge';
 // packaged. Moot on the Windows target, which is frameless with no menu bar, and
 // hidden under kiosk anyway.
 app.setName(APP_NAME);
+
+// Diagnostics on disk. Opened here, and the position is not arbitrary: it has to
+// be after setName(), which decides userData (otherwise a dev run writes into an
+// "Electron" folder), and before resolveConfigPath(), because a config that fails
+// to parse is exactly the failure worth having on disk.
+//
+// That second constraint is why the directory cannot come from the config file.
+// WALLWRIGHT_LOG_DIR overrides it for a soak run; a config key may only ever turn
+// the log off, never move it.
+const diag = createDiagLog({ dir: process.env.WALLWRIGHT_LOG_DIR || null });
+function openDiagLog() {
+  const dir = process.env.WALLWRIGHT_LOG_DIR || path.join(app.getPath('userData'), 'logs');
+  const file = diag.open(dir);
+  if (file) log(`diagnostics log: ${file}`);
+  return file;
+}
 
 const BUNDLED_CONFIG = path.join(__dirname, '..', 'config', 'wall.json');
 
@@ -136,11 +160,23 @@ let editDrag = null; // { i, baseGrid, baseZoom } while a layout drag is in flig
 const watchdog = new Map(); // view id -> { attempts, pending, deferred }
 const touched = new Map(); // view id -> ms of the last input in that panel
 
+// Console and file, not one or the other. `npm run dev` and `npm run selftest`
+// are read off stdout, and CI reads the same stream, so removing it would buy
+// nothing. The file exists because on Windows stdout is not there at all.
 function log(...args) {
   console.log('[wallwright]', ...args);
+  diag.write('info', ...args);
 }
 function warn(...args) {
   console.warn('[wallwright]', ...args);
+  diag.write('warn', ...args);
+}
+// For the lines that explain why the app is not running. showFatal() used to call
+// console.error directly, which on a packaged Windows build meant the single most
+// important line went nowhere.
+function fatal(...args) {
+  console.error('[wallwright]', ...args);
+  diag.write('fatal', ...args);
 }
 
 // ---- geometry / display -----------------------------------------------------
@@ -683,7 +719,13 @@ function checkMemory() {
 function startMemoryWatch() {
   if (memoryTimer) clearInterval(memoryTimer);
   if (!config.memoryCheckMs) return;
-  memoryTimer = setInterval(checkMemory, config.memoryCheckMs);
+  // Belt and braces over the validator: a floor here means that however this
+  // value arrived, it cannot become a tight loop that floods the log.
+  const every = Math.max(1000, Number(config.memoryCheckMs) || 0);
+  if (every !== config.memoryCheckMs) {
+    warn(`memoryCheckMs ${config.memoryCheckMs} clamped to ${every}ms`);
+  }
+  memoryTimer = setInterval(checkMemory, every);
 }
 
 // ---- presets ----------------------------------------------------------------
@@ -1945,7 +1987,7 @@ function showFatal(message) {
     <pre style="white-space:pre-wrap">${escapeHtml(message)}</pre>
     <p style="color:#8b949e">Config: ${escapeHtml(configPath)}</p></body>`;
   v.webContents.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-  console.error('[wallwright] fatal:', message);
+  fatal('cannot start:', message);
 }
 
 function escapeHtml(s) {
@@ -1957,7 +1999,10 @@ function escapeHtml(s) {
 
 // Two copies would fight over the wall.
 if (!app.requestSingleInstanceLock()) {
-  console.error('[wallwright] another instance is already running; exiting');
+  // Through diag as well: on a soak machine this is the line that explains why
+  // "the app was launched" and nothing changed on the wall.
+  openDiagLog();
+  fatal('another instance is already running; exiting');
   app.quit();
 } else {
   app.on('second-instance', () => {
@@ -1966,12 +2011,29 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null);
+    openDiagLog();
     try {
       configPath = resolveConfigPath();
       config = loadConfig(configPath);
     } catch (e) {
       return showFatal(e.message);
     }
+    // One line of provenance per run. runId is the join key between this file,
+    // /api/status and the soak sampler, and it is how a restart is recognised
+    // rather than guessed at from an uptime that went backwards.
+    diag.banner({
+      runId: RUN_ID,
+      version: app.getVersion(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      platform: `${process.platform}-${process.arch}`,
+      release: os.release(),
+      host: os.hostname(),
+      packaged: app.isPackaged,
+      config: configPath,
+      wall: `${config.wall.width}x${config.wall.height}`,
+      panels: config.views.length,
+    });
     log(
       `config ${configPath}: ${config.views.length} views on a ` +
         `${config.wall.width}x${config.wall.height} wall`
@@ -2022,5 +2084,33 @@ if (!app.requestSingleInstanceLock()) {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   if (controlServer) controlServer.close();
+  // A run that ends must say whether it ended on purpose. Silence at the end of
+  // a soak log is otherwise indistinguishable from a kill.
+  log(`stopping after ${Math.round((Date.now() - startedAt) / 1000)}s`);
+  diag.close();
 });
 app.on('window-all-closed', () => app.quit());
+
+// ---- the ways a long run dies -----------------------------------------------
+//
+// None of these were recorded anywhere before. On a wall that is meant to be up
+// for weeks, "it was gone on Monday" with no line explaining why is the worst
+// possible outcome of a soak, because it cannot be acted on.
+
+process.on('uncaughtException', (e) => {
+  fatal('uncaught exception:', e);
+  throw e; // still crash: masking it would leave the wall in an unknown state
+});
+process.on('unhandledRejection', (e) => {
+  fatal('unhandled rejection:', e);
+});
+// Renderer death is already handled per view in hardenView(). This catches the
+// processes nothing was watching: the GPU process and the utility processes,
+// whose loss is invisible today and is a real multi-day failure mode.
+app.on('child-process-gone', (_e, details) => {
+  if (details && details.type === 'Frame Renderer') return; // hardenView() has it
+  warn(
+    `child process gone: type=${details && details.type} ` +
+      `reason=${details && details.reason} name=${details && details.name}`
+  );
+});
