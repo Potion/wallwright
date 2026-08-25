@@ -51,7 +51,14 @@ test('every action the page can take is one the server routes', () => {
 
 test('it posts only to routes the control server serves', () => {
   const paths = [...inlineScript().matchAll(/'(\/api\/[a-z]+)'/g)].map((m) => m[1]);
-  const served = ['/api/status', '/api/preset', '/api/panel', '/api/promote', '/api/reload'];
+  const served = [
+    '/api/status',
+    '/api/preset',
+    '/api/panel',
+    '/api/promote',
+    '/api/reload',
+    '/api/recycle',
+  ];
   for (const p of new Set(paths)) assert.ok(served.includes(p), `${p} is not a served route`);
 });
 

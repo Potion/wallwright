@@ -92,6 +92,15 @@ function createControlServer(actions, options = {}) {
           const ok = actions.reload(body.id === undefined ? null : String(body.id));
           return json(res, ok ? 200 : 404, ok ? actions.status() : { error: 'no such panel' });
         }
+
+        // Rebuilds the view rather than reloading the document, which is the only
+        // way to hand a renderer process back. It also loses sessionStorage, so it
+        // is the thing to press when a panel is wedged, and the thing to test a
+        // dashboard against before turning recycleMs on for it.
+        if (path === '/api/recycle') {
+          const ok = actions.recycle(body.id === undefined ? null : String(body.id));
+          return json(res, ok ? 200 : 404, ok ? actions.status() : { error: 'no such panel' });
+        }
       }
 
       json(res, 404, { error: `no route for ${req.method} ${path}` });

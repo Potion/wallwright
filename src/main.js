@@ -2412,6 +2412,12 @@ function wallStatus() {
       memoryWatchRunning: !!memoryTimer,
     },
     recycles: recycleProbes.slice(-20),
+    // Over the limit and unable to act. The gap between this being true and
+    // anything being recycled is the interesting failure.
+    memoryPressure: !!memoryPressureSince,
+    memoryPressureSec: memoryPressureSince
+      ? Math.round((now - memoryPressureSince) / 1000)
+      : null,
     wall: { width: config.wall.width, height: config.wall.height, scale: round3(layout.scale) },
     presets: config.presets.map((p) => ({ id: p.id, name: p.name || p.id })),
     panels: config.views.map((v, i) => {
@@ -2457,6 +2463,11 @@ function wallStatus() {
         timerRefreshes: c.timerRefreshes,
         recycleCount: c.recycles,
         reloadAttemptsPeak: c.reloadAttemptsPeak,
+        // The watchdog has stopped trying and the panel is showing why. Slow
+        // retries continue, so this is a state rather than an ending.
+        gaveUp: !!w.gaveUp,
+        lastError: w.lastError || null,
+        lastMoveSecAgo: present.has(v.id) ? Math.round((now - present.get(v.id)) / 1000) : null,
       };
     }),
   };
@@ -2486,7 +2497,23 @@ const controlActions = {
     return true;
   },
   // Explicitly asked for, so it is allowed to interrupt someone: unlike the
-  // watchdog, a person pressed this.
+  // watchdog, a person pressed this. Same reasoning as reload below, with more at
+  // stake, since a rebuild costs sessionStorage.
+  //
+  // This is also how a dashboard gets tested before recycleMs is turned on for
+  // it: sign in, press this, see whether it is still signed in.
+  recycle: (id) => {
+    const targets = id === null ? config.views.map((_v, i) => i) : [indexOfId(id)];
+    if (targets.some((i) => i < 0)) return false;
+    // Highest index first, so rebuilding one cannot shift the next one's index.
+    targets
+      .sort((a, b) => b - a)
+      .forEach((i) => {
+        log(`recycle requested for ${config.views[i].id}`);
+        recyclePanel(i);
+      });
+    return true;
+  },
   reload: (id) => {
     const targets = id === null ? config.views.map((_v, i) => i) : [indexOfId(id)];
     if (targets.some((i) => i < 0)) return false;

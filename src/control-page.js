@@ -118,6 +118,7 @@ const PAGE = `<!doctype html>
     if (action === 'preset') post('/api/preset', { id: id });
     else if (action === 'promote') post('/api/promote', { id: id });
     else if (action === 'reload') post('/api/reload', { id: id });
+    else if (action === 'recycle') post('/api/recycle', { id: id });
     else if (action === 'grid') post('/api/promote', {});
     else if (action === 'reload-all') post('/api/reload', {});
   });
@@ -134,10 +135,24 @@ const PAGE = `<!doctype html>
 
   function draw(s) {
     $('mode').textContent = s.mode;
+    var byType = s.memoryByType || {};
+    var split = Object.keys(byType)
+      .sort(function (a, b) { return byType[b] - byType[a]; })
+      .map(function (t) { return t + ' ' + byType[t]; })
+      .join(', ');
     $('sub').textContent =
-      s.panels.length + ' panels \\u00b7 ' + s.memoryMb + 'MB \\u00b7 up ' +
-      Math.floor(s.uptimeSec / 60) + 'm \\u00b7 ' + s.wall.width + 'x' + s.wall.height +
-      ' at ' + s.wall.scale + 'x';
+      s.panels.length + ' panels \\u00b7 ' + s.memoryMb + 'MB' +
+      (s.memoryPeakMb ? ' (peak ' + s.memoryPeakMb + ')' : '') +
+      (split ? ' \\u00b7 ' + split : '') +
+      ' \\u00b7 up ' + Math.floor(s.uptimeSec / 60) + 'm \\u00b7 ' +
+      s.wall.width + 'x' + s.wall.height + ' at ' + s.wall.scale + 'x' +
+      (s.counters ? ' \\u00b7 ' + s.counters.crashes + ' crashes, ' +
+        s.counters.watchdogReloads + ' watchdog reloads, ' +
+        s.counters.recycles + ' recycles' : '');
+    $('err').innerHTML = s.memoryPressure
+      ? '<div class="err">Over the memory limit for ' + s.memoryPressureSec +
+        's. The wall is recycling idle panels.</div>'
+      : '';
 
     $('presets').innerHTML = s.presets.length
       ? s.presets
@@ -155,6 +170,13 @@ const PAGE = `<!doctype html>
         var drifted = p.currentUrl && p.url && p.currentUrl !== p.url;
         var notes = [];
         if (p.crashed) notes.push('<span class="warn">renderer gone</span>');
+        if (p.gaveUp) {
+          notes.push('<span class="warn">unrecoverable: ' + esc(p.lastError) + '</span>');
+        }
+        if (p.memoryMb) notes.push(p.memoryMb + 'MB' + (p.pidShared ? ' (shared)' : ''));
+        // Cumulative, so a panel that crashed and recovered overnight still says so.
+        if (p.crashes) notes.push('<span class="warn">' + p.crashes + ' crashes</span>');
+        if (p.recycleCount) notes.push(p.recycleCount + ' recycles');
         if (p.loading) notes.push('loading');
         if (p.reloadAttempts) {
           notes.push('<span class="warn">' + p.reloadAttempts + ' reload attempts</span>');
@@ -172,7 +194,8 @@ const PAGE = `<!doctype html>
           '</div>' +
           '<input value="' + esc(p.url) + '" data-id="' + esc(p.id) + '">' +
           '<button data-action="promote" data-id="' + esc(p.id) + '">Open fullscreen</button> ' +
-          '<button data-action="reload" data-id="' + esc(p.id) + '">Reload</button>' +
+          '<button data-action="reload" data-id="' + esc(p.id) + '">Reload</button> ' +
+          '<button data-action="recycle" data-id="' + esc(p.id) + '">Rebuild</button>' +
           '</div>';
       })
       .join('');

@@ -34,6 +34,10 @@ function fakeWall() {
         calls.push(['reload', id]);
         return id === null || state.panels.includes(id);
       },
+      recycle: (id) => {
+        calls.push(['recycle', id]);
+        return id === null || state.panels.includes(id);
+      },
     },
   };
 }
@@ -217,5 +221,40 @@ test('a throwing action becomes a 500, and the server survives', async () => {
     assert.match(json(r).error, /boom/);
     // Still serving.
     assert.strictEqual((await request(base, 'GET', '/api/status')).status, 200);
+  });
+});
+
+test('POST /api/recycle rebuilds one panel, or the whole wall', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    assert.strictEqual((await request(base, 'POST', '/api/recycle', { id: 'a' })).status, 200);
+    assert.deepStrictEqual(w.calls[0], ['recycle', 'a']);
+    // No id means every panel, the same shape as reload.
+    await request(base, 'POST', '/api/recycle', {});
+    assert.deepStrictEqual(w.calls[1], ['recycle', null]);
+    assert.strictEqual(
+      (await request(base, 'POST', '/api/recycle', { id: 'nope' })).status,
+      404
+    );
+  });
+});
+
+test('the status payload passes through untouched, counters and all', async () => {
+  // The server must never become a filter: a field added to wallStatus() should
+  // reach a sampler without anything here needing to know about it.
+  const w = fakeWall();
+  w.actions.status = () => ({
+    mode: 'grid',
+    panels: [],
+    presets: [],
+    counters: { crashes: 2 },
+    memoryByType: { Tab: 400 },
+    memoryPeakMb: 1234,
+  });
+  await withServer(w.actions, async (base) => {
+    const body = json(await request(base, 'GET', '/api/status'));
+    assert.deepStrictEqual(body.counters, { crashes: 2 });
+    assert.deepStrictEqual(body.memoryByType, { Tab: 400 });
+    assert.strictEqual(body.memoryPeakMb, 1234);
   });
 });
