@@ -35,6 +35,15 @@ hosted Linux runner does not have.
 The hosted Linux job stays, as the fifteen-second signal that does not depend on a
 self-hosted machine being reachable.
 
+**It earned itself on the first run.** Three self-test steps were passing wall
+units to `ww:addPanel`, which takes window pixels - the handler runs
+`unscaleRect()` on whatever it is given. At scale 1.0 on the dev machine the two
+are indistinguishable, so the calls looked correct and had been green for days. On
+the runner, where a 1280x800 wall is fitted into a 1024x768 display at 0.8, a panel
+asked for at x=512 was created at 640, and the drag check failed. That is precisely
+the class of bug a POSIX-only CI cannot see, and it was found within minutes of
+turning Windows on.
+
 The Windows step is a gate, with no `continue-on-error`, and `AGENTS.md` now
 forbids adding one: a step marked that way reports a failed conclusion as
 `success`, which is how a sibling project believed a broken smoke test passed for

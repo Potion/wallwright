@@ -1218,6 +1218,14 @@ macOS passing does not settle the target platform. This group is the real risk.
   The self-test is the only coverage that file has. Self-hosted runners are free,
   so the cost objection that removed the old `windows-latest` job no longer
   applies.
+- **The first Windows run found a bug, in the tests rather than the app.** Three
+  self-test steps passed wall units to `ww:addPanel`, which takes window pixels
+  and runs `unscaleRect()` on them. At scale 1.0 on the dev machine those are the
+  same number, so the calls had been green for days. On the runner, fitting a
+  1280x800 wall into a 1024x768 display at 0.8, a panel asked for at x=512 was
+  created at 640 and the drag check failed. Fixed by converting through
+  `scaleRect()`. Nothing was wrong with the app; the harness had a POSIX-shaped
+  assumption baked in, which is the exact thing this job exists to catch.
 - The Windows job is a **required gate, not advisory**. `continue-on-error` reports
   a failed step as `success`, which is how a sibling project believed a broken
   smoke test passed for weeks. See `docs/windows-runner.md` for what that runner
