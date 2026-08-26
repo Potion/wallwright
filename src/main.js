@@ -2211,6 +2211,12 @@ function selfTest() {
     if (!ok) failures.push(`${n}: ${label}${why}`);
   };
   const ids = () => config.views.map((v) => v.id).join(',');
+  // ww:addPanel takes WINDOW PIXELS: the handler runs unscaleRect() on whatever it
+  // is given. At scale 1.0 on the dev machine that is indistinguishable from wall
+  // units, so every call here used to pass wall units and look correct. On the
+  // Windows runner, where a 1280x800 wall is fitted into a 1024x768 display at
+  // 0.8, a panel asked for at x=512 was created at x=640. Convert explicitly.
+  const wallPx = (g) => scaleRect(g);
   const run = (js) => overlay.webContents.executeJavaScript(js, true);
   const soon = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -2565,7 +2571,9 @@ function selfTest() {
     // main.js and needs a real view.
     step(16, 'the watchdog survives a panel that no longer exists');
     const countBefore16 = config.views.length;
-    await run(`window.wallwright.addPanel({ x: 40, y: 1100, width: 400, height: 260 })`);
+    await run(
+      `window.wallwright.addPanel(${JSON.stringify(wallPx({ x: 40, y: 1100, width: 400, height: 260 }))})`
+    );
     await until(() => config.views.length === countBefore16 + 1);
     const doomed = config.views[config.views.length - 1];
     const doomedView = contentViews[config.views.length - 1];
@@ -2710,7 +2718,9 @@ function selfTest() {
     // can hand back an id that was deleted earlier in the run, and with it a
     // partition that was already guarded, so the check would pass either way.
     const countBefore19 = config.views.length;
-    await run(`window.wallwright.addPanel({ x: 60, y: 1400, width: 300, height: 220 })`);
+    await run(
+      `window.wallwright.addPanel(${JSON.stringify(wallPx({ x: 60, y: 1400, width: 300, height: 220 }))})`
+    );
     await until(() => config.views.length === countBefore19 + 1);
     const freshPanel = config.views[config.views.length - 1];
     const freshPartition = `persist:selftest-fresh-${RUN_ID}`;
@@ -2762,9 +2772,13 @@ function selfTest() {
     // edge so the drag has somewhere to travel from.
     const wall20 = wallUnits();
     const countBefore20 = config.views.length;
-    await run(
-      `window.wallwright.addPanel({ x: ${Math.round(wall20.width * 0.4)}, y: ${Math.round(wall20.height * 0.3)}, width: 300, height: 200 })`
-    );
+    const wanted20 = {
+      x: Math.round(wall20.width * 0.4),
+      y: Math.round(wall20.height * 0.3),
+      width: 300,
+      height: 200,
+    };
+    await run(`window.wallwright.addPanel(${JSON.stringify(wallPx(wanted20))})`);
     await until(() => config.views.length === countBefore20 + 1);
     await soon(300);
 
@@ -2802,11 +2816,18 @@ function selfTest() {
         `from=${fromX},${fromY} to=${toX} startGrid=${dragged.grid.x}`;
 
       send('mouseDown', fromX, fromY);
-      // Did the gesture begin at all? editDrag is set by ww:dragStart, so this
-      // separates "the pointer never landed on the frame" from "the moves went
-      // somewhere unexpected".
+      // Two questions, not one. startDrag() adds the 'dragging' class before it
+      // sends ww:dragStart, so the class says whether the pointerdown reached the
+      // frame at all, and editDrag says whether the main process accepted it.
       const started = await until(() => editDrag !== null, 2000);
-      check(20, 'the pointer landed on the frame and began a drag', started, where);
+      const grabbed = await run(`!!document.querySelector('.epanel.dragging')`);
+      check(
+        20,
+        'the pointerdown reached the panel frame',
+        grabbed === true,
+        `no .dragging class. ${where}`
+      );
+      check(20, 'the main process accepted the drag', started, where);
 
       // Several moves rather than two, and slower. A loaded runner coalesces
       // events, and the last one processed is the one that decides where it lands.
