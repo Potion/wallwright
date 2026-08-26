@@ -1208,10 +1208,12 @@ macOS passing does not settle the target platform. This group is the real risk.
 
 ### What CI covers
 
-- `ci.yml` runs on **every push to `main` and every PR**, on two runners. The
+- `ci.yml` runs on **every push to `main` and every PR**, on three runners. The
   hosted Linux job does lint and the 264 unit tests in about fifteen seconds. The
-  self-hosted Windows job (`PROTO1-P8`) does lint, the unit tests **and
-  `npm run selftest`**, gating.
+  self-hosted Windows job (`PROTO1-P8`) and macOS job (`hqmbp26-crouse`, the
+  development machine) each do lint, the unit tests **and `npm run selftest`**,
+  both gating. So the only coverage `src/main.js` has now runs on both platforms
+  the app ships to, on every change.
 - That closes the gap this file used to describe. Windows coverage had been moved
   into `build-windows.yml`, which only runs on a `v*` tag, so a `src/main.js`
   regression could merge to `main` completely green and surface at release time.

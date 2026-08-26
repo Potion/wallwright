@@ -1,18 +1,29 @@
 name: CI
 
-# Two jobs, deliberately on two kinds of runner.
+# Three jobs, deliberately on two kinds of runner.
 #
 # `linux` is GitHub-hosted: about fifteen seconds on the cheapest tier, and
 # independent of whether the self-hosted machines are reachable. It is the signal
 # that always arrives.
 #
-# `windows` is the org self-hosted runner PROTO1-P8, and it is the one that
-# matters. Windows is the deployment target and is never exercised on the dev
+# `windows` and `macos` are org self-hosted runners, and they are the ones that run
+# `npm run selftest` - the only coverage `src/main.js` has - because it needs a
+# real display, which a hosted Linux runner does not have. Windows is the more
+# important of the two. Windows is the deployment target and is never exercised on the dev
 # machine, which is a Mac. It is also the only place `npm run selftest` can run -
 # the only coverage `src/main.js` has - because that needs a real display, and
 # PROTO1-P8 has a logged-in desktop session while a hosted Linux runner has
 # nothing. And it catches the class of thing the conventions warn about: an npm
 # script that works on POSIX and not on Windows.
+#
+# `macos` is `hqmbp26-crouse`, the development machine, which is always on. It
+# catches the reverse case - something that only works on Windows - and it is where
+# the app is actually developed, so a self-test failure there is the fastest
+# possible feedback. Note that `[self-hosted, macOS]` is answered by more than one
+# Mac (`jeffbook-mac`, and `Brooklyn-Studio` when it is up), so a job lands on
+# whichever is free. GitHub does not dispatch to an offline runner, so that is safe
+# rather than fragile; if it ever needs pinning, add a custom label to the machine
+# you want and ask for `[self-hosted, macOS, <label>]`.
 #
 # There used to be a `windows-latest` hosted job here. It was removed because
 # GitHub bills Windows at 2x on a private repo, and its lint and test coverage
@@ -107,5 +118,39 @@ jobs:
       # this ever flakes, fix the test: it polls for conditions rather than
       # sleeping, so a loaded runner should not make it flake. A smoke test people
       # learn to ignore is worse than none.
+      - name: Self-test
+        run: npm run selftest
+
+  macos:
+    name: lint + test + self-test (hqmbp26-crouse)
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Cache Electron downloads
+        uses: actions/cache@v6
+        with:
+          path: ~/Library/Caches/electron
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          restore-keys: ${{ runner.os }}-electron-
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm test
+
+      # config/selftest.json is deliberately windowed rather than fullscreen, and
+      # every panel has an empty URL, so this opens a 1280x800 window for about
+      # forty seconds and touches no network. That matters here more than on the
+      # Windows runner: this is somebody's actual desktop.
+      #
+      # Gating, and never continue-on-error, for the reason given above.
       - name: Self-test
         run: npm run selftest

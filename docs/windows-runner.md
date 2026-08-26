@@ -41,9 +41,22 @@ both run on it. So a job stuck at "Waiting for a runner to pick up this job" mea
 the machine is offline, not a labels or permissions problem. The tell: if one
 platform's job starts and the other queues, it is a machine.
 
-An offline runner will block a PR here, because the Windows job is a required gate
-rather than advisory. That is deliberate. The hosted Linux job still reports in
-about fifteen seconds, so there is always some signal.
+An offline runner will block a PR here, because both self-hosted jobs are required
+gates rather than advisory. That is deliberate. The hosted Linux job still reports
+in about fifteen seconds, so there is always some signal.
+
+`[self-hosted, macOS]` is answered by more than one machine: `hqmbp26-crouse` (the
+development machine, always on), `jeffbook-mac`, and `Brooklyn-Studio` when it is
+up. A job lands on whichever is free. GitHub does not dispatch to an offline
+runner, so this is safe rather than fragile - but it does mean a run can land on a
+laptop that later sleeps. If that ever becomes annoying, add a custom label to the
+machine you want in the org runner settings and change `runs-on` to
+`[self-hosted, macOS, <label>]`.
+
+The macOS self-test opens a real 1280x800 window on that desktop for about forty
+seconds per run. `config/selftest.json` is windowed rather than fullscreen and every
+panel has an empty URL precisely so a shared machine is not taken over, and so the
+run needs no network and cannot flake because a site was slow.
 
 `../planchette/docs/RUNNERS.md` has the fuller write-up, including how a Mac was
 added as an org runner and why `svc.sh install` is the step people forget.
