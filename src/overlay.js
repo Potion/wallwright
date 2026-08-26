@@ -414,10 +414,20 @@ function renderInspector() {
 }
 
 // ---- snapping ---------------------------------------------------------------
+//
+// The geometry itself lives in src/layout.js, which this page loads as a plain
+// script before overlay.js. It used to be implemented twice - once there in wall
+// units, once here in window pixels - and the two had already drifted apart. What
+// is left here is only the part that is genuinely renderer-specific: reading the
+// candidate edges out of the DOM.
+const L = window.WallwrightLayout;
 
 // Edges worth snapping to: the wall's own edges and centre lines, plus the live
 // edges of every other panel. Read from the DOM rather than from state, because
 // other panels may already have been moved earlier in this edit session.
+//
+// Not rounded, unlike the wall-units version: these are fractional window pixels
+// and rounding them would put the guide a fraction off the edge it is marking.
 function snapTargets(exceptId) {
   const st = current.stage;
   const xs = [st.x, st.x + st.width / 2, st.x + st.width];
@@ -430,103 +440,29 @@ function snapTargets(exceptId) {
   return { xs, ys };
 }
 
-function nearest(value, targets) {
-  let best = null;
-  let bestDelta = SNAP + 1;
-  for (const t of targets) {
-    const d = Math.abs(t - value);
-    if (d < bestDelta) {
-      bestDelta = d;
-      best = t;
-    }
-  }
-  return best === null ? null : { target: best, delta: best - value };
-}
-
-// Of several candidate edges on one axis, take whichever is closest to a target.
-function nearestEdge(values, targets) {
-  let best = null;
-  for (const v of values) {
-    const hit = nearest(v, targets);
-    if (hit && (!best || Math.abs(hit.delta) < Math.abs(best.delta))) best = hit;
-  }
-  return best;
-}
-
-// Adjusts r in place and returns the guide lines to draw.
+// Snap a drag. Mutates r in place and returns the guides, which is the shape the
+// drag loop below wants; layout.js itself is non-mutating.
 function applySnap(r, kind, handle, base, aspect, exceptId) {
   const { xs, ys } = snapTargets(exceptId);
-  const guides = { x: [], y: [] };
+  const { rect, guides } = L.snapRect(r, {
+    kind,
+    handle,
+    base,
+    aspect,
+    xs,
+    ys,
+    tolerance: SNAP,
+  });
+  Object.assign(r, rect);
+  return guides;
+}
 
-  if (kind === 'move') {
-    const sx = nearestEdge([r.x, r.x + r.w / 2, r.x + r.w], xs);
-    if (sx) {
-      r.x += sx.delta;
-      guides.x.push(sx.target);
-    }
-    const sy = nearestEdge([r.y, r.y + r.h / 2, r.y + r.h], ys);
-    if (sy) {
-      r.y += sy.delta;
-      guides.y.push(sy.target);
-    }
-    return guides;
-  }
-
-  if (kind === 'resize') {
-    // Only the dragged edge snaps; the opposite edge stays pinned where the
-    // drag started.
-    if (handle === 'e') {
-      const s = nearest(r.x + r.w, xs);
-      if (s) {
-        r.w = s.target - base.x;
-        guides.x.push(s.target);
-      }
-    } else if (handle === 'w') {
-      const s = nearest(r.x, xs);
-      if (s) {
-        r.x = s.target;
-        r.w = base.x + base.w - s.target;
-        guides.x.push(s.target);
-      }
-    } else if (handle === 's') {
-      const s = nearest(r.y + r.h, ys);
-      if (s) {
-        r.h = s.target - base.y;
-        guides.y.push(s.target);
-      }
-    } else if (handle === 'n') {
-      const s = nearest(r.y, ys);
-      if (s) {
-        r.y = s.target;
-        r.h = base.y + base.h - s.target;
-        guides.y.push(s.target);
-      }
-    }
-    return guides;
-  }
-
-  // Scale: aspect is locked, so snapping one edge decides both dimensions. Take
-  // whichever of the two moving edges is closer to a target.
-  const east = handle.includes('e');
-  const south = handle.includes('s');
-  const sx = nearest(east ? r.x + r.w : r.x, xs);
-  const sy = nearest(south ? r.y + r.h : r.y, ys);
-  const useX = sx && (!sy || Math.abs(sx.delta) <= Math.abs(sy.delta));
-
-  if (useX) {
-    r.w = east ? sx.target - base.x : base.x + base.w - sx.target;
-    r.h = r.w / aspect;
-    guides.x.push(sx.target);
-  } else if (sy) {
-    r.h = south ? sy.target - base.y : base.y + base.h - sy.target;
-    r.w = r.h * aspect;
-    guides.y.push(sy.target);
-  } else {
-    return guides;
-  }
-  // Re-anchor on the opposite corner, the same way the drag itself does.
-  r.x = east ? base.x : base.x + base.w - r.w;
-  r.y = south ? base.y : base.y + base.h - r.h;
+// Snap a rectangle being drawn on empty wall, so a new panel lands flush with its
+// neighbours. Same in-place contract as applySnap.
+function snapCreate(r) {
+  const { xs, ys } = snapTargets(null);
+  const { rect, guides } = L.snapDrawnRect(r, { xs, ys, tolerance: SNAP });
+  Object.assign(r, rect);
   return guides;
 }
 
@@ -554,51 +490,14 @@ function drawGuides(guides) {
 
 // ---- creating by drawing ----------------------------------------------------
 
-// Drag on empty wall to draw a new panel. Snapping applies to the rectangle
-// being drawn, so a new panel lands flush with its neighbours.
-function snapCreate(r) {
-  const { xs, ys } = snapTargets(null);
-  const guides = { x: [], y: [] };
-  const left = nearest(r.x, xs);
-  if (left) {
-    const right = r.x + r.w;
-    r.x = left.target;
-    r.w = right - r.x;
-    guides.x.push(left.target);
-  }
-  const right = nearest(r.x + r.w, xs);
-  if (right) {
-    r.w = right.target - r.x;
-    guides.x.push(right.target);
-  }
-  const top = nearest(r.y, ys);
-  if (top) {
-    const bottom = r.y + r.h;
-    r.y = top.target;
-    r.h = bottom - r.y;
-    guides.y.push(top.target);
-  }
-  const bottom = nearest(r.y + r.h, ys);
-  if (bottom) {
-    r.h = bottom.target - r.y;
-    guides.y.push(bottom.target);
-  }
-  return guides;
-}
-
 function startCreate(e) {
   const ax = e.clientX;
   const ay = e.clientY;
   let rect = null;
 
   const onMove = (ev) => {
-    // Normalise, so dragging up and to the left works.
-    const r = {
-      x: Math.min(ax, ev.clientX),
-      y: Math.min(ay, ev.clientY),
-      w: Math.abs(ev.clientX - ax),
-      h: Math.abs(ev.clientY - ay),
-    };
+    // Normalised, so dragging up and to the left works.
+    const r = L.normaliseRect(ax, ay, ev.clientX, ev.clientY);
     const guides = ev.altKey ? { x: [], y: [] } : snapCreate(r);
     drawGuides(guides);
     bandEl.style.display = 'block';
@@ -639,7 +538,7 @@ function startDrag(e, view, panel, handle) {
   e.preventDefault();
   e.stopPropagation();
 
-  const kind = handle === 'move' ? 'move' : handle.length === 2 ? 'scale' : 'resize';
+  const { kind, axis, east, south } = L.parseHandle(handle);
   const startX = e.clientX;
   const startY = e.clientY;
   const base = {
@@ -666,8 +565,7 @@ function startDrag(e, view, panel, handle) {
       // dimensions exactly as they were instead of round-tripping them through
       // pixels, and can re-snap the driven edge in wall units.
       handle,
-      axis:
-        handle === 'e' || handle === 'w' ? 'x' : handle === 'n' || handle === 's' ? 'y' : null,
+      axis,
       rect: {
         x: Math.round(pending.x),
         y: Math.round(pending.y),
@@ -700,13 +598,13 @@ function startDrag(e, view, panel, handle) {
     } else {
       // Aspect-locked, anchored on the opposite corner. Drive from whichever
       // axis the pointer moved further along so diagonal drags feel direct.
-      const sx = handle.includes('e') ? 1 : -1;
-      const sy = handle.includes('s') ? 1 : -1;
+      const sx = east ? 1 : -1;
+      const sy = south ? 1 : -1;
       const w = Math.max(base.w + sx * dx, (base.h + sy * dy) * aspect);
       r.w = w;
       r.h = w / aspect;
-      if (handle.includes('w')) r.x = base.x + (base.w - r.w);
-      if (handle.includes('n')) r.y = base.y + (base.h - r.h);
+      if (!east) r.x = base.x + (base.w - r.w);
+      if (!south) r.y = base.y + (base.h - r.h);
     }
 
     // Alt defeats snapping, for the case where a panel genuinely belongs a few
@@ -738,26 +636,19 @@ function startDrag(e, view, panel, handle) {
 
 // Keep the panel inside the wall area and above the minimum size. A scale drag
 // shrinks proportionally rather than clipping one axis, so the aspect lock holds
-// even at the edges.
+// even at the edges. The stage has an origin as well as a size here, because it is
+// letterboxed inside the window rather than starting at 0,0.
 function clamp(r, kind, aspect) {
   const st = current.stage;
-  const min = current.minPx;
-
-  if (kind === 'scale') {
-    if (r.w < min) {
-      r.w = min;
-      r.h = min / aspect;
-    }
-    const k = Math.min(1, st.width / r.w, st.height / r.h);
-    r.w *= k;
-    r.h *= k;
-  } else {
-    r.w = Math.min(Math.max(r.w, min), st.width);
-    r.h = Math.min(Math.max(r.h, min), st.height);
-  }
-
-  r.x = Math.min(Math.max(r.x, st.x), st.x + st.width - r.w);
-  r.y = Math.min(Math.max(r.y, st.y), st.y + st.height - r.h);
+  Object.assign(
+    r,
+    L.clampRect(r, {
+      kind,
+      aspect,
+      bounds: { x: st.x, y: st.y, width: st.width, height: st.height },
+      min: current.minPx,
+    })
+  );
   return r;
 }
 

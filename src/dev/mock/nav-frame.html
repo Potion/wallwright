@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>subframe navigation</title>
+    <link rel="stylesheet" href="mock.css" />
+  </head>
+  <body>
+    <h1>Subframe navigation</h1>
+    <p>
+      The iframe below navigates itself. The top-level document never moves, so this is the case
+      will-navigate is documented not to cover.
+    </p>
+    <iframe id="f" src="/dash-3.html" width="600" height="300"></iframe>
+    <script>
+      setTimeout(function () {
+        document.getElementById('f').contentWindow.location.assign('/dash-4.html');
+      }, 500);
+    </script>
+  </body>
+</html>

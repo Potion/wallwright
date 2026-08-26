@@ -22,9 +22,14 @@ function fakeWall() {
         calls.push(['applyPreset', id]);
         return state.presets.includes(id);
       },
+      // Mirrors the real action's verdict shape: ok, notFound, or a reason.
       updatePanel: (id, patch) => {
         calls.push(['updatePanel', id, patch]);
-        return state.panels.includes(id);
+        if (!state.panels.includes(id)) return { ok: false, notFound: true };
+        if (patch && patch.url === 'file:///etc/passwd') {
+          return { ok: false, reason: 'file: is not allowed for a panel' };
+        }
+        return { ok: true };
       },
       promote: (id) => {
         calls.push(['promote', id]);
@@ -189,6 +194,46 @@ test('a malformed body is a 400, and does not reach the wall', async () => {
     assert.strictEqual(r.status, 400);
     assert.match(json(r).error, /valid JSON/);
     assert.strictEqual(w.calls.length, 0);
+  });
+});
+
+// The cap used to call req.destroy() while only 'end' could resolve the promise,
+// and 'end' never fires on a destroyed request. The await never settled: the
+// handler leaked a pending promise and the client got a dropped socket. A real
+// status line is the proof it settles, so this test would hang on a regression
+// rather than merely fail.
+test('a body over the cap is a 413, and does not reach the wall', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const huge = JSON.stringify({ id: 'a', patch: { label: 'x'.repeat(1.2e6) } });
+    const r = await request(base, 'POST', '/api/panel', huge);
+    assert.strictEqual(r.status, 413);
+    assert.match(json(r).error, /too large/);
+    assert.strictEqual(w.calls.length, 0);
+  });
+});
+
+// A refused patch used to answer 200 with the wall's status, which reads as
+// "done". The distinction that matters is 400 (I will not) versus 404 (there is
+// no such thing).
+test('a refused patch is a 400 saying why, not a 200', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const r = await request(base, 'POST', '/api/panel', {
+      id: 'a',
+      patch: { url: 'file:///etc/passwd' },
+    });
+    assert.strictEqual(r.status, 400);
+    assert.match(json(r).error, /file:/);
+  });
+});
+
+test('a patch for a panel that does not exist is still a 404', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const r = await request(base, 'POST', '/api/panel', { id: 'nope', patch: { label: 'x' } });
+    assert.strictEqual(r.status, 404);
+    assert.match(json(r).error, /no such panel/);
   });
 });
 

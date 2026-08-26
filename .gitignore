@@ -6,3 +6,10 @@ out/
 
 # Local, site-specific config overrides (keep the committed config generic)
 config/local*.json
+
+# Harvested soak archives. The extracted data files under docs/soak/<date>/ are
+# small and committed; the zips are tens of megabytes, almost all screen grabs.
+docs/soak/*.zip
+# ...but the harvested app log IS the evidence: its last line is what proves a run
+# ended on purpose rather than being killed. The blanket *.log above would drop it.
+!docs/soak/**/*.log

@@ -3,7 +3,9 @@
 
 const fs = require('fs');
 
-function loadConfig(file) {
+// onWarn is injected the way src/counters.js and src/control-server.js take their
+// logger, so this file still imports nothing and stays testable on plain node.
+function loadConfig(file, { onWarn } = {}) {
   let raw;
   try {
     raw = fs.readFileSync(file, 'utf8');
@@ -19,6 +21,15 @@ function loadConfig(file) {
   const problems = validateConfig(parsed);
   if (problems.length) {
     throw new Error(`Config at ${file} is invalid:\n- ${problems.join('\n- ')}`);
+  }
+  // After validation, so a config that is going to fail says why it failed rather
+  // than also complaining about spelling.
+  if (onWarn) {
+    for (const key of unknownKeys(parsed)) {
+      onWarn(
+        `config: unknown key "${key}" is ignored (typo, or a setting that no longer exists)`
+      );
+    }
   }
   return withDefaults(parsed);
 }
@@ -39,6 +50,23 @@ const NON_NEGATIVE = {
   minUptimeMs: 'no relaunch before this, so a bad limit cannot become a restart loop',
   maxRelaunches: 'how many times the ladder may restart the app',
   presenceGraceMs: 'recent pointer motion blocks a relaunch for this long',
+  // These two predate the table and were the last unchecked durations. Both reach
+  // Electron or a comparison as raw numbers: a NaN transitionMs silently disables
+  // the promote animation, and a NaN escDoubleMs makes double-Esc never fire,
+  // quietly undoing the Esc policy decided on 2026-08-21.
+  transitionMs: 'how long the promote/dock animation takes; 0 = snap, no animation',
+  escDoubleMs: 'how quickly two Esc presses must land to count as a double',
+};
+
+// Flags where anything other than a real boolean is a mistake worth naming. The
+// defaults coerce with `!!` or `??`, so without this a quoted "false" reads as
+// true - which for idleResetUrls means turning on a scheduled logout of every
+// dashboard, the one behaviour the conventions warn hardest about.
+const BOOLEANS = {
+  showHotspotHint: 'whether grid mode hints that a panel can be promoted',
+  hideInactiveWhenActive: 'whether the other panels are hidden while one is promoted',
+  idleResetUrls: 'whether idling puts every panel back to its configured URL',
+  memoryRelaunch: 'whether the memory ladder may restart the app as a last resort',
 };
 
 const WATCHDOG_NON_NEGATIVE = {
@@ -47,6 +75,87 @@ const WATCHDOG_NON_NEGATIVE = {
   maxAttempts: 'reloads before escalating to a rebuild; 0 = unlimited',
   retryMs: 'how long an unrecoverable panel waits before trying again; 0 = never',
 };
+
+// Every key the app actually reads, per level. Kept beside the validation tables
+// because unknownKeys() below is only useful if this stays complete.
+const KNOWN_TOP = new Set([
+  'wall',
+  'views',
+  'presets',
+  'backButton',
+  'watchdog',
+  'control',
+  'idleReturnMs',
+  'escToGrid',
+  'recentUseMs',
+  'memoryCheckMs',
+  'memoryLimitMb',
+  ...Object.keys(NON_NEGATIVE),
+  ...Object.keys(BOOLEANS),
+]);
+
+const KNOWN_WALL = new Set([
+  'width',
+  'height',
+  'backgroundColor',
+  'displayLabel',
+  'displayId',
+  'kiosk',
+  'fullscreen',
+  'fitToDisplay',
+  'safeAreaTop',
+]);
+
+const KNOWN_VIEW = new Set([
+  'id',
+  'label',
+  'url',
+  'grid',
+  'zoom',
+  'partition',
+  'refreshMs',
+  'recycleMs',
+  'neverRecycle',
+  'allowedOrigins',
+  'allowedPermissions',
+]);
+
+// Unrecognised keys, as warnings rather than problems.
+//
+// The validator is an allow-check and withDefaults spreads the raw object first,
+// so a typo has always been accepted in silence: `memoryLimitMB` or `escToGird`
+// parse, validate, and do nothing at all. That is the same class of hole the
+// NON_NEGATIVE table exists to close, one level up.
+//
+// Deliberately NOT fatal. These configs are hand-edited on a show floor, and
+// refusing to boot over a stray key would be a worse failure than ignoring one.
+// A leading underscore means documentation: `_comment`, `_memoryBaseline` and
+// `_soak` are already used that way, and saveViews preserves them.
+function unknownKeys(c) {
+  if (!c || typeof c !== 'object') return [];
+  const out = [];
+  const walk = (obj, known, where) => {
+    if (!obj || typeof obj !== 'object') return;
+    for (const key of Object.keys(obj)) {
+      if (key.startsWith('_')) continue;
+      if (!known.has(key)) out.push(`${where}${key}`);
+    }
+  };
+  walk(c, KNOWN_TOP, '');
+  walk(c.wall, KNOWN_WALL, 'wall.');
+  if (Array.isArray(c.views)) {
+    c.views.forEach((v, i) => walk(v, KNOWN_VIEW, `views[${i}].`));
+  }
+  if (Array.isArray(c.presets)) {
+    c.presets.forEach((preset, i) => {
+      walk(preset, new Set(['id', 'name', 'views']), `presets[${i}].`);
+      if (preset && Array.isArray(preset.views)) {
+        preset.views.forEach((v, j) => walk(v, KNOWN_VIEW, `presets[${i}].views[${j}].`));
+      }
+    });
+  }
+  return out;
+}
 
 // Returns a list of human-readable problems. A bad config must fail here with a
 // readable message rather than throwing a stack trace on a show floor.
@@ -120,6 +229,18 @@ function validateConfig(c) {
     if (v.allowedOrigins !== undefined && !Array.isArray(v.allowedOrigins)) {
       p.push(`${at}.allowedOrigins must be an array of origins`);
     }
+    // Permissions this panel may be granted. Absent or empty means none, which is
+    // the opposite polarity to allowedOrigins above and is deliberate: measured,
+    // a session with no handler grants microphone, camera and notifications
+    // silently (npm run probe:perm, docs/validation.md). The strings are
+    // Chromium's own, so they are not validated against a fixed list here.
+    if (v.allowedPermissions !== undefined) {
+      if (!Array.isArray(v.allowedPermissions)) {
+        p.push(`${at}.allowedPermissions must be an array of permission names`);
+      } else if (v.allowedPermissions.some((x) => typeof x !== 'string')) {
+        p.push(`${at}.allowedPermissions must contain only strings`);
+      }
+    }
     // Exempts a panel from every automatic rebuild. For a dashboard that keeps
     // its token in sessionStorage, where a recycle is a logout, that is a
     // decision to make here rather than discover on the wall at 3am.
@@ -166,8 +287,31 @@ function validateConfig(c) {
       p.push(`${key} must be a number >= 0 (${note})`);
     }
   }
-  if (c.memoryRelaunch !== undefined && typeof c.memoryRelaunch !== 'boolean') {
-    p.push('memoryRelaunch must be true or false');
+  for (const [key, note] of Object.entries(BOOLEANS)) {
+    if (c[key] !== undefined && typeof c[key] !== 'boolean') {
+      p.push(`${key} must be true or false (${note})`);
+    }
+  }
+  // Checked because it is load-bearing and was not. main.js hands it to
+  // scaleRect() and then to setBounds(), so a malformed value becomes NaN bounds
+  // on the one control that leaves active mode besides Esc: get both wrong and an
+  // administrator is stuck on a fullscreen panel with no way back.
+  if (c.backButton !== undefined) {
+    const b = c.backButton;
+    if (typeof b !== 'object' || b === null || Array.isArray(b)) {
+      p.push('backButton must be an object with x, y, width and height in wall units');
+    } else {
+      for (const key of ['x', 'y']) {
+        if (b[key] !== undefined && !(Number.isFinite(b[key]) && b[key] >= 0)) {
+          p.push(`backButton.${key} must be a number >= 0`);
+        }
+      }
+      for (const key of ['width', 'height']) {
+        if (b[key] !== undefined && !(Number.isFinite(b[key]) && b[key] > 0)) {
+          p.push(`backButton.${key} must be a number > 0`);
+        }
+      }
+    }
   }
   if (c.watchdog !== undefined) {
     if (typeof c.watchdog !== 'object' || c.watchdog === null) {
@@ -366,7 +510,15 @@ function saveViews(file, views, presets) {
   } else if (raw.presets) {
     delete raw.presets;
   }
-  fs.writeFileSync(file, JSON.stringify(raw, null, 2) + '\n');
+  // Write to a sibling then rename. This file is what the editor saves and what
+  // the wall boots from, so a crash or a full disk part-way through a plain
+  // writeFileSync would truncate it and send the next launch down the
+  // fatal-config path. rename(2) is atomic within a directory, which is why the
+  // temp file sits beside the target rather than in a temp dir. Same reasoning as
+  // the rotation in src/diag-log.js.
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(raw, null, 2) + '\n');
+  fs.renameSync(tmp, file);
   return raw.views.length;
 }
 
@@ -391,4 +543,11 @@ function serializeView(v) {
   return out;
 }
 
-module.exports = { loadConfig, validateConfig, withDefaults, saveViews, serializeView };
+module.exports = {
+  loadConfig,
+  validateConfig,
+  withDefaults,
+  unknownKeys,
+  saveViews,
+  serializeView,
+};

@@ -1,8 +1,24 @@
-# The 72-hour soak: in flight
+# The 72-hour soak: runbook
 
-**Status: RUNNING.** Started `2026-08-25T13:24:29Z`, ends about
-`2026-08-28T13:24Z` (Friday morning, 09:24 local). Everything below is written to
-be usable by somebody who was not there, from nothing but this file.
+**Status: NOT RUNNING. The first attempt ended early and a re-run is planned for
+Thursday 2026-08-27.**
+
+That attempt started `2026-08-25T13:24:29Z` and was shut down at the machine
+`2026-08-25T20:17:36Z`, 6.9 hours in, well short of the 72 it needed. It was
+harvested and torn down on 2026-08-26. See `docs/validation.md`, "The 72-hour run:
+ENDED EARLY", for what the partial data does and does not say - there is no
+verdict, and `memoryLimitMb` is still unset.
+
+**Nothing below needs changing to run it again.** The harness did its job: the
+sampler, the per-panel series, the grabs and the app log between them dated the
+end, proved it was a graceful quit rather than a crash, and ruled out a reboot and
+a session hijack. One thing to add that is not a code change: **tell whoever else
+uses HQ-PROTO-MINI-2 that a run is in progress.** The run ended because someone
+stopped it at the machine, and no amount of harness can prevent that.
+
+Everything below is written to be usable by somebody who was not there, from
+nothing but this file. The machine details, task table, harvest and teardown steps
+are all still current; the tense is the only thing that is off.
 
 ## What is running, and where
 

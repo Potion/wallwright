@@ -3,7 +3,13 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 const fs = require('node:fs');
-const { validateConfig, withDefaults, loadConfig, saveViews } = require('../src/config');
+const {
+  validateConfig,
+  withDefaults,
+  loadConfig,
+  unknownKeys,
+  saveViews,
+} = require('../src/config');
 
 const good = () => ({
   wall: { width: 3840, height: 2160 },
@@ -156,6 +162,16 @@ test('saveViews writes back grid and zoom', () => {
   const out = JSON.parse(fs.readFileSync(f, 'utf8'));
   assert.deepStrictEqual(out.views[0].grid, { x: 10, y: 20, width: 300, height: 400 });
   assert.strictEqual(out.views[0].zoom, 0.667);
+});
+
+// The wall boots from this file, so it is written to a sibling and renamed rather
+// than truncated in place. Assert the temp file is not left behind, which is the
+// only externally visible trace of the mechanism.
+test('saveViews leaves no temp file beside the config', () => {
+  const f = tmpConfig(good());
+  saveViews(f, [view({ id: 'a' })]);
+  const siblings = fs.readdirSync(path.dirname(f));
+  assert.deepStrictEqual(siblings, ['wall.json']);
 });
 
 test('saveViews adds and removes panels, not just moves them', () => {
@@ -428,6 +444,127 @@ test('memoryRelaunch is a boolean, and defaults to off', () => {
   c.memoryRelaunch = 'yes';
   assert.match(validateConfig(c).join('\n'), /memoryRelaunch/);
   assert.strictEqual(withDefaults(good()).memoryRelaunch, false);
+});
+
+// The defaults coerce these with `!!` or `??`, so a quoted "false" used to read as
+// true. For idleResetUrls that is not cosmetic: it turns on a scheduled reload of
+// every panel a few minutes after the operator stops typing.
+test('the flags reject a quoted boolean rather than reading it as true', () => {
+  for (const key of [
+    'showHotspotHint',
+    'hideInactiveWhenActive',
+    'idleResetUrls',
+    'memoryRelaunch',
+  ]) {
+    const c = good();
+    c[key] = 'false';
+    assert.match(validateConfig(c).join('\n'), new RegExp(key), `${key} rejects "false"`);
+
+    const ok = good();
+    ok[key] = true;
+    assert.deepStrictEqual(validateConfig(ok), [], `${key} accepts a real boolean`);
+  }
+});
+
+// transitionMs and escDoubleMs predate the NON_NEGATIVE table. A NaN in either is
+// silent: no animation, or double-Esc that never fires.
+test('transitionMs and escDoubleMs are numbers >= 0', () => {
+  for (const key of ['transitionMs', 'escDoubleMs']) {
+    const c = good();
+    c[key] = 'soon';
+    assert.match(validateConfig(c).join('\n'), new RegExp(key), `${key} rejects a string`);
+
+    const ok = good();
+    ok[key] = 0;
+    assert.deepStrictEqual(validateConfig(ok), [], `${key} accepts 0`);
+  }
+});
+
+// backButton reaches setBounds() by way of scaleRect(). It is also the only way
+// out of active mode besides Esc, so NaN bounds strand an administrator.
+test('backButton is checked as a rect, not just passed through', () => {
+  const notObject = good();
+  notObject.backButton = 7;
+  assert.match(validateConfig(notObject).join('\n'), /backButton must be an object/);
+
+  const badWidth = good();
+  badWidth.backButton = { x: 24, y: 24, width: 0, height: 56 };
+  assert.match(validateConfig(badWidth).join('\n'), /backButton.width must be a number > 0/);
+
+  const negative = good();
+  negative.backButton = { x: -5, y: 24, width: 176, height: 56 };
+  assert.match(validateConfig(negative).join('\n'), /backButton.x must be a number >= 0/);
+
+  const ok = good();
+  ok.backButton = { x: 24, y: 24, width: 176, height: 56 };
+  assert.deepStrictEqual(validateConfig(ok), []);
+});
+
+test('allowedPermissions must be an array of strings', () => {
+  const notArray = good();
+  notArray.views[0].allowedPermissions = 'media';
+  assert.match(validateConfig(notArray).join('\n'), /allowedPermissions must be an array/);
+
+  const notStrings = good();
+  notStrings.views[0].allowedPermissions = ['media', 7];
+  assert.match(
+    validateConfig(notStrings).join('\n'),
+    /allowedPermissions must contain only strings/
+  );
+
+  const ok = good();
+  ok.views[0].allowedPermissions = ['geolocation'];
+  assert.deepStrictEqual(validateConfig(ok), []);
+
+  // Absent is the normal case and must stay valid: it means no permissions.
+  assert.deepStrictEqual(validateConfig(good()), []);
+});
+
+// ---- unknown keys -----------------------------------------------------------
+
+// A typo used to parse, validate and do nothing, in silence. Warnings rather than
+// problems on purpose: these files are hand-edited on a show floor, and refusing
+// to boot over a stray key is a worse failure than ignoring one.
+test('unknownKeys names a typo at every level, and stays quiet on a clean config', () => {
+  assert.deepStrictEqual(unknownKeys(good()), []);
+
+  const c = good();
+  c.memoryLimitMB = 2000; // the real key is memoryLimitMb
+  c.wall.backgroundColour = '#000';
+  c.views[1].refreshMS = 5000;
+  assert.deepStrictEqual(unknownKeys(c).sort(), [
+    'memoryLimitMB',
+    'views[1].refreshMS',
+    'wall.backgroundColour',
+  ]);
+});
+
+// _comment, _memoryBaseline and _soak are already used this way in config/, and
+// saveViews preserves them, so the convention has to be honoured here too.
+test('an underscore prefix means documentation, at every level', () => {
+  const c = good();
+  c._memoryBaseline = { status: 'NOT MEASURED YET' };
+  c._comment = 'why this wall is shaped like this';
+  c.wall._note = 'portrait';
+  c.views[0]._why = 'the control arm';
+  assert.deepStrictEqual(unknownKeys(c), []);
+});
+
+test('unknownKeys walks presets as well as the live views', () => {
+  const c = good();
+  c.presets = [{ id: 'solo', name: 'Solo', views: [{ id: 'a', gird: {} }], extra: 1 }];
+  assert.deepStrictEqual(unknownKeys(c).sort(), [
+    'presets[0].extra',
+    'presets[0].views[0].gird',
+  ]);
+});
+
+test('every committed config is free of unknown keys', () => {
+  const dir = path.join(__dirname, '..', 'config');
+  for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.json'))) {
+    const c = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+    assert.deepStrictEqual(unknownKeys(c), [], `${f} has no unknown keys`);
+  }
 });
 
 test('the watchdog block is validated and merged over the defaults', () => {

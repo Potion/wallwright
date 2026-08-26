@@ -194,7 +194,7 @@ npm run dev
 npm start
 WALLWRIGHT_CONFIG=./config/local-demo.json npm start
 
-npm test      # 80 tests: config, layout geometry, control server and page
+npm test      # 264 tests: config, layout, upkeep, counters, diag log, control
 npm run coverage # the same, with a coverage report
 npm run selftest # drives the real app over IPC; needs a display, exits non-zero on failure
 npm run lint
@@ -356,11 +356,14 @@ in `AGENTS.md`.
 
 ## CI
 
-Four GitHub Actions workflows:
+Five GitHub Actions workflows:
 
 - **CI** (`ci.yml`) - lint and tests on every push to `main` and every PR, on
-  both Ubuntu and Windows. Installs with `--ignore-scripts` to skip Electron's
-  binary download, which the tests do not need.
+  Ubuntu only. It is the one GitHub-hosted job, kept as an independent signal
+  that does not depend on the self-hosted runners being reachable. The Windows
+  lint and test coverage moved into `build-windows.yml`. Installs with
+  `--ignore-scripts` to skip Electron's binary download, which the tests do not
+  need.
   Both build workflows run lint, the unit tests, and the **self-test** before
   packaging. The self-test needs a real display, which the self-hosted runners
   have and a hosted Linux runner does not, so that is the only place it can run.
@@ -391,7 +394,21 @@ and each uploads its own artifacts.
 - `src/config.js` - config loading, validation, defaults, and writing the panel
   list back. No electron import, so it is testable with plain node.
 - `src/layout.js` - pure layout geometry: clamping a panel to the wall and
-  snapping its edges. Also electron-free.
+  snapping its edges, both for a drag and for a newly drawn panel. Also
+  electron-free.
+- `src/policy.js` - what a panel may load and where it may navigate: the
+  `allowedOrigins` check, the fixed http/https scheme list, and the `persist:`
+  partition rule. Electron-free.
+- `src/upkeep.js` - the decisions behind refresh, recycling and the memory
+  ladder, including why a panel was passed over. Electron-free, and the most
+  heavily tested module here.
+- `src/counters.js` - per-panel and wall-wide event counts for the status
+  surface and the soak.
+- `src/diag-log.js` - the rotating diagnostics file. It exists because a Windows
+  GUI-subsystem process has nowhere to write stdout, so on the show PC this is
+  the only record. Never throws, whatever the filesystem does.
+- `src/control-server.js` / `src/control-page.js` - the optional HTTP control
+  surface and its status page. Unauthenticated by design and bound to loopback.
 - `src/preload.js` - the overlay's bridge: promote a panel, go back, edit the
   layout, receive state.
 - `src/content-preload.js` - injected into each page only to report user
@@ -399,9 +416,12 @@ and each uploads its own artifacts.
 - `src/overlay.html` / `src/overlay.js` - the transparent layer: hotspots, the
   Back button, and the whole layout editor.
 - `src/dev/` - dev-only, never shipped: `dev.js` launcher, `mock-server.js` and
-  the mock dashboards under `mock/`, `probe.js` and `fsprobe.js` for checking
-  Electron behaviour, `capture.js`, and `make-icon.js`.
-- `test/` - config and geometry tests (`npm test`).
+  the mock dashboards under `mock/`, `probe.js`, `fsprobe.js`,
+  `session-probe.js` and `activity-probe.js` for checking Electron behaviour,
+  `soak.js` and `soak-stats.js` for the long unattended runs, `selftest-run.js`,
+  `capture.js`, `make-icon.js`, and `reports.js`.
+- `test/` - unit tests for every electron-free module (`npm test`). What they do
+  not reach is listed in `docs/validation.md` under "Test coverage, measured".
 - `config/wall.json` - layout and content config.
 - `electron-builder.yml` - packaging. `build/icon.png` is the source image.
 - `docs/validation.md` - what has been observed running, and what has not.

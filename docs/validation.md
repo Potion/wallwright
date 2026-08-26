@@ -80,7 +80,7 @@ layout saved to .../smoke.json
   corner drag: `0.75 * (2784 / 2342)`. Aspect went 2342/1308 = 1.7905 to
   2784/1555 = 1.790, preserved.
 
-34 tests cover this geometry (`test/layout.test.js`), including a case asserting
+23 tests cover this geometry (`test/layout.test.js`), including a case asserting
 that snapped neighbours share an exact edge.
 
 ### Fullscreen on macOS needs simple fullscreen, not kiosk
@@ -685,6 +685,99 @@ same frame count is a frozen renderer, which no memory series can see. The DOM H
 is still present and overlaps it slightly; cosmetic, and left alone rather than
 restarting the run a third time to tidy it.
 
+### The 72-hour run: ENDED EARLY at 6.9h, no verdict
+
+Stopped on 2026-08-26 because the machine was needed for other work. The run had
+in fact already ended the previous evening, and nobody knew.
+
+**What happened.** The last sampler row and the last app log line are the same
+moment, 2026-08-25T20:17:36Z, 24787 seconds in. The app log's final line is:
+
+```
+2026-08-25T16:17:36.119-04:00 info stopping after 24787s
+```
+
+That line is written from `app.on('will-quit')`, so this was a graceful
+`app.quit()`, not a crash. The comment above it - "a run that ends must say
+whether it ended on purpose; silence at the end of a soak log is otherwise
+indistinguishable from a kill" - is the only reason that is knowable.
+
+The three long-running Scheduled Tasks all exited `0xC000013A`
+(`STATUS_CONTROL_C_EXIT`), i.e. a console control event. `SoakGrab`, which is a
+short periodic task rather than a long-running console one, kept firing every 30
+minutes for another 17 hours and collected 47 grabs. So the scheduler and the
+session were healthy throughout; only the console processes were stopped.
+
+**What it was not.** Three candidates ruled out by evidence, not assumption:
+
+| suspected                       | checked                                       | result                                                                                     |
+| ------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| reboot                          | `LastBootUpTime`, event IDs 1074/6005/6008/41 | last boot 2026-08-11, two weeks before                                                     |
+| RDP hijacking console session 1 | `query session`, TerminalServices/Operational | session 1 active and unbroken since 2026-08-14, last logon `Source Network Address: LOCAL` |
+| app crash                       | app log, `render-process-gone` counters       | graceful `will-quit`; 0 crashes, 0 failed loads, 0 watchdog reloads                        |
+
+A graceful quit plus Ctrl+C to the console tasks is what a person shutting the
+run down at the machine looks like. The pre-registered invalidating condition (a
+remote session blanking the display) did **not** occur.
+
+**No verdict, and that is the point of the pre-registration.** The threshold is 15
+MB/hour judged on the **final 24 hours of 72**. Six point nine hours cannot satisfy
+that, and `docs/soak-run.md` is explicit that an early reading is not a result. So
+`config/wall.json` `_memoryBaseline` stays `NOT MEASURED YET` and `memoryLimitMb`
+stays 0. What follows is data, not a pass.
+
+|                     |                                                   |
+| ------------------- | ------------------------------------------------- |
+| Window              | 2026-08-25T13:26:20Z to 20:17:28Z (6.85h)         |
+| Sampler             | 412 samples, 412 ok, 0 failed, 0 restarts         |
+| App-reported memory | first 1379MB, last 1424MB, min 1379MB, max 1458MB |
+| Whole-segment OLS   | 3.40 MB/hour, R² 0.467                            |
+| Median cross-check  | 3.76 MB/hour                                      |
+
+The two estimators agree in sign and rough magnitude, which is the pre-registered
+condition for trusting either. Both are far below 15 MB/hour. Encouraging, and
+still only warm-up: the two-hour reading was 14.79 MB/hour and the one-hour
+extrapolation was 29, so the curve is flattening exactly as the pre-registration
+predicted it would.
+
+**The control arm did not move**, which is the result that would have mattered
+most had it gone the other way:
+
+| panel                                     | first | last  | peak  | crashes / failed loads / reloads |
+| ----------------------------------------- | ----- | ----- | ----- | -------------------------------- |
+| `control` (static, no timers, no network) | 73MB  | 74MB  | 74MB  | 0 / 0 / 0                        |
+| `heavy` (bounded local load)              | 99MB  | 103MB | 104MB | 0 / 0 / 0                        |
+| `grafana` (live dashboard)                | 248MB | 240MB | 253MB | 0 / 0 / 0                        |
+| `earth` (WebGL, live data)                | 128MB | 134MB | 135MB | 0 / 0 / 0                        |
+
+`grafana` ended lower than it started. Nothing crashed, nothing failed to load,
+and the watchdog never fired, over 412 samples.
+
+**The workingSetSize versus private-bytes gap, partially answered.** This was an
+open question since the original 699MB datum. The app's own figure reads high, and
+by a shrinking amount:
+
+```
+T0     ws 1384MB  private 840MB   -> 65% high
+2h     ws 1414MB  private 865MB   -> 63% high
+6.9h   ws 1422MB  private 892MB   -> 59% high
+```
+
+So a `memory:` line in the log overstates private bytes by roughly 60% on this
+machine, trending down as the run settles. Enough to interpret a log line; not
+enough to call a plateau figure, because the run never plateaued.
+
+**Harvested before teardown**, per the runbook: `docs/soak/2026-08-25-partial/`
+holds the sampler CSV, the per-panel CSV, the JSONL, the summary, the machine
+description and the app log. The 47 screen grabs are in the zip alongside it,
+which is gitignored for size. Teardown then ran clean: no `Soak*` task remains,
+`FCATWallLauncher` and `FCATSoakSampler` are both back to `Ready`, and the stage
+and `%APPDATA%\Wallwright` profile are gone.
+
+**A re-run starts from zero.** A memory curve cannot be resumed across a two-day
+gap, so Thursday is a fresh 72 hours, not a continuation. Nothing about the
+harness needs changing; it did its job, including telling us how it ended.
+
 ### Panel CRUD works end to end
 
 `src/main.js` has no unit tests, so `WALLWRIGHT_SELFTEST=1` drives the real path:
@@ -833,10 +926,143 @@ Both now say so loudly.
 
 ### Config validation
 
-12 tests in `test/config.test.js`, all passing (`npm test`). Rejects rects that
+57 tests in `test/config.test.js`, all passing (`npm test`). Rejects rects that
 fall outside the wall, duplicate view ids, two views sharing a session
 partition, missing wall dimensions, and bad `escToGrid` values. A malformed
 config now shows a readable error page on the wall instead of a stack trace.
+
+### Permissions are granted by default, and one of them hangs
+
+Electron's security checklist says a session with no permission handler approves
+requests. Nothing in `src/` had ever touched permissions - `session` was not even
+imported - so the claim mattered and was untested. `npm run probe:perm` asks for
+each permission from a page on `http://localhost` and records both what the
+handlers were asked and what the page got back, across four arms.
+
+With **no handler**, which is what shipped up to now:
+
+```
+media.audio          resolved  stream        <- microphone, granted, no prompt
+media.video          resolved  stream        <- camera, granted, no prompt
+notifications        resolved  granted
+query:geolocation    resolved  granted
+geolocation          NEVER ANSWERED          <- pending forever, not denied
+clipboard-read       rejected  NotAllowedError
+```
+
+So the checklist is right, and worse than it sounds: camera and microphone are
+handed to any panel that asks, silently, on a machine that runs unattended for
+days. `clipboard-read` is refused for an unrelated reason (it wants a user
+gesture), and `geolocation` is the one that never resolves at all - on a wall
+nobody is standing at, a request that hangs is a different failure from one that
+is denied.
+
+**One handler is not enough, and which one is not obvious.** The four arms:
+
+| arm                                | media / geolocation / notifications         | `navigator.permissions.query` |
+| ---------------------------------- | ------------------------------------------- | ----------------------------- |
+| no handler                         | granted (geolocation hangs)                 | granted                       |
+| `setPermissionRequestHandler` only | **denied, cleanly**                         | **still granted**             |
+| `setPermissionCheckHandler` only   | **still granted** (geolocation still hangs) | denied                        |
+| both                               | denied, cleanly                             | denied                        |
+
+The request handler is what actually refuses `getUserMedia` and
+`getCurrentPosition`; the check handler is the only thing that stops
+`navigator.permissions.query` reporting `granted` to a page that is about to ask.
+Installing either alone leaves a hole, so `src/main.js` installs both.
+
+The permission strings seen on 43.4.1 were `media` (once per `getUserMedia` call,
+covering both audio and video), `geolocation`, `notifications`,
+`web-app-installation` and `speaker-selection`. That set is why
+`allowedPermissions` is a config array rather than a fixed list in code: the
+strings are Chromium's, and they change between versions.
+
+Denying is clean. Every refusal came back as a normal JS rejection
+(`NotAllowedError: Permission denied`, `User denied Geolocation`), and nothing
+hung once a request handler was installed - so a deny-by-default policy removes
+the hanging case rather than adding to it.
+
+**Windows is unverified.** These are Chromium-level behaviours and are expected
+to match, but the deployment target is Windows. Run `npm run probe:perm` there,
+or dispatch the `probe-windows.yml` workflow, before trusting it.
+
+### `will-navigate` does not see a redirect, and never sees a subframe
+
+`AGENTS.md` TODO 4 treats scoping `allowedOrigins` to the real Honeywell domains
+as a config edit, on the grounds that "enforcement already exists for
+`will-navigate` and `setWindowOpenHandler`". `npm run probe:nav` measures whether
+that enforcement actually covers the shapes a real dashboard navigates in. It
+does not.
+
+What fires for a single server 302 (`->` order as received):
+
+```
+did-start-navigation     /redirect?to=/dash-2.html   mainFrame=true
+will-frame-navigate      /redirect?to=/dash-2.html   mainFrame=true
+will-navigate            /redirect?to=/dash-2.html   <- the URL ASKED FOR
+will-redirect            /dash-2.html                <- where it actually goes
+did-redirect-navigation  /dash-2.html
+```
+
+`will-navigate` is handed the URL the page requested, never the one it lands on.
+A three-hop chain fires `will-redirect` three times and `will-navigate` once. And
+for a subframe navigating itself, `will-navigate` **does not fire at all**; only
+`will-frame-navigate` does, with `isMainFrame: false`.
+
+The probe then polices by origin in each event in turn and reports whether the
+panel still arrived where the policy was refusing:
+
+| navigation                                 | `will-navigate` only | + `will-redirect` | + `will-frame-navigate` |
+| ------------------------------------------ | -------------------- | ----------------- | ----------------------- |
+| server 302                                 | **reached it**       | blocked           | blocked                 |
+| three-hop 302 chain                        | **reached it**       | blocked           | blocked                 |
+| meta refresh                               | blocked              | blocked           | blocked                 |
+| script `location.assign`                   | blocked              | blocked           | blocked                 |
+| subframe navigating itself                 | **reached it**       | **reached it**    | blocked                 |
+| 302 whose target is not in the request URL | **reached it**       | blocked           | blocked                 |
+
+The last row is the one that matters most in practice. A page asks for a URL that
+is perfectly allowed, the server bounces it somewhere else, and nothing in the
+requested URL names the destination - which is exactly what an expired session
+bouncing to an identity provider looks like. Four of six shapes slip past the
+enforcement as it stood.
+
+So `hardenView()` and `hardenPopup()` now police `will-redirect` and
+`will-frame-navigate` as well, all three routed through the same `isAllowed()` so
+there is one policy rather than three. `will-frame-navigate` is filtered to
+subframes, since the main frame is already covered and blocking the same
+navigation twice proves nothing. Scoping `allowedOrigins` is still a config edit,
+but only because the code changed here first.
+
+**Windows is unverified.** Run `npm run probe:nav` there, or dispatch
+`probe-windows.yml`.
+
+### `npm run capture` does not work on this machine
+
+Recorded because the claim next to it is wrong, and was wrong before this pass.
+`docs/validation.md` above and `README.md` both say the built-in capture "needs no
+OS Screen Recording permission, so it also works on a CI runner or a headless show
+PC". On the dev machine, macOS 25.5.0, it does not work at all:
+
+```
+[wallwright] capture failed: Current display surface not available for capture
+```
+
+Verified as pre-existing rather than introduced: the same command fails
+identically from a clean worktree of `531f06f`, before any of the audit work. So
+`webContents.capturePage()` is refusing here for a reason the compositing approach
+was supposed to sidestep.
+
+What this does and does not settle. It does not invalidate the design argument -
+compositing per-view captures still avoids `screencapture` and still captures the
+editor, which an OS screenshot of a kiosk window cannot. It does mean the
+"no permission needed" claim is unproven on macOS, and that the screenshots in the
+README cannot currently be regenerated on this machine, which the conventions ask
+for after a visible change.
+
+Not chased further because it is orthogonal to the audit and may simply need the
+permission granted to the terminal. The next person to touch the README images
+will hit it first.
 
 ## Still to verify
 
@@ -982,9 +1208,12 @@ macOS passing does not settle the target platform. This group is the real risk.
 
 ### What CI covers
 
-- `ci.yml` runs lint and the 34 tests on Ubuntu **and Windows** for every push
-  to `main` and every PR. Windows is in the matrix because it is the deployment
-  target and because it catches POSIX-only scripts and paths.
+- `ci.yml` runs lint and the 264 tests on **Ubuntu only**, for every push to
+  `main` and every PR. There was a `windows-latest` job here; it was removed on
+  cost grounds and its lint and test coverage moved into `build-windows.yml`,
+  which runs both on the self-hosted Windows runner before packaging. The
+  consequence is that Windows sees nothing until a `v*` tag, which is worth
+  knowing given the convention that npm scripts must work there.
 - `build-windows.yml` builds the installer and zip on `windows-latest`, on a
   `v*` tag or manual dispatch. It runs lint and tests first, so a failing build
   cannot ship.
@@ -1000,7 +1229,7 @@ absent.
 
 A blanket find-and-replace across `src/` did most of it correctly: IPC channels
 became `ww:*` with senders and receivers still matched, environment variables
-became `WALLWRIGHT_*` consistently, and the 80 tests stayed green throughout.
+became `WALLWRIGHT_*` consistently, and the tests stayed green throughout.
 
 It broke the one place the old name was supposed to survive. `LEGACY_APP_NAME`
 exists to name the _previous_ app so a previous install can be found; the rename
@@ -1062,23 +1291,52 @@ on any Windows machine with a display.
 
 ### Test coverage, measured
 
-`npm test` runs 80 tests; `npm run coverage` reports on what they reach.
+`npm test` runs 264 tests; `npm run coverage` reports on what they reach.
+Measured 2026-08-25.
 
-| module                  | lines | line % | branch % |
-| ----------------------- | ----- | ------ | -------- |
-| `src/layout.js`         | 105   | 100    | 100      |
-| `src/control-page.js`   | 170   | 100    | 100      |
-| `src/control-server.js` | 107   | 100    | 87       |
-| `src/config.js`         | 286   | 91     | 74       |
+| module                  | lines | line % | branch % | funcs % |
+| ----------------------- | ----- | ------ | -------- | ------- |
+| `src/layout.js`         | 307   | 100    | 97       | 100     |
+| `src/control-page.js`   | 217   | 100    | 100      | 100     |
+| `src/control-server.js` | 163   | 100    | 92       | 83      |
+| `src/policy.js`         | 135   | 100    | 100      | 100     |
+| `src/pages.js`          | 77    | 100    | 100      | 100     |
+| `src/interaction.js`    | 54    | 100    | 100      | 100     |
+| `src/display.js`        | 143   | 100    | 100      | 100     |
+| `src/watchdog.js`       | 105   | 100    | 100      | 100     |
+| `src/counters.js`       | 122   | 100    | 94       | 75      |
+| `src/upkeep.js`         | 337   | 99.7   | 87       | 100     |
+| `src/diag-log.js`       | 207   | 95     | 77       | 100     |
+| `src/config.js`         | 553   | 94     | 79       | 100     |
 
-That is high, but it covers **19% of the shipped source**. The other 81% has no
-unit tests at all:
+**Read `npm run coverage`'s own total with care.** It reports `all files 98.26%`,
+and that figure is a lie of omission: Node's reporter lists only the files the
+test process actually loaded, so the four untested modules below are absent from
+the table rather than shown as 0%. The total describes 2424 of 6406 lines.
+
+True coverage of shipped source is **38%**, up from 19% when this table was first written. The rest has no unit tests:
 
 | module                                     | lines | why not                                             |
 | ------------------------------------------ | ----- | --------------------------------------------------- |
-| `src/main.js`                              | 1954  | imports electron at module scope, with side effects |
-| `src/overlay.js`                           | 799   | a renderer; needs a DOM and the bridge              |
-| `src/preload.js`, `src/content-preload.js` | 48    | thin electron bridges                               |
+| `src/main.js`                              | 3192  | imports electron at module scope, with side effects |
+| `src/overlay.js`                           | 716   | a renderer; needs a DOM and the bridge              |
+| `src/preload.js`, `src/content-preload.js` | 68    | thin electron bridges                               |
+
+`src/overlay.js` used to be the one worth acting on: roughly 260 of its lines were
+a second implementation of the snapping and clamping `src/layout.js` already
+tested, and the two had diverged three ways. **That is now collapsed.**
+`src/layout.js` holds one implementation, parameterised on its candidate edges and
+tolerance so the same code snaps window pixels during a drag and wall units before
+a save, and `src/overlay.html` loads it as a plain script alongside `overlay.js`.
+The file is 825 lines lighter for it, and the aspect-locked scale branch and the
+proportional clamp have tests for the first time.
+
+Collapsing them found a real bug in the wall-units half. It took the **first**
+edge within tolerance where the overlay took the **closest**, so a panel shorter
+than the tolerance had its top edge snapped onto a target its bottom edge was
+already sitting on - moving the whole panel off the wall. `clampGrid` hid the
+symptom by pulling it back. The rule is now "closest wins" everywhere, which is
+what the operator sees while dragging, and what gets saved now matches it.
 
 The pattern that works is extraction: the snapping geometry moved out to
 `src/layout.js` and went straight to 100%, and `src/control-server.js` was
@@ -1093,7 +1351,7 @@ it only **logged** its results. An assertion that went false printed `false` int
 a log nobody reads, and the process never exited, so a regression was invisible.
 The exit code came from `timeout` killing it.
 
-It now has 20 real assertions, prints `ok` or `FAIL` per line, names what failed,
+It now has 62 real assertions, prints `ok` or `FAIL` per line, names what failed,
 and exits non-zero. Verified by deliberately breaking one:
 
 ```

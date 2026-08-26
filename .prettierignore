@@ -8,3 +8,6 @@ out
 # A print-styled document. Prettier reflows inline elements, which changes
 # spacing in the rendered PDF.
 docs/report/*.html
+
+# Harvested soak output. This is evidence: reformatting it would edit the record.
+docs/soak/

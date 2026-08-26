@@ -3,6 +3,7 @@
   "productName": "Wallwright",
   "version": "0.1.1",
   "private": true,
+  "author": "Jeff Crouse <jeff.crouse@hyperquake.com>",
   "description": "Wallwright: a montage of live, interactive web pages laid out on one large LED wall, arrangeable at the wall itself. Electron + WebContentsView.",
   "main": "src/main.js",
   "scripts": {
@@ -21,13 +22,15 @@
     "capture": "node src/dev/capture.js",
     "probe:session": "node src/dev/session-probe-run.js",
     "probe:activity": "node src/dev/activity-probe-run.js",
+    "probe:perm": "node src/dev/probe-serve.js perm-probe.js",
+    "probe:nav": "node src/dev/probe-serve.js nav-probe.js",
     "coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\"",
     "selftest": "node src/dev/selftest-run.js",
     "soak": "node src/dev/soak.js",
     "report": "node src/dev/reports.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "devDependencies": {
     "electron": "^43.0.0",

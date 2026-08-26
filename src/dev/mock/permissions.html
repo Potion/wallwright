@@ -1,0 +1,99 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>permission probe target</title>
+    <link rel="stylesheet" href="mock.css" />
+  </head>
+  <body>
+    <h1>Permission probe</h1>
+    <p>
+      Asks for each permission the main process might have to police, and reports what the page
+      actually got back. Loaded over http://localhost on purpose: several of these APIs need a
+      secure context, localhost qualifies, and a data: URL would fail for the wrong reason.
+    </p>
+    <pre id="out">waiting</pre>
+
+    <script>
+      // Results are written as each one settles rather than all at once at the
+      // end. A request that is never answered is a real outcome here - on an
+      // unattended wall it is worse than a refusal - so the probe has to be able
+      // to read partial state and report what is still outstanding. Waiting for a
+      // Promise.all would hide exactly the case worth finding.
+      window.__permProbe = { done: [], outstanding: [] };
+
+      function ask(label, fn) {
+        window.__permProbe.outstanding.push(label);
+        const finish = (outcome, detail) => {
+          const i = window.__permProbe.outstanding.indexOf(label);
+          if (i >= 0) window.__permProbe.outstanding.splice(i, 1);
+          window.__permProbe.done.push({ label, outcome, detail: String(detail) });
+          render();
+        };
+        Promise.resolve()
+          .then(fn)
+          .then(
+            (value) => finish('resolved', value),
+            // The error name is kept because it is what separates "the policy
+            // refused this" from "this machine has no camera".
+            (err) =>
+              finish(
+                'rejected',
+                (err && err.name ? err.name + ': ' : '') + (err && err.message)
+              )
+          );
+      }
+
+      ask(
+        'geolocation',
+        () =>
+          new Promise((resolve, reject) =>
+            navigator.geolocation.getCurrentPosition(
+              (pos) => resolve('coords ' + pos.coords.latitude),
+              (err) => reject(new Error(err.code + ' ' + err.message))
+            )
+          )
+      );
+      ask('notifications', () => Notification.requestPermission());
+      ask('media.audio', () =>
+        navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => {
+          s.getTracks().forEach((t) => t.stop());
+          return 'stream';
+        })
+      );
+      ask('media.video', () =>
+        navigator.mediaDevices.getUserMedia({ video: true }).then((s) => {
+          s.getTracks().forEach((t) => t.stop());
+          return 'stream';
+        })
+      );
+      ask('clipboard-read', () => navigator.clipboard.readText().then(() => 'read'));
+      // These two do not prompt. They are here because they should reach
+      // setPermissionCheckHandler rather than setPermissionRequestHandler, and
+      // which of the two sees them decides whether one handler is enough.
+      ask('query:geolocation', () =>
+        navigator.permissions.query({ name: 'geolocation' }).then((s) => s.state)
+      );
+      ask('query:notifications', () =>
+        navigator.permissions.query({ name: 'notifications' }).then((s) => s.state)
+      );
+
+      // Render once up front. Without this the page looks identical whether every
+      // request is pending or the script died on line one, and "pending forever"
+      // is the outcome this probe most needs to be able to see.
+      render();
+
+      function render() {
+        document.getElementById('out').textContent = JSON.stringify(
+          window.__permProbe,
+          null,
+          2
+        );
+      }
+      window.addEventListener('error', (e) => {
+        window.__permProbe.error = String(e.message);
+        render();
+      });
+    </script>
+  </body>
+</html>

@@ -40,3 +40,18 @@ jobs:
       - name: Which fullscreen path covers the display
         run: npm run probe:fs
         continue-on-error: true
+
+      # These two answered on macOS in docs/validation.md, under "Permissions are
+      # granted by default" and "will-navigate does not see a redirect". Both are
+      # Chromium-level and expected to match, but Windows is the deployment target
+      # and the conventions do not accept "expected to".
+      #
+      # They serve the mock dashboards themselves on port 8799, so nothing else
+      # has to be running, and they never touch the soak machine.
+      - name: What a session grants when nobody is handling permissions
+        run: npm run probe:perm
+        continue-on-error: true
+
+      - name: Which navigation events fire, and which of them can be blocked
+        run: npm run probe:nav
+        continue-on-error: true
