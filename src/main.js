@@ -2793,15 +2793,27 @@ function selfTest() {
       const toX = fromX + (stage.x + 6 - Math.round(box.x));
       const send = (type, x, y) =>
         overlay.webContents.sendInputEvent({ type, x, y, button: 'left', clickCount: 1 });
+      // Everything this step depends on, in one string. The first Windows run
+      // failed with nothing but a final grid.x, which was not enough to tell a
+      // drag that never started from one that landed on the wrong target.
+      const where =
+        `scale=${layout.scale.toFixed(3)} stage=${stage.x},${stage.y} ` +
+        `box=${Math.round(box.x)},${Math.round(box.y)} ${Math.round(box.w)}x${Math.round(box.h)} ` +
+        `from=${fromX},${fromY} to=${toX} startGrid=${dragged.grid.x}`;
 
       send('mouseDown', fromX, fromY);
-      await soon(60);
-      // Two moves: one to start the gesture, one to land it. A single move can be
-      // coalesced with the down event.
-      send('mouseMove', Math.round((fromX + toX) / 2), fromY);
-      await soon(60);
-      send('mouseMove', toX, fromY);
-      await soon(120);
+      // Did the gesture begin at all? editDrag is set by ww:dragStart, so this
+      // separates "the pointer never landed on the frame" from "the moves went
+      // somewhere unexpected".
+      const started = await until(() => editDrag !== null, 2000);
+      check(20, 'the pointer landed on the frame and began a drag', started, where);
+
+      // Several moves rather than two, and slower. A loaded runner coalesces
+      // events, and the last one processed is the one that decides where it lands.
+      for (const t of [0.25, 0.5, 0.75, 1, 1]) {
+        send('mouseMove', Math.round(fromX + (toX - fromX) * t), fromY);
+        await soon(80);
+      }
       send('mouseUp', toX, fromY);
       await until(() => dragged.grid.x === 0, 3000);
 
@@ -2809,7 +2821,7 @@ function selfTest() {
         20,
         'the dragged panel snapped flush to the wall edge',
         dragged.grid.x === 0,
-        `grid.x=${dragged.grid.x} after dragging its left edge to 6px from the wall`
+        `grid.x=${dragged.grid.x}, expected 0. ${where}`
       );
     }
     deletePanel(dragged.id);
