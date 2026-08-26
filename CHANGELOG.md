@@ -18,6 +18,33 @@ built from, so nothing is unrecoverable.
 
 ## Unreleased
 
+### The self-test now gates every push, on Windows
+
+`npm run selftest` is the only coverage `src/main.js` has, and it only ran on a
+`v*` tag. So a regression in 3,200 lines of main process could merge to `main`
+completely green and surface at release time. It now runs on every push and every
+PR, on the self-hosted Windows runner, along with lint and the unit tests.
+
+Windows specifically, because Windows is the deployment target and is never
+exercised on the dev machine, which is a Mac. It also restores the Windows
+coverage that was dropped when the `windows-latest` job was removed for costing 2x
+on a private repo - self-hosted runners are free, so that objection is gone. And
+it is the only place the self-test _can_ run: it needs a real display, which a
+hosted Linux runner does not have.
+
+The hosted Linux job stays, as the fifteen-second signal that does not depend on a
+self-hosted machine being reachable.
+
+The Windows step is a gate, with no `continue-on-error`, and `AGENTS.md` now
+forbids adding one: a step marked that way reports a failed conclusion as
+`success`, which is how a sibling project believed a broken smoke test passed for
+weeks.
+
+`docs/windows-runner.md` gains what that runner can and cannot do, which is
+narrower than it looks: Electron can create and drive a real window there, and
+nothing on it can photograph the desktop, because the runner is a service in
+session 0. Those two facts sound contradictory and are not.
+
 ### The 72-hour soak ended early, and there is still no memory baseline
 
 The first attempt ran 6.9 of its 72 hours. It was shut down at the machine on

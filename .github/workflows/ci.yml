@@ -1,22 +1,48 @@
 name: CI
 
+# Two jobs, deliberately on two kinds of runner.
+#
+# `linux` is GitHub-hosted: about fifteen seconds on the cheapest tier, and
+# independent of whether the self-hosted machines are reachable. It is the signal
+# that always arrives.
+#
+# `windows` is the org self-hosted runner PROTO1-P8, and it is the one that
+# matters. Windows is the deployment target and is never exercised on the dev
+# machine, which is a Mac. It is also the only place `npm run selftest` can run -
+# the only coverage `src/main.js` has - because that needs a real display, and
+# PROTO1-P8 has a logged-in desktop session while a hosted Linux runner has
+# nothing. And it catches the class of thing the conventions warn about: an npm
+# script that works on POSIX and not on Windows.
+#
+# There used to be a `windows-latest` hosted job here. It was removed because
+# GitHub bills Windows at 2x on a private repo, and its lint and test coverage
+# moved into build-windows.yml, which only runs on a `v*` tag. That left a gap:
+# a src/main.js regression could merge to main completely green and only surface
+# at release time. Self-hosted is free, so the cost objection no longer applies
+# and Windows is back on every push.
+#
+# Runner setup is documented in docs/windows-runner.md. The short version: both
+# runners are org-level in group `default`, access is already granted to this
+# repository, and a job that sits at "Waiting for a runner" means the machine is
+# offline rather than a permissions or label problem.
+
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# Per-ref, and superseded runs are cancelled. PROTO1-P8 runs one job at a time,
+# so without this a busy afternoon queues behind itself.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  check:
-    # The one remaining GitHub-hosted job, and the cheapest tier: Linux at 1x for
-    # about fifteen seconds a push. It stays hosted deliberately, as an
-    # independent signal that does not depend on the self-hosted runners being
-    # reachable, since the builds now do.
-    #
-    # There used to be a windows-latest job here too, at 2x on every push. Its
-    # lint and test coverage moved into build-windows.yml, which runs both on the
-    # self-hosted Windows runner before packaging.
-    name: lint + test
+  linux:
+    name: lint + test (hosted)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v5
@@ -26,12 +52,60 @@ jobs:
           node-version: 22
           cache: npm
 
-      # --ignore-scripts skips Electron's ~100MB binary download. The linters
-      # and the unit tests never touch Electron: they cover src/config.js and
-      # src/layout.js, which are deliberately electron-free. The build workflow
-      # does a full install.
+      # --ignore-scripts skips Electron's ~100MB binary download. The linters and
+      # the unit tests never touch Electron: everything they cover is a plain node
+      # module. The Windows job below does a full install, because the self-test
+      # launches the real app.
       - run: npm ci --ignore-scripts
 
       - run: npm run lint
 
       - run: npm test
+
+  windows:
+    name: lint + test + self-test (PROTO1-P8)
+    runs-on: [self-hosted, Windows]
+    # Generous, because this one launches Electron. It bounds a hung run, not a
+    # queued one: a job waiting for an offline runner is not covered by this and
+    # will sit there until somebody looks.
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      # Paid once per machine rather than once per run. Same path build-windows.yml
+      # caches, so the two share it.
+      - name: Cache Electron downloads
+        uses: actions/cache@v6
+        with:
+          path: ~\AppData\Local\electron\Cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          restore-keys: ${{ runner.os }}-electron-
+
+      - run: npm ci
+
+      # Not a duplicate of the Linux job. The conventions require every npm script
+      # to work on Windows - no `FOO=1 cmd` prefixes, no shell loops - and a POSIX
+      # runner cannot catch a violation of that.
+      - run: npm run lint
+
+      - run: npm test
+
+      # The only coverage src/main.js has: it drives the real app over real IPC.
+      # 62 assertions covering panel CRUD, the overlay in every mode, preset
+      # recall, the refresh and recycle timers, the watchdog's guard against a
+      # deleted panel, the SSO popup rule, permission guarding, the overlay CSP,
+      # and a synthetic pointer drag through the layout editor's geometry.
+      #
+      # **Gating on purpose. Never add continue-on-error here.** A step marked
+      # that way reports a failed conclusion as `success`, which is exactly how a
+      # sibling project ran a broken smoke test for weeks believing it passed. If
+      # this ever flakes, fix the test: it polls for conditions rather than
+      # sleeping, so a loaded runner should not make it flake. A smoke test people
+      # learn to ignore is worse than none.
+      - name: Self-test
+        run: npm run selftest

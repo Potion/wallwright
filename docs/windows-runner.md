@@ -1,5 +1,53 @@
 # Giving the Windows runner a desktop
 
+## What the runner can and cannot do, precisely
+
+Added 2026-08-26, when the self-test moved onto every push. Two facts that sound
+contradictory and are not:
+
+- **Electron can create and drive a real window on PROTO1-P8.** `npm run selftest`
+  runs there as a gating step and passes: 62 assertions, a `BaseWindow`, four
+  `WebContentsView`s, an overlay composited on top, and a synthetic pointer drag
+  through the layout editor. Proven, not assumed - the step has no
+  `continue-on-error`, and the run is green.
+- **Nothing on that runner can photograph the desktop.** The diagnostic below
+  still stands: the runner is a Windows service, so it lives in session 0, where
+  `UserInteractive` is `False`, no user is logged on and `explorer.exe` is not
+  running. `CopyFromScreen` needs an interactive desktop; creating a window does
+  not.
+
+So session 0 has a window station Electron is happy to draw into, and no desktop a
+screenshot API can read. That distinction is the whole reason `npm run selftest`
+is a useful CI gate while `screenshot-windows.yml` is parked.
+
+Worth stating because it is easy to over-read. A sibling project's runner notes
+conclude from a passing Electron smoke test that "that machine has an interactive
+desktop". The smoke test proves Electron can make a window; it does not prove the
+session is interactive, and here the same evidence coexists with a session 0
+diagnostic that says it is not.
+
+## Runner facts, for when a job will not start
+
+Both runners are **org-level**, in the Potion group `default`. There are none
+scoped to this repository.
+
+| label set                | machine                                                             |
+| ------------------------ | ------------------------------------------------------------------- |
+| `[self-hosted, Windows]` | `PROTO1-P8`                                                         |
+| `[self-hosted, macOS]`   | `hqmbp26-crouse`, plus `jeffbook-mac` and `Brooklyn-Studio` when up |
+
+Access for this repository **is** granted - `build-windows.yml` and now `ci.yml`
+both run on it. So a job stuck at "Waiting for a runner to pick up this job" means
+the machine is offline, not a labels or permissions problem. The tell: if one
+platform's job starts and the other queues, it is a machine.
+
+An offline runner will block a PR here, because the Windows job is a required gate
+rather than advisory. That is deliberate. The hosted Linux job still reports in
+about fifteen seconds, so there is always some signal.
+
+`../planchette/docs/RUNNERS.md` has the fuller write-up, including how a Mac was
+added as an org runner and why `svc.sh install` is the step people forget.
+
 ## The problem
 
 Wallwright's last unverified assumption is that the transparent overlay
