@@ -1208,12 +1208,20 @@ macOS passing does not settle the target platform. This group is the real risk.
 
 ### What CI covers
 
-- `ci.yml` runs lint and the 264 tests on **Ubuntu only**, for every push to
-  `main` and every PR. There was a `windows-latest` job here; it was removed on
-  cost grounds and its lint and test coverage moved into `build-windows.yml`,
-  which runs both on the self-hosted Windows runner before packaging. The
-  consequence is that Windows sees nothing until a `v*` tag, which is worth
-  knowing given the convention that npm scripts must work there.
+- `ci.yml` runs on **every push to `main` and every PR**, on two runners. The
+  hosted Linux job does lint and the 264 unit tests in about fifteen seconds. The
+  self-hosted Windows job (`PROTO1-P8`) does lint, the unit tests **and
+  `npm run selftest`**, gating.
+- That closes the gap this file used to describe. Windows coverage had been moved
+  into `build-windows.yml`, which only runs on a `v*` tag, so a `src/main.js`
+  regression could merge to `main` completely green and surface at release time.
+  The self-test is the only coverage that file has. Self-hosted runners are free,
+  so the cost objection that removed the old `windows-latest` job no longer
+  applies.
+- The Windows job is a **required gate, not advisory**. `continue-on-error` reports
+  a failed step as `success`, which is how a sibling project believed a broken
+  smoke test passed for weeks. See `docs/windows-runner.md` for what that runner
+  can and cannot do.
 - `build-windows.yml` builds the installer and zip on `windows-latest`, on a
   `v*` tag or manual dispatch. It runs lint and tests first, so a failing build
   cannot ship.

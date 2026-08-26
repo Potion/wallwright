@@ -40,11 +40,13 @@ and the decisions that need Jeff before some of it can be finalized.
   proportions it will have on the wall.
 - Dev harness: `npm run dev` serves four local mock dashboards that exercise
   login/session persistence, Esc handling, an SSO popup flow, and per-panel zoom.
-- Packaging with electron-builder, and five CI workflows: lint/test on Ubuntu
-  (hosted), Windows and macOS installer builds on self-hosted runners that also
-  run the self-test, a manual Windows probe job that answers the open platform
-  questions without the show PC, and a parked screenshot job that cannot run (see
-  "Parked" below).
+- Packaging with electron-builder, and five CI workflows. `ci.yml` runs on every
+  push and PR on two runners: hosted Linux for lint and the unit tests, and the
+  self-hosted Windows runner for lint, the unit tests and **the self-test**, which
+  is the only coverage `src/main.js` has. Then Windows and macOS installer builds
+  on tags, a manual Windows probe job that answers the open platform questions
+  without the show PC, and a parked screenshot job that cannot run (see "Parked"
+  below).
 
 ## Where this was left
 
@@ -278,6 +280,11 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
   import anything. It exists in that shape because the snapping used to be
   written twice, in wall units here and window pixels there, and the two had
   already drifted apart.
+- **Never put `continue-on-error` on the self-test step.** It reports a failed
+  step's conclusion as `success`, so the gate silently stops being a gate. A
+  sibling project ran a broken smoke test for weeks that way. If the self-test
+  flakes, fix the test; it polls for conditions rather than sleeping precisely so a
+  loaded runner does not make it flake.
 - A `check()` added to the self-test must be **proved able to fail** by breaking
   the thing it covers and watching it go red. Two ways this has bitten: a check
   that passed because a popup had guarded the same partition as a side effect,
