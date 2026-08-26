@@ -14,8 +14,8 @@
 
 const {
   app,
+  session,
   BaseWindow,
-  BrowserWindow,
   View,
   WebContentsView,
   Menu,
@@ -28,7 +28,23 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const { loadConfig, saveViews } = require('./config');
-const { clampGrid, snapGrid } = require('./layout');
+const { clampGrid, snapGrid, snapNewGrid } = require('./layout');
+const {
+  isOriginAllowed,
+  isPermissionAllowed,
+  panelUrlVerdict,
+  partitionVerdict,
+  rectVerdict,
+} = require('./policy');
+const { dataUrl, placeholderPage, unrecoverablePage, fatalPage } = require('./pages');
+const { escapeDecision, isFullscreenToggle } = require('./interaction');
+const { chooseWallDisplay, safeAreaTopFor, fitLayout, describeLayout } = require('./display');
+const {
+  newWatchdogRecord,
+  nextWatchdogStep,
+  failureReport,
+  isRealLoadFailure,
+} = require('./watchdog');
 const { createControlServer } = require('./control-server');
 const { statusPage } = require('./control-page');
 const { createDiagLog } = require('./diag-log');
@@ -253,48 +269,36 @@ let layout = { scale: 1, offsetX: 0, offsetY: 0, width: 0, height: 0 };
 // Only applies while the app owns the display. In a window it already sits below
 // the menu bar, so there is nothing to avoid.
 function safeAreaTop() {
-  if (!isFullscreenNow()) return 0;
-  const setting = config.wall.safeAreaTop;
-  if (setting === 'auto') {
-    if (process.platform !== 'darwin') return 0;
-    const d = pickWallDisplay();
-    return Math.max(0, d.workArea.y - d.bounds.y);
-  }
-  return Number.isFinite(setting) && setting > 0 ? Math.round(setting) : 0;
+  const fullscreen = isFullscreenNow();
+  return safeAreaTopFor({
+    setting: config.wall.safeAreaTop,
+    fullscreen,
+    platform: process.platform,
+    // Only measured when it will actually be used, so the "auto" path does not
+    // pick a display on every call in windowed mode.
+    display: fullscreen && config.wall.safeAreaTop === 'auto' ? pickWallDisplay() : null,
+  });
 }
 
 function computeLayout() {
   const target = win ? win.getContentBounds() : pickWallDisplay().bounds;
-  const W = target.width;
-  const H = target.height;
-  const w = config.wall.width;
-  const h = config.wall.height;
-  const top = safeAreaTop();
-  const avail = Math.max(1, H - top);
-  const scale = config.wall.fitToDisplay === false ? 1 : Math.min(W / w, avail / h);
+  const next = fitLayout({
+    target,
+    wall: config.wall,
+    safeTop: safeAreaTop(),
+    fitToDisplay: config.wall.fitToDisplay,
+  });
 
-  // Report against the window, which is what the layout is actually scaled
-  // into. Reporting against the display would claim 1:1 while the app sits in
-  // an 85% window. Only on change, since this is called on every resize.
-  const stamp = `${scale}/${top}/${W}x${H}`;
+  // Report against the window, which is what the layout is actually scaled into.
+  // Reporting against the display would claim 1:1 while the app sits in an 85%
+  // window. Only on change, since this is called on every resize.
+  const stamp = `${next.scale}/${next.safeTop}/${next.width}x${next.height}`;
   if (stamp !== lastScaleLogged) {
     lastScaleLogged = stamp;
-    const inset = top ? `, keeping ${top}px clear at the top` : '';
-    if (Math.abs(scale - 1) < 0.0005) {
-      log(`layout ${w}x${h} in a ${W}x${H} window, 1:1${inset}`);
-    } else {
-      log(`layout ${w}x${h} in a ${W}x${H} window, scaled to ${scale.toFixed(3)}${inset}`);
-    }
+    log(describeLayout({ wall: config.wall, layout: next }));
   }
 
-  return {
-    scale,
-    offsetX: Math.round((W - w * scale) / 2),
-    offsetY: top + Math.round((avail - h * scale) / 2),
-    width: W,
-    height: H,
-    safeTop: top,
-  };
+  return next;
 }
 
 // Wall units -> window pixels.
@@ -346,75 +350,24 @@ function unscaleRect(r) {
 // the wall on its primary display, so label/id matching matters there; falling
 // back to primary is a dev-machine convenience and says so loudly.
 function pickWallDisplay() {
-  const displays = screen.getAllDisplays();
-  const { displayLabel, displayId, width, height } = config.wall;
-
-  // This runs on every resize and every display-metrics change, so notes are
-  // collected and only emitted when the chosen display actually changes.
-  // Otherwise an unattended run buries its real messages under hundreds of
-  // identical warnings.
-  const notes = [];
-  let hit = null;
-
-  if (displayId != null) {
-    hit = displays.find((d) => String(d.id) === String(displayId));
-    if (!hit) {
-      notes.push([
-        warn,
-        `no display with id ${displayId}; known ids:`,
-        displays.map((d) => d.id),
-      ]);
+  const { display, notes } = chooseWallDisplay(
+    screen.getAllDisplays(),
+    screen.getPrimaryDisplay(),
+    config.wall
+  );
+  // Emitted only when the chosen display changes. chooseWallDisplay() collects
+  // rather than logs precisely so this can stay quiet: it runs on every resize and
+  // every display-metrics change, and an unattended run would otherwise bury its
+  // real messages under hundreds of identical warnings.
+  if (display.id !== lastDisplayId) {
+    lastDisplayId = display.id;
+    for (const n of notes) {
+      const emit = n.level === 'warn' ? warn : log;
+      if (n.extra === undefined) emit(n.message);
+      else emit(n.message, n.extra);
     }
   }
-  if (!hit && displayLabel) {
-    hit = displays.find((d) => d.label === displayLabel);
-    if (!hit) {
-      notes.push([
-        warn,
-        `no display labelled "${displayLabel}"; known labels:`,
-        displays.map((d) => d.label),
-      ]);
-    }
-  }
-  if (!hit) {
-    // Last resort before primary: a display whose resolution matches the wall.
-    const exact = displays.filter(
-      (d) => d.bounds.width === width && d.bounds.height === height
-    );
-    if (exact.length === 1) {
-      hit = exact[0];
-      notes.push([log, `matched display by ${width}x${height}: "${hit.label}" (id ${hit.id})`]);
-    }
-  }
-  if (!hit) {
-    hit = screen.getPrimaryDisplay();
-    notes.push([
-      warn,
-      `falling back to the PRIMARY display "${hit.label}" (id ${hit.id}). ` +
-        'Set wall.displayLabel or wall.displayId to target the LED wall output.',
-    ]);
-  }
-
-  // Only a real problem when the layout is not being fitted: then the authored
-  // rectangles genuinely land in the wrong place. With fitToDisplay on, the
-  // scale is reported by computeLayout() against the window instead.
-  if (
-    config.wall.fitToDisplay === false &&
-    (hit.bounds.width !== width || hit.bounds.height !== height)
-  ) {
-    notes.push([
-      warn,
-      `wall config is ${width}x${height} but display "${hit.label}" is ` +
-        `${hit.bounds.width}x${hit.bounds.height}, and wall.fitToDisplay is off. ` +
-        'Panel rectangles will not land where you expect until these agree.',
-    ]);
-  }
-
-  if (hit.id !== lastDisplayId) {
-    lastDisplayId = hit.id;
-    notes.forEach(([fn, msg, extra]) => (extra === undefined ? fn(msg) : fn(msg, extra)));
-  }
-  return hit;
+  return display;
 }
 
 // ---- z-order ----------------------------------------------------------------
@@ -533,8 +486,14 @@ function createWall() {
       overlay.webContents.send('ww:select', process.env.WALLWRIGHT_SELECT);
     }
     if (DEV && process.env.WALLWRIGHT_SELFTEST === '1') selfTest();
-    if (DEV && process.env.WALLWRIGHT_CAPTURE_OUT)
-      scheduleCapture(process.env.WALLWRIGHT_CAPTURE_OUT);
+    if (DEV && process.env.WALLWRIGHT_CAPTURE_OUT) {
+      // Required here rather than at the top: src/dev/ does not ship, so a
+      // packaged build must never reach this line. It cannot - DEV gates it - but
+      // a lazy require means a missing file would fail loudly at capture time
+      // instead of stopping the app from starting at all.
+      const { scheduleCapture } = require('./dev/capture-wall');
+      scheduleCapture(captureContext(), process.env.WALLWRIGHT_CAPTURE_OUT);
+    }
     startUpkeep();
     startMemoryWatch();
     startControlServer();
@@ -546,13 +505,71 @@ function createWall() {
 // A panel with no URL yet is a normal state right after it is created in the
 // editor. Show something that says so rather than a black rectangle.
 function placeholderURL(v) {
-  const html = `<body style="margin:0;height:100vh;display:flex;align-items:center;
-    justify-content:center;background:#0d1117;color:#8b949e;
-    font:16px/1.5 -apple-system,Helvetica,Arial,sans-serif;text-align:center">
-    <div><div style="color:#f04e23;font-weight:600;margin-bottom:8px">
-    ${escapeHtml(v.label || v.id)}</div>
-    No URL set. Select this panel in layout edit mode and enter one.</div></body>`;
-  return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+  return dataUrl(placeholderPage(v));
+}
+
+// Every partition that already has permission handlers, so attaching is cheap to
+// repeat. It has to be repeatable: a brand-new partition can appear at runtime
+// from addPanel(), from a partition change in updatePanel(), or from a preset
+// naming one nothing has seen, so there is no single startup moment that covers
+// them all. createContentView() is the one chokepoint they all pass through.
+const guardedPartitions = new Set();
+
+// Which panel is asking. Deliberately resolved at call time rather than captured:
+// panels may share a partition on purpose (see the conventions in AGENTS.md), and
+// the handler is per-session, so two views with different allowedPermissions can
+// land on one session. Popups resolve through popupOwner, which is the same map
+// that stops upkeep rebuilding a panel mid-login.
+function viewForWebContents(wc) {
+  if (!wc) return null;
+  const i = contentViews.findIndex(
+    (cv) => cv && !cv.webContents.isDestroyed() && cv.webContents === wc
+  );
+  if (i >= 0) return config.views[i];
+  for (const [win_, id] of popupOwner) {
+    if (!win_.isDestroyed() && win_.webContents === wc) {
+      return config.views.find((v) => v.id === id) || null;
+    }
+  }
+  return null;
+}
+
+// Deny every permission unless the panel's config names it.
+//
+// Measured before this existed (npm run probe:perm, and the write-up in
+// docs/validation.md): a session with no handler grants microphone, camera and
+// notifications silently and leaves geolocation pending forever. Both handlers
+// are installed because neither is sufficient alone - the request handler is what
+// refuses getUserMedia, and the check handler is the only thing that stops
+// navigator.permissions.query telling a page it already has what it is about to
+// ask for.
+//
+// The default session is deliberately not touched. Only the overlay, showFatal()
+// and the generated data: pages live there, all local and authored here, none of
+// which request anything. It is also the session behind the overlay's
+// did-finish-load, which is the sole trigger for upkeep, the memory watch and the
+// control server, with no timeout: wedging it would take the wall up with no way
+// to diagnose it.
+function guardPermissions(partition) {
+  if (!partition || guardedPartitions.has(partition)) return;
+  guardedPartitions.add(partition);
+  const ses = session.fromPartition(partition);
+
+  const decide = (wc, permission) => {
+    const v = viewForWebContents(wc);
+    const allowed = isPermissionAllowed(permission, v && v.allowedPermissions);
+    if (!allowed) {
+      log(`denied ${permission} to ${v ? v.id : 'an unknown view'} on ${partition}`);
+    }
+    return allowed;
+  };
+
+  ses.setPermissionRequestHandler((wc, permission, callback) => {
+    callback(decide(wc, permission));
+  });
+  // Synchronous, and documented as sometimes being called with no webContents.
+  // Without a view there is nothing to consult, so it refuses.
+  ses.setPermissionCheckHandler((wc, permission) => decide(wc, permission));
 }
 
 function createContentView(v) {
@@ -571,6 +588,7 @@ function createContentView(v) {
     view.setBounds(panelRect(i));
     view.webContents.setZoomFactor(panelZoom(i));
   }
+  guardPermissions(v.partition);
   hardenView(view, v);
   view.webContents.loadURL(v.url || placeholderURL(v));
   return view;
@@ -588,11 +606,25 @@ function uniqueId(base) {
 // SSO-protected app need.
 function addPanel(rect) {
   const id = uniqueId('panel');
+  const wall = wallUnits();
   const v = {
     id,
     label: '',
     url: '',
-    grid: clampGrid(rect, wallUnits(), MIN_PANEL),
+    // Snapped in wall units before it is stored, the same way a drag is at
+    // ww:layout. This path used to clamp only, which made it the one way to
+    // create a seam the editor's snapping was supposed to prevent.
+    grid: clampGrid(
+      snapNewGrid(rect, {
+        views: config.views,
+        wall,
+        // Same tolerance as the drag path: the residual error from snapping in
+        // window pixels is at most one pixel, expressed in wall units.
+        tolerance: Math.max(2, Math.ceil(2 / (layout.scale || 1))),
+      }),
+      wall,
+      MIN_PANEL
+    ),
     zoom: 1,
     partition: `persist:${id}`,
   };
@@ -647,8 +679,24 @@ function deletePanel(id) {
 // can only be chosen when a view is created, so that one rebuilds the view.
 function updatePanel(id, patch) {
   const i = indexOfId(id);
-  if (i < 0) return;
+  if (i < 0) return { ok: false, notFound: true, reason: `no panel "${id}"` };
   const v = config.views[i];
+
+  // Checked before anything is applied, so a rejected patch cannot leave the
+  // panel half-updated with a new label and its old URL. Neither field was
+  // checked at all before: patch.url was String()-coerced and handed straight to
+  // loadURL, so file:, chrome: and data: all worked, and a partition without the
+  // persist: prefix silently became an in-memory session.
+  if (patch.url !== undefined) {
+    const verdict = panelUrlVerdict(patch.url);
+    if (!verdict.ok) return { ok: false, reason: verdict.reason };
+  }
+  // A falsy partition has always meant "leave the session alone", so it is not
+  // put to the verdict.
+  if (patch.partition) {
+    const verdict = partitionVerdict(patch.partition);
+    if (!verdict.ok) return { ok: false, reason: verdict.reason };
+  }
 
   if (patch.label !== undefined) v.label = String(patch.label);
   if (patch.zoom !== undefined && Number.isFinite(patch.zoom) && patch.zoom > 0) {
@@ -679,6 +727,31 @@ function updatePanel(id, patch) {
   }
 
   bringToTop(overlay);
+  return { ok: true };
+}
+
+// What src/dev/capture-wall.js is allowed to see. Getters rather than values,
+// because `layout` and `overlay` are module-level bindings that get reassigned:
+// a snapshot taken when the context is built would go stale the first time the
+// window is resized.
+function captureContext() {
+  return {
+    get contentViews() {
+      return contentViews;
+    },
+    get overlay() {
+      return overlay;
+    },
+    get layout() {
+      return layout;
+    },
+    get config() {
+      return config;
+    },
+    panelRect,
+    log,
+    warn,
+  };
 }
 
 function wallUnits() {
@@ -1337,16 +1410,6 @@ function round3(n) {
 // every other app on the machine. It is handled per view instead, the same way
 // Esc is. The tradeoff is that the panels themselves lose Cmd+F find-in-page,
 // which is the right call for a kiosk wall.
-function isFullscreenToggle(input) {
-  return (
-    input.type === 'keyDown' &&
-    String(input.key).toLowerCase() === 'f' &&
-    (input.meta || input.control) &&
-    !input.shift &&
-    !input.alt
-  );
-}
-
 // macOS is the awkward one. Measured on Electron 43.4.1 with a 1800x1169
 // display (`/tmp/fsprobe1.js`, see docs/validation.md):
 //
@@ -1549,22 +1612,10 @@ function clearIdle() {
 
 // ---- navigation policy ------------------------------------------------------
 
-function originOf(url) {
-  try {
-    return new URL(url).origin;
-  } catch {
-    return null;
-  }
-}
-
-// Absent or empty allowedOrigins means permissive, which is today's behavior
-// and the right default while the real Honeywell domains are unknown. Populate
-// it in config to enforce; no code change needed then.
+// The policy itself lives in src/policy.js, where it is testable. This is only
+// the bit that knows a view has an allowedOrigins field.
 function isAllowed(v, url) {
-  const list = v.allowedOrigins;
-  if (!Array.isArray(list) || list.length === 0) return true;
-  const origin = originOf(url);
-  return !!origin && list.includes(origin);
+  return isOriginAllowed(url, v.allowedOrigins);
 }
 
 // ---- per-view hardening -----------------------------------------------------
@@ -1573,26 +1624,21 @@ function isAllowed(v, url) {
 // overlay cannot disagree. Returns true when the wall consumed the key, meaning
 // the page must not also see it.
 function handleEscape() {
-  if (state.mode === 'select') {
-    dockGrid();
-    return true;
-  }
-  if (state.mode !== 'active') return false;
-  const mode = config.escToGrid;
-  if (mode === 'off') return false;
-  if (mode === 'single') {
-    dockGrid();
-    return true;
-  }
-  // "double": let the first Esc through so the page can close its own modal,
-  // and dock on a quick second press.
   const now = Date.now();
-  if (now - lastEscAt < config.escDoubleMs) {
+  const decision = escapeDecision({
+    mode: state.mode,
+    escToGrid: config.escToGrid,
+    lastEscAt,
+    now,
+    escDoubleMs: config.escDoubleMs,
+  });
+  if (decision === 'dock') {
     lastEscAt = 0;
     dockGrid();
     return true;
   }
-  lastEscAt = now;
+  // 'arm' starts the double-press clock; 'pass' leaves it alone.
+  if (decision === 'arm') lastEscAt = now;
   return false;
 }
 
@@ -1652,12 +1698,43 @@ function hardenView(view, v) {
 
   wc.on('did-create-window', (child) => {
     popups.add(child);
-    child.on('closed', () => popups.delete(child));
+    // popupOwner is what lets upkeep refuse to rebuild the panel that opened
+    // this login. Without the mapping, ineligibleReason()'s popup rule is dead.
+    popupOwner.set(child, v.id);
+    child.on('closed', () => {
+      popups.delete(child);
+      popupOwner.delete(child);
+    });
+    hardenPopup(child, v);
   });
 
+  // Three events, one policy. Measured (npm run probe:nav, docs/validation.md):
+  // will-navigate alone lets four of six navigation shapes through, because it is
+  // handed the URL the page ASKED for and never the one it lands on, and it does
+  // not fire for a subframe at all.
   wc.on('will-navigate', (event, url) => {
     if (!isAllowed(v, url)) {
       warn(`blocked navigation to ${url} in ${v.id} (not in allowedOrigins)`);
+      event.preventDefault();
+    }
+  });
+  // The redirect target. A page can ask for a URL that is perfectly allowed and
+  // be bounced somewhere else, which is what an expired session going to an
+  // identity provider looks like. Nothing in the requested URL names where it
+  // ends up, so will-navigate cannot see this coming.
+  wc.on('will-redirect', (event, url) => {
+    if (!isAllowed(v, url)) {
+      warn(`blocked redirect to ${url} in ${v.id} (not in allowedOrigins)`);
+      event.preventDefault();
+    }
+  });
+  // Subframes only: the main frame is already covered above, and blocking the
+  // same navigation from two listeners would just double the log line. This is
+  // the only event that fires when an iframe navigates itself.
+  wc.on('will-frame-navigate', (event) => {
+    if (event.isMainFrame) return;
+    if (!isAllowed(v, event.url)) {
+      warn(`blocked subframe navigation to ${event.url} in ${v.id} (not in allowedOrigins)`);
       event.preventDefault();
     }
   });
@@ -1669,8 +1746,7 @@ function hardenView(view, v) {
     scheduleReload(view, v);
   });
   wc.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
-    // -3 is ERR_ABORTED, which a normal redirect or a cancelled load produces.
-    if (!isMainFrame || code === -3) return;
+    if (!isRealLoadFailure({ code, isMainFrame })) return;
     // Counted after that return, so the number means real failures rather than
     // every cancelled navigation.
     counters.bump('failedLoads', v.id);
@@ -1681,24 +1757,25 @@ function hardenView(view, v) {
     // successful load and reset the ladder - which is why a broken panel retried
     // at the base delay forever instead of backing off.
     w.sawFailure = true;
-    const text = `${desc} (${code})`;
-    // The same failure repeating is one fact, not fifty. An unattended wall can
-    // otherwise fill its log with one message and push out everything else.
-    if (w.lastError === text) {
-      w.suppressed += 1;
-      if (w.suppressed % 10 === 0) {
-        warn(`${v.id} still failing: ${text}, ${w.suppressed} times`);
-      }
-    } else {
-      w.lastError = text;
-      w.suppressed = 0;
-      warn(`${v.id} failed to load ${url}: ${text}`);
-    }
+    const report = failureReport(w, { id: v.id, url, text: `${desc} (${code})` });
+    w.lastError = report.state.lastError;
+    w.suppressed = report.state.suppressed;
+    if (report.log) warn(report.log);
     scheduleReload(view, v);
   });
   // 'unresponsive' is deliberately NOT a reload trigger: a slow enterprise
   // dashboard is not a crashed one, and reloading would drop the session.
   wc.on('unresponsive', () => warn(`${v.id} is unresponsive (not reloading)`));
+
+  // A preload that throws takes activity reporting to zero and does it in
+  // silence: no crash, no failed load, the page renders normally. Found the hard
+  // way, by breaking src/content-preload.js and watching every test still pass.
+  // That preload is what tells the wall which panel is in use, so losing it means
+  // the idle timer docks the wall under someone and the watchdog reloads a panel
+  // mid-login.
+  wc.on('preload-error', (_e, preloadPath, error) => {
+    warn(`${v.id}: preload failed (${preloadPath}): ${error && error.message}`);
+  });
   // Cleared per navigation, so a failure recorded for one load cannot suppress
   // recovery from the next.
   wc.on('did-start-loading', () => {
@@ -1734,27 +1811,75 @@ function hardenView(view, v) {
   });
 }
 
+// A popup is the SSO login window, and until now it was the only window in the
+// app with no navigation policy at all: hardenView() was never applied to it, so
+// a redirect chain could take it anywhere and it could open further windows
+// freely. It gets the same origin policy the content views get.
+//
+// Three deliberate differences from hardenView():
+//
+//   - No Esc handling. Esc in a login form belongs to the page, and docking the
+//     wall would close the popup out from under a half-entered password. This is
+//     the one window where swallowing Esc would be actively harmful.
+//   - No watchdog reload. A popup is a transient part of a login flow, not a
+//     panel with a configured URL to recover to; there is nothing to reload it
+//     to. A dead one is closed instead.
+//   - Closing on a dead renderer is not tidiness, it is required. popupOwner
+//     keeps this panel ineligible for upkeep while the popup is open, and
+//     'closed' is what clears that. A popup whose renderer died without being
+//     closed would hold the entry, and the panel would be passed over until the
+//     deferral expired.
+function hardenPopup(child, v) {
+  const pwc = child.webContents;
+  // A popup reuses the opener's partition, so this is normally already done. It
+  // is repeated because it is idempotent and because a popup is where a login
+  // form lives, which is the last place to discover the guard was missed.
+  guardPermissions(v.partition);
+
+  // Same three events as hardenView, and for the same measured reason. A login
+  // window is if anything more redirect-heavy than a panel.
+  pwc.on('will-navigate', (event, url) => {
+    if (!isAllowed(v, url)) {
+      warn(`blocked popup navigation to ${url} from ${v.id} (not in allowedOrigins)`);
+      event.preventDefault();
+    }
+  });
+  pwc.on('will-redirect', (event, url) => {
+    if (!isAllowed(v, url)) {
+      warn(`blocked popup redirect to ${url} from ${v.id} (not in allowedOrigins)`);
+      event.preventDefault();
+    }
+  });
+  pwc.on('will-frame-navigate', (event) => {
+    if (event.isMainFrame) return;
+    if (!isAllowed(v, event.url)) {
+      warn(`blocked popup subframe navigation to ${event.url} from ${v.id}`);
+      event.preventDefault();
+    }
+  });
+
+  // A popup opening another window is unusual but real in some SSO flows, so it
+  // is policed rather than refused outright. No geometry override: the wall
+  // centring in hardenView() is for a popup opened from a docked panel, and a
+  // window opened from a popup should sit where the OS puts it.
+  pwc.setWindowOpenHandler(({ url }) => {
+    if (!isAllowed(v, url)) {
+      warn(`blocked window from ${v.id}'s popup to ${url} (not in allowedOrigins)`);
+      return { action: 'deny' };
+    }
+    return { action: 'allow', overrides: { parent: win } };
+  });
+
+  pwc.on('render-process-gone', (_e, details) => {
+    warn(`${v.id}: popup renderer gone (${details && details.reason}), closing it`);
+    if (!child.isDestroyed()) child.close();
+  });
+
+  pwc.on('unresponsive', () => warn(`${v.id}: popup is unresponsive`));
+}
+
 function wd(id) {
-  if (!watchdog.has(id)) {
-    watchdog.set(id, {
-      attempts: 0,
-      pending: null,
-      deferred: false,
-      // How many times the whole ladder has been walked. Round 2 is the last one:
-      // past that the panel is declared unrecoverable rather than retried forever.
-      round: 0,
-      gaveUp: false,
-      slowTimer: null,
-      lastError: null,
-      suppressed: 0,
-      sawFailure: false,
-      // True while the panel is showing a page this app generated rather than the
-      // configured one. Without it, loading the "could not be loaded" page counts
-      // as the panel having recovered, which clears the ladder and cancels the
-      // retry that page has just promised the reader.
-      showingDiagnostic: false,
-    });
-  }
+  if (!watchdog.has(id)) watchdog.set(id, newWatchdogRecord());
   return watchdog.get(id);
 }
 
@@ -1766,22 +1891,7 @@ function wd(id) {
 // front of the wall with no access to a log, which is the realistic support
 // situation for an exhibit.
 function unrecoverableURL(v, w) {
-  const retry = config.watchdog.retryMs
-    ? `Retrying every ${Math.round(config.watchdog.retryMs / 60000)} minutes.`
-    : 'Not retrying.';
-  const html = `<body style="margin:0;height:100vh;display:flex;align-items:center;
-    justify-content:center;background:#0d1117;color:#8b949e;
-    font:15px/1.6 -apple-system,Helvetica,Arial,sans-serif;text-align:center">
-    <div style="max-width:80%">
-    <div style="color:#f04e23;font-weight:600;font-size:19px;margin-bottom:12px">
-    ${escapeHtml(v.label || v.id)} could not be loaded</div>
-    <div style="font-family:ui-monospace,Menlo,monospace;color:#e6edf3;
-    word-break:break-all;margin-bottom:12px">${escapeHtml(v.url || '(no URL set)')}</div>
-    <div>${escapeHtml(w.lastError || 'unknown error')}</div>
-    <div style="margin-top:12px">Gave up after ${w.round + 1} rounds
-    at ${escapeHtml(new Date().toLocaleTimeString())}. ${retry}</div>
-    </div></body>`;
-  return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+  return dataUrl(unrecoverablePage(v, w, { retryMs: config.watchdog.retryMs }));
 }
 
 // Load whatever this panel should be showing. The one place that decides, so the
@@ -1800,6 +1910,14 @@ function scheduleReload(view, v) {
   const w = wd(v.id);
   if (w.pending || w.gaveUp) return; // one in-flight reload per view
   const i = config.views.indexOf(v);
+
+  // The spec can be gone while this view's handlers are still attached:
+  // deletePanel() splices it out, and applyPreset() replaces the whole list. The
+  // handler then fires with an index of -1, and eligible() would index
+  // panelStates() out of bounds and dereference undefined. Since uncaughtException
+  // rethrows, that took the wall down. giveUpOn() and the escalation below already
+  // guard the same lookup; this is the path that did not.
+  if (i < 0) return;
 
   // A panel with no URL has nothing to recover. It shows the placeholder, and the
   // placeholder cannot fail, so retrying is pure noise.
@@ -1822,33 +1940,28 @@ function scheduleReload(view, v) {
   }
 
   const cfg = config.watchdog;
-  // Out of attempts for this round. Escalate once to a rebuild, because a fresh
-  // renderer fixes failures a reload cannot - a wedged GPU context, a renderer
-  // dying on its own corrupt state - and the sessionStorage a rebuild costs is
-  // already gone: the panel is showing an error, not a session.
-  if (cfg.maxAttempts && w.attempts >= cfg.maxAttempts) {
-    if (cfg.escalateToRecycle && w.round === 0) {
-      w.round = 1;
-      w.attempts = 0;
-      warn(`${v.id}: ${cfg.maxAttempts} reloads failed, rebuilding the view`);
-      if (i >= 0) recyclePanel(i);
-      return;
-    }
-    return giveUpOn(view, v, w);
-  }
+  const step = nextWatchdogStep(w, cfg);
 
-  w.attempts += 1;
+  if (step.action === 'recycle') {
+    w.round = step.round;
+    w.attempts = step.attempts;
+    warn(`${v.id}: ${cfg.maxAttempts} reloads failed, rebuilding the view`);
+    recyclePanel(i);
+    return;
+  }
+  if (step.action === 'giveUp') return giveUpOn(view, v, w);
+
+  w.attempts = step.attempts;
   counters.bump('watchdogScheduled', v.id);
   counters.highWater('reloadAttempts', w.attempts, v.id);
-  const delay = Math.min(cfg.maxDelayMs, cfg.baseDelayMs * 2 ** w.attempts);
-  log(`reloading ${v.id} in ${delay}ms (attempt ${w.attempts}, round ${w.round + 1})`);
+  log(`reloading ${v.id} in ${step.delayMs}ms (attempt ${w.attempts}, round ${w.round + 1})`);
   w.pending = setTimeout(() => {
     w.pending = null;
     // Counted here rather than where it was scheduled, so it means reloads that
     // actually happened.
     counters.bump('watchdogReloads', v.id);
     loadPanel(view, v);
-  }, delay);
+  }, step.delayMs);
 }
 
 // Stop the fast ladder and say so on the wall. Then try again on a slow timer
@@ -1896,6 +2009,7 @@ function closePopups() {
     if (!p.isDestroyed()) p.close();
   }
   popups.clear();
+  popupOwner.clear();
 }
 
 // ---- IPC from the overlay ---------------------------------------------------
@@ -1977,6 +2091,10 @@ ipcMain.on('ww:layout', (_e, msg) => {
   if (state.mode !== 'edit' || !msg) return;
   const i = indexOfId(msg.id);
   if (i < 0) return;
+  // A non-numeric field here becomes NaN, passes through clampGrid untouched,
+  // reaches setBounds, and is then written into the config file by saveViews.
+  const rectOk = rectVerdict(msg.rect);
+  if (!rectOk.ok) return warn(`ignored layout for ${msg.id}: ${rectOk.reason}`);
   const v = config.views[i];
 
   // Only the dimensions the gesture actually drives are taken from the pointer.
@@ -2047,7 +2165,9 @@ ipcMain.on('ww:deletePreset', (_e, id) => {
 });
 
 ipcMain.on('ww:addPanel', (_e, rect) => {
-  if (state.mode !== 'edit' || !rect) return;
+  if (state.mode !== 'edit') return;
+  const rectOk = rectVerdict(rect);
+  if (!rectOk.ok) return warn(`ignored addPanel: ${rectOk.reason}`);
   const v = addPanel(unscaleRect(rect));
   bringToTop(overlay);
   sendOverlayState();
@@ -2065,7 +2185,11 @@ ipcMain.on('ww:deletePanel', (_e, id) => {
 
 ipcMain.on('ww:updatePanel', (_e, msg) => {
   if (state.mode !== 'edit' || !msg) return;
-  updatePanel(msg.id, msg.patch || {});
+  const verdict = updatePanel(msg.id, msg.patch || {});
+  // The inspector is the only caller, so a refusal here is an administrator
+  // typing something the wall will not accept. Saying so beats appearing to
+  // accept it and then not changing.
+  if (!verdict.ok) warn(`updatePanel refused for ${msg.id}: ${verdict.reason}`);
   sendOverlayState();
   overlay.webContents.send('ww:select', msg.id);
 });
@@ -2081,9 +2205,10 @@ function selfTest() {
   // run still looked fine. A smoke test that cannot fail is not a test.
   const failures = [];
   const step = (n, msg) => log(`selftest ${n}: ${msg}`);
-  const check = (n, label, ok) => {
-    log(`selftest ${n}: ${ok ? 'ok  ' : 'FAIL'} ${label}`);
-    if (!ok) failures.push(`${n}: ${label}`);
+  const check = (n, label, ok, detail) => {
+    const why = !ok && detail ? ` (${detail})` : '';
+    log(`selftest ${n}: ${ok ? 'ok  ' : 'FAIL'} ${label}${why}`);
+    if (!ok) failures.push(`${n}: ${label}${why}`);
   };
   const ids = () => config.views.map((v) => v.id).join(',');
   const run = (js) => overlay.webContents.executeJavaScript(js, true);
@@ -2432,6 +2557,265 @@ function selfTest() {
     check(15, 'a line written through log() reached it', logHasNonce);
     check(15, 'the log is not disabled', diag.stats().disabled === false);
 
+    // Reproduces a crash rather than describing one. deletePanel() splices the
+    // spec out while that view's own did-fail-load and render-process-gone
+    // handlers are still attached, so the watchdog runs with an index of -1. That
+    // used to throw inside eligible(), and uncaughtException rethrows, which took
+    // the whole wall down. No unit test can reach this: scheduleReload lives in
+    // main.js and needs a real view.
+    step(16, 'the watchdog survives a panel that no longer exists');
+    const countBefore16 = config.views.length;
+    await run(`window.wallwright.addPanel({ x: 40, y: 1100, width: 400, height: 260 })`);
+    await until(() => config.views.length === countBefore16 + 1);
+    const doomed = config.views[config.views.length - 1];
+    const doomedView = contentViews[config.views.length - 1];
+    // Given a URL on purpose, so the guard is what stops this and not the
+    // unrelated "a placeholder cannot fail" early return further down.
+    doomed.url = 'https://example.com/';
+    deletePanel(doomed.id);
+    check(16, 'the spec really is gone', config.views.indexOf(doomed) === -1);
+    let watchdogThrew = null;
+    try {
+      scheduleReload(doomedView, doomed);
+    } catch (e) {
+      watchdogThrew = e;
+    }
+    check(
+      16,
+      'scheduleReload did not throw for a deleted panel',
+      watchdogThrew === null,
+      watchdogThrew && watchdogThrew.message
+    );
+
+    // The rule that refuses to rebuild a panel mid-SSO-login was written, unit
+    // tested in src/upkeep.js, and dead: popupOwner was declared and read and
+    // never written to, so popupOpen was permanently false. A real popup is the
+    // only way to prove the write path, which is the half that was missing.
+    step(17, 'the SSO popup rule is wired, not just written');
+    const owner = config.views[0];
+    const ownerState = () => panelStates().find((p) => p.id === owner.id);
+    // Wrapped so the expression resolves to a boolean. Returning the Window that
+    // window.open() hands back fails to serialise over IPC, and executeJavaScript
+    // rejects with a bare "Uncaught" that says nothing about why.
+    await contentViews[0].webContents.executeJavaScript(
+      `(() => { window.open('about:blank', '_blank', 'width=320,height=200'); return true; })()`,
+      true
+    );
+    const popupOpened = await until(() => popups.size > 0);
+    check(17, 'the popup was created', popupOpened);
+    check(
+      17,
+      'panelStates attributes it to the panel that opened it',
+      ownerState().popupOpen === true
+    );
+    check(
+      17,
+      'and upkeep refuses that panel even when forcing',
+      /popup/.test(eligible(owner, 0, 'recycle', { force: true }).reason || '')
+    );
+    // hardenPopup() ran. The popup was the only window in the app with no
+    // navigation policy at all, and a listener is the observable trace of it.
+    const popupWin = [...popups][0];
+    check(
+      17,
+      'the popup was given a navigation policy',
+      !!popupWin && popupWin.webContents.listenerCount('will-navigate') > 0
+    );
+    closePopups();
+    check(17, 'closing it clears the attribution', ownerState().popupOpen === false);
+
+    // updatePanel is reachable from the inspector and, unauthenticated, from the
+    // loopback control surface. Both used to accept any scheme and any partition
+    // name: patch.url was String()-coerced straight into loadURL, and a partition
+    // without the persist: prefix silently became an in-memory session that loses
+    // the login on the next rebuild.
+    step(18, 'a panel cannot be pointed at anything at all');
+    const guarded = config.views[0];
+    const urlBefore = guarded.url;
+    const labelBefore = guarded.label;
+    const partitionBefore = guarded.partition;
+
+    const badUrl = updatePanel(guarded.id, {
+      url: 'file:///etc/passwd',
+      label: 'should not be applied',
+    });
+    check(18, 'a file: url is refused', badUrl.ok === false, badUrl.reason);
+    check(18, 'the url is unchanged', guarded.url === urlBefore);
+    // The whole patch is validated before any of it is applied, so a rejected
+    // url must not leave a new label behind.
+    check(18, 'and no other field of that patch was applied', guarded.label === labelBefore);
+
+    const badPartition = updatePanel(guarded.id, { partition: 'wall-1' });
+    check(
+      18,
+      'a partition without persist: is refused',
+      badPartition.ok === false,
+      badPartition.reason
+    );
+    check(18, 'the session is unchanged', guarded.partition === partitionBefore);
+
+    const goodPatch = updatePanel(guarded.id, { label: 'accepted by selftest' });
+    check(
+      18,
+      'a valid patch still applies',
+      goodPatch.ok === true && guarded.label === 'accepted by selftest'
+    );
+
+    const missing = updatePanel('no-such-panel', { label: 'x' });
+    check(
+      18,
+      'a missing panel is reported as not found, not as refused',
+      missing.ok === false && missing.notFound === true
+    );
+
+    // The overlay's stylesheet moved out of overlay.html so the CSP could be
+    // default-src 'none' with no 'unsafe-inline' exception. If overlay.css ever
+    // fails to load - a rename, a bad path, a CSP that is too strict - the editor
+    // still works and every other check here still passes, it just looks wrong.
+    // Nothing else would catch that.
+    // Measured before this existed: a session with no handler grants microphone,
+    // camera and notifications silently. Nothing else here would notice the guard
+    // going missing, because a granted permission looks like nothing happening.
+    // Nothing covered the content preload, and a preload that fails is silent:
+    // the page renders, nothing crashes, and the wall simply stops knowing which
+    // panel is in use. Breaking it on purpose passed every other check here.
+    step(19, 'the content preload is alive and reporting');
+    const watched = config.views[0];
+    const beforeTouch = touched.get(watched.id) || 0;
+    contentViews[0].webContents.sendInputEvent({ type: 'keyDown', keyCode: 'a' });
+    const reported = await until(() => (touched.get(watched.id) || 0) > beforeTouch, 4000);
+    check(
+      19,
+      'a keypress in a panel reaches the main process as activity',
+      reported,
+      'src/content-preload.js is not reporting; check for a preload-error line above'
+    );
+
+    step(19, 'permissions are guarded on every panel session');
+    const partitions = [...new Set(config.views.map((v) => v.partition))];
+    check(
+      19,
+      'every partition currently in use has been guarded',
+      partitions.length > 0 && partitions.every((pt) => guardedPartitions.has(pt)),
+      `guarded=${[...guardedPartitions].join(',')} views=${partitions.join(',')}`
+    );
+    // Draw a new panel, which mints a partition that has never existed, and check
+    // it was guarded on the way in. This is the case a startup-time attach would
+    // miss, and it is the reason the guard hangs off createContentView() rather
+    // than off app.whenReady(). Checking only the partitions already in use is
+    // not enough: a popup guards one of those as a side effect, so that check
+    // still passes with the guard removed from the panel path.
+    // The partition name carries RUN_ID so it cannot collide with anything this
+    // run has already guarded. addPanel() alone is not enough for this: uniqueId()
+    // can hand back an id that was deleted earlier in the run, and with it a
+    // partition that was already guarded, so the check would pass either way.
+    const countBefore19 = config.views.length;
+    await run(`window.wallwright.addPanel({ x: 60, y: 1400, width: 300, height: 220 })`);
+    await until(() => config.views.length === countBefore19 + 1);
+    const freshPanel = config.views[config.views.length - 1];
+    const freshPartition = `persist:selftest-fresh-${RUN_ID}`;
+    check(19, 'the test partition really is new', !guardedPartitions.has(freshPartition));
+    updatePanel(freshPanel.id, { partition: freshPartition });
+    check(
+      19,
+      'a partition minted at runtime is guarded too',
+      guardedPartitions.has(freshPartition),
+      `${freshPartition} not in guarded set`
+    );
+    deletePanel(freshPanel.id);
+    // The deny path, exercised rather than assumed. No view names any permission
+    // in config/selftest.json, so every one of these must come back false.
+    check(
+      19,
+      'nothing is allowed by default',
+      config.views.every((v) => !isPermissionAllowed('media', v.allowedPermissions))
+    );
+
+    step(19, 'the overlay stylesheet loaded under the CSP');
+    const sheets = await run(`document.styleSheets.length`);
+    check(19, 'a stylesheet is attached', sheets > 0, `styleSheets.length=${sheets}`);
+    // A token from overlay.css, resolved rather than merely present, so a file
+    // that loaded but parsed to nothing still fails.
+    const accent = await run(
+      `getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()`
+    );
+    check(19, 'the palette tokens resolve', !!accent, `--accent="${accent}"`);
+    // overlay.js reads window.WallwrightLayout at load. If the CSP ever blocks
+    // that second script, or the file is renamed, the symptom is a drag that
+    // throws rather than a message saying what went missing.
+    const sharedGeometry = await run(
+      `typeof window.WallwrightLayout === 'object' && typeof window.WallwrightLayout.snapRect === 'function'`
+    );
+    check(19, 'the shared layout geometry loaded into the overlay', sharedGeometry === true);
+
+    // The layout editor's snapping runs in the overlay renderer, in window pixels,
+    // and nothing covered it: every other check here drives the editor through IPC
+    // and skips the geometry entirely. This drives a real pointer drag instead, so
+    // the whole path is exercised - overlay hit-test, applySnap in pixels,
+    // ww:layout, snapGrid in wall units, clampGrid - and lands on a number.
+    step(20, 'a real pointer drag snaps the panel to the wall edge');
+    enterEdit();
+    await soon(400);
+
+    // Self-contained: earlier steps delete panels, so this draws its own rather
+    // than depending on what is left over. Placed well clear of the wall's left
+    // edge so the drag has somewhere to travel from.
+    const wall20 = wallUnits();
+    const countBefore20 = config.views.length;
+    await run(
+      `window.wallwright.addPanel({ x: ${Math.round(wall20.width * 0.4)}, y: ${Math.round(wall20.height * 0.3)}, width: 300, height: 200 })`
+    );
+    await until(() => config.views.length === countBefore20 + 1);
+    await soon(300);
+
+    const dragged = config.views[config.views.length - 1];
+    const stage = stageBounds();
+    const box = JSON.parse(
+      await run(
+        `(() => {
+           const el = document.querySelector('.epanel');
+           if (!el) return 'null';
+           const r = el.getBoundingClientRect();
+           return JSON.stringify({ x: r.x, y: r.y, w: r.width, h: r.height });
+         })()`
+      )
+    );
+    check(20, 'the editor drew a panel frame to drag', !!box, `mode=${state.mode}`);
+
+    if (box) {
+      // Aim the left edge six window pixels inside the wall's left edge: inside
+      // the overlay's 10px snap radius, but well outside the 2-unit tolerance
+      // main.js re-snaps with. So if the overlay stopped snapping, the panel
+      // lands at ~6 units rather than 0 and this check fails rather than
+      // silently passing on the second pass.
+      const fromX = Math.round(box.x + box.w / 2);
+      const fromY = Math.round(box.y + box.h / 2);
+      const toX = fromX + (stage.x + 6 - Math.round(box.x));
+      const send = (type, x, y) =>
+        overlay.webContents.sendInputEvent({ type, x, y, button: 'left', clickCount: 1 });
+
+      send('mouseDown', fromX, fromY);
+      await soon(60);
+      // Two moves: one to start the gesture, one to land it. A single move can be
+      // coalesced with the down event.
+      send('mouseMove', Math.round((fromX + toX) / 2), fromY);
+      await soon(60);
+      send('mouseMove', toX, fromY);
+      await soon(120);
+      send('mouseUp', toX, fromY);
+      await until(() => dragged.grid.x === 0, 3000);
+
+      check(
+        20,
+        'the dragged panel snapped flush to the wall edge',
+        dragged.grid.x === 0,
+        `grid.x=${dragged.grid.x} after dragging its left edge to 6px from the wall`
+      );
+    }
+    deletePanel(dragged.id);
+    exitEdit({ save: false });
+    await soon(200);
+
     if (failures.length) {
       warn(`selftest FAILED (${failures.length}): ${failures.join('; ')}`);
     } else {
@@ -2443,84 +2827,6 @@ function selfTest() {
     warn('selftest threw:', e.message);
     app.exit(1);
   });
-}
-
-// Dev-only: render the wall and write a single PNG of it, then quit.
-//
-// Captures each panel from its own webContents and the overlay on top, then
-// composites them at their wall coordinates. That means it needs no OS
-// screen-recording permission, so it works where `screencapture` cannot run at
-// all: a terminal without that permission, a CI runner, a headless show PC. It
-// also captures the editor, which an OS screenshot of a kiosk window can only do
-// if someone is standing there.
-//
-//   WALLWRIGHT_DEV=1 WALLWRIGHT_CAPTURE_OUT=./wall.png npm start
-async function captureWall(outPath) {
-  const dpr = Number(process.env.WALLWRIGHT_CAPTURE_DPR || 1);
-  const shots = [];
-
-  for (let i = 0; i < contentViews.length; i++) {
-    const img = await contentViews[i].webContents.capturePage();
-    shots.push({ rect: panelRect(i), data: img.toDataURL() });
-  }
-  // The overlay last, so it lands on top the way it does on the wall. In grid
-  // mode it is invisible; in edit mode it is the whole point of the picture.
-  const ov = await overlay.webContents.capturePage();
-  shots.push({ rect: overlay.getBounds(), data: ov.toDataURL() });
-
-  const comp = new BrowserWindow({ show: false, width: 64, height: 64 });
-  await comp.loadURL('data:text/html,<canvas id="c"></canvas>');
-  const png = await comp.webContents.executeJavaScript(
-    `(async () => {
-      const shots = ${JSON.stringify(shots)};
-      const dpr = ${dpr};
-      const c = document.getElementById('c');
-      c.width = ${layout.width} * dpr;
-      c.height = ${layout.height} * dpr;
-      const ctx = c.getContext('2d');
-      ctx.fillStyle = ${JSON.stringify(config.wall.backgroundColor || '#000000')};
-      ctx.fillRect(0, 0, c.width, c.height);
-      for (const s of shots) {
-        const img = new Image();
-        await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = s.data; });
-        ctx.drawImage(img, s.rect.x * dpr, s.rect.y * dpr, s.rect.width * dpr, s.rect.height * dpr);
-      }
-      return c.toDataURL('image/png');
-    })()`,
-    true
-  );
-
-  fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  fs.writeFileSync(outPath, Buffer.from(png.split(',')[1], 'base64'));
-  const kb = Math.round(fs.statSync(outPath).size / 1024);
-  log(`captured ${outPath} (${layout.width * dpr}x${layout.height * dpr}, ${kb}KB)`);
-}
-
-// Wait for the pages to load and settle, then capture and exit.
-function scheduleCapture(outPath) {
-  const settle = Number(process.env.WALLWRIGHT_CAPTURE_SETTLE || 7000);
-  const timeout = Number(process.env.WALLWRIGHT_CAPTURE_LOAD_TIMEOUT || 25000);
-
-  const loaded = contentViews.map(
-    (view, i) =>
-      new Promise((res) => {
-        if (!view.webContents.isLoading()) return res();
-        view.webContents.once('did-stop-loading', () => {
-          log(`loaded ${config.views[i].id}`);
-          res();
-        });
-        setTimeout(res, timeout);
-      })
-  );
-
-  Promise.all(loaded)
-    .then(() => new Promise((r) => setTimeout(r, settle)))
-    .then(() => captureWall(outPath))
-    .then(() => app.exit(0))
-    .catch((e) => {
-      warn('capture failed:', e.message);
-      app.exit(1);
-    });
 }
 
 // ---- control surface --------------------------------------------------------
@@ -2634,11 +2940,10 @@ const controlActions = {
     applyPreset(id);
     return true;
   },
-  updatePanel: (id, patch) => {
-    if (indexOfId(id) < 0) return false;
-    updatePanel(id, patch);
-    return true;
-  },
+  // Returns the verdict rather than a boolean, so the HTTP surface can tell a
+  // panel that does not exist (404) from a patch that was refused (400). It used
+  // to answer 200 to a rejected patch, which read as "done".
+  updatePanel: (id, patch) => updatePanel(id, patch),
   promote: (id) => {
     if (id === null) {
       dockGrid();
@@ -2700,18 +3005,35 @@ function startControlServer() {
 // ---- lockdown + lifecycle ---------------------------------------------------
 
 function registerShortcuts() {
+  // globalShortcut.register() returns false when the OS refuses the accelerator,
+  // which happens when another running application already owns it. Unchecked,
+  // that is silent, and the first anyone knows is that a key does nothing at the
+  // wall - including Ctrl+Shift+Q, which is the deliberate way out of a kiosk
+  // window with no menu and no title bar. Named so the warning says which one.
+  const bind = (accelerator, what, handler) => {
+    let ok = false;
+    try {
+      ok = globalShortcut.register(accelerator, handler);
+    } catch (e) {
+      warn(`could not register ${accelerator} (${what}): ${e.message}`);
+      return false;
+    }
+    if (!ok) warn(`${accelerator} (${what}) was refused, probably taken by another app`);
+    return ok;
+  };
+
   // Deliberate admin exit.
-  globalShortcut.register('CommandOrControl+Shift+Q', () => app.quit());
+  bind('CommandOrControl+Shift+Q', 'quit', () => app.quit());
   // Layout edit mode. Not dev-only: this is how the layout gets tuned at the
   // wall, against the real dashboards, without editing JSON on site.
-  globalShortcut.register('CommandOrControl+Shift+E', () => toggleEdit());
+  bind('CommandOrControl+Shift+E', 'edit mode', () => toggleEdit());
   // Panels are interactive in grid mode, so promoting one needs its own mode
   // rather than a click that would otherwise land on the page.
-  globalShortcut.register('CommandOrControl+Shift+P', () => toggleSelect());
+  bind('CommandOrControl+Shift+P', 'select mode', () => toggleSelect());
   // Recall a montage by number, without opening the editor. Registered for all
   // nine whether or not that many presets exist; the handler just does nothing.
   for (let n = 1; n <= 9; n++) {
-    globalShortcut.register(`CommandOrControl+Shift+${n}`, () => {
+    bind(`CommandOrControl+Shift+${n}`, `preset ${n}`, () => {
       const preset = config.presets[n - 1];
       if (preset) applyPreset(preset.id);
       else log(`no preset ${n}`);
@@ -2722,12 +3044,12 @@ function registerShortcuts() {
   // before the page sees it, which would break every Esc-to-close modal in the
   // dashboards. Esc is handled per view in hardenView() instead.
   if (DEV) {
-    globalShortcut.register('CommandOrControl+Shift+I', () => {
+    bind('CommandOrControl+Shift+I', 'devtools', () => {
       const i = state.activeIndex;
       const target = i >= 0 ? contentViews[i] : overlay;
       target.webContents.openDevTools({ mode: 'detach' });
     });
-    globalShortcut.register('CommandOrControl+Shift+G', () => dockGrid());
+    bind('CommandOrControl+Shift+G', 'dock to grid', () => dockGrid());
   }
 }
 
@@ -2738,20 +3060,8 @@ function showFatal(message) {
   const v = new WebContentsView();
   w.contentView.addChildView(v);
   v.setBounds({ x: 0, y: 0, width: 900, height: 520 });
-  const html = `<body style="margin:0;padding:32px;background:#0d1117;color:#e6edf3;
-    font:14px/1.5 ui-monospace,Menlo,monospace">
-    <h1 style="font:600 20px sans-serif;color:#f04e23;margin:0 0 16px">${APP_NAME} cannot start</h1>
-    <pre style="white-space:pre-wrap">${escapeHtml(message)}</pre>
-    <p style="color:#8b949e">Config: ${escapeHtml(configPath)}</p></body>`;
-  v.webContents.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  v.webContents.loadURL(dataUrl(fatalPage(APP_NAME, message, configPath)));
   fatal('cannot start:', message);
-}
-
-function escapeHtml(s) {
-  return String(s).replace(
-    /[&<>"']/g,
-    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]
-  );
 }
 
 // Two copies would fight over the wall.
@@ -2780,7 +3090,7 @@ if (!app.requestSingleInstanceLock()) {
     openDiagLog();
     try {
       configPath = resolveConfigPath();
-      config = loadConfig(configPath);
+      config = loadConfig(configPath, { onWarn: warn });
     } catch (e) {
       return showFatal(e.message);
     }

@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>script navigation</title>
+    <link rel="stylesheet" href="mock.css" />
+  </head>
+  <body>
+    <h1>Script navigation</h1>
+    <p>Calls location.assign after a beat, which is what an SPA route change looks like.</p>
+    <script>
+      setTimeout(function () {
+        location.assign('/dash-2.html');
+      }, 500);
+    </script>
+  </body>
+</html>

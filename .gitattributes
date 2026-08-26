@@ -9,3 +9,7 @@
 *.png binary
 *.ico binary
 *.icns binary
+
+# Harvested soak output is evidence, so it is stored byte-for-byte. It came off a
+# Windows machine with CRLF line endings; normalising it would edit the record.
+docs/soak/** -text

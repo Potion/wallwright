@@ -1,6 +1,7 @@
 // Launcher for the app's built-in wall capture. The capture itself lives in
-// src/main.js so it uses the real layout, the real overlay and the real state
-// machine; this only sets the environment and starts the app.
+// src/dev/capture-wall.js, required lazily by main.js so it uses the real layout,
+// the real overlay and the real state machine; this only sets the environment and
+// starts the app.
 //
 //   WALLWRIGHT_CONFIG=./config/local-demo.json WALLWRIGHT_CAPTURE_OUT=./wall.png npm run capture
 //   ... plus WALLWRIGHT_START_EDIT=1 WALLWRIGHT_SELECT=<panel id> to capture the editor

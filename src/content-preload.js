@@ -5,6 +5,12 @@
 // target when a panel is clicked.
 const { ipcRenderer } = require('electron');
 
+// NOTE: this file cannot require anything but electron and a few node built-ins.
+// It is a preload in a sandboxed renderer, where require() is limited. Pulling the
+// throttle below out into src/interaction.js to share it was tried and reverted:
+// it fails at runtime with "module not found", takes activity reporting to zero,
+// and does it silently. Keep the logic here, inline.
+
 // mousemove is throttled, and the other events are not.
 //
 // Two reasons. It is the highest-frequency thing this app does - four panels of

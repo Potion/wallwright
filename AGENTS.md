@@ -7,7 +7,7 @@ and the decisions that need Jeff before some of it can be finalized.
 
 ## What works today
 
-- Loads and **validates** `config/wall.json` (12 tests in `test/config.test.js`).
+- Loads and **validates** `config/wall.json` (57 tests in `test/config.test.js`).
   A bad config shows a readable error on the wall instead of a stack trace.
 - One kiosk `BaseWindow` at wall size, targeted by `wall.displayLabel` /
   `wall.displayId` / resolution match, with loud warnings when it has to fall
@@ -40,14 +40,16 @@ and the decisions that need Jeff before some of it can be finalized.
   proportions it will have on the wall.
 - Dev harness: `npm run dev` serves four local mock dashboards that exercise
   login/session persistence, Esc handling, an SSO popup flow, and per-panel zoom.
-- Packaging with electron-builder, and three CI workflows: lint/test on Ubuntu
-  and Windows, a Windows installer build, and a manual Windows probe job that
-  answers the open platform questions without the show PC.
+- Packaging with electron-builder, and five CI workflows: lint/test on Ubuntu
+  (hosted), Windows and macOS installer builds on self-hosted runners that also
+  run the self-test, a manual Windows probe job that answers the open platform
+  questions without the show PC, and a parked screenshot job that cannot run (see
+  "Parked" below).
 
 ## Where this was left
 
 Released as **v0.1.1** with Windows and macOS artifacts, built on Potion's
-self-hosted runners. `npm test` is 133 tests, `npm run selftest` is 38 end to end
+self-hosted runners. `npm test` is 264 tests, `npm run selftest` is 62 end to end
 assertions, and both gate every build. CI is green.
 
 The app is **Wallwright**, the repository is `Potion/wallwright`, and the npm
@@ -76,10 +78,20 @@ See "Overlay compositing on Windows: WORKS" in `docs/validation.md`. None of the
 countermeasure ships switched off because the number that would engage it has to
 come from a measured baseline.
 
-**A 72-hour soak is IN FLIGHT.** Started 2026-08-25T13:24:29Z on HQ-PROTO-MINI-2,
-ending Friday morning. `docs/soak-run.md` is the runbook: what is running, how to
-read it without disturbing it, how to harvest and tear down, and what to do with
-the numbers. Read that first if you are picking this up.
+**The 72-hour soak ENDED EARLY and must be re-run.** It ran 6.9 of 72 hours on
+HQ-PROTO-MINI-2 and was shut down at the machine on 2026-08-25T20:17:36Z; the
+machine was then needed for other work, so it was harvested and torn down on
+2026-08-26. **No verdict**: the threshold is judged on the final 24 hours of 72, so
+`_memoryBaseline` stays `NOT MEASURED YET` and `memoryLimitMb` stays 0. The 6.9
+hours are still worth reading - the `control` arm was flat, nothing crashed, and
+the drift estimators agreed at ~3.4 MB/hour - and are written up in
+`docs/validation.md` under "The 72-hour run: ENDED EARLY". Data in
+`docs/soak/2026-08-25-partial/`.
+
+Planned re-run: **Thursday 2026-08-27**. It starts from zero; a memory curve cannot
+be resumed across a gap. `docs/soak-run.md` is the runbook and needs no changes -
+the harness worked, including telling us how it ended. The machine is currently
+released: no `Soak*` task remains and both `FCAT*` tasks are back to `Ready`.
 
 Two things to know before touching that machine. It belongs to another project, and
 `FCATWallLauncher` and `FCATSoakSampler` are disabled for the duration and are
@@ -96,12 +108,17 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
 
 ## Build / harden next (TODO)
 
-1. **Finish the soak.** It is running; see `docs/soak-run.md`. When it ends:
-   harvest before tearing down, judge the final 24 hours against the pre-registered
-   15 MB/hour, quantify the workingSetSize versus private-bytes gap at the plateau,
-   and set `memoryLimitMb` from the rule in `config/wall.json` `_memoryBaseline`
-   rather than by guessing. A limit inside the normal operating band was measured
-   taking memory _up_, from 1513 to 1885MB.
+1. **Re-run the soak, Thursday 2026-08-27.** The first attempt got 6.9 of 72
+   hours; see `docs/soak-run.md` for the runbook and `docs/validation.md` for what
+   the partial run did and did not settle. Re-stage the build, start it, and this
+   time **tell whoever else uses that machine that it is running**: the run was
+   ended by hand at the machine, which nothing in the harness can prevent. When it
+   finishes: harvest before tearing down, judge the final 24 hours against the
+   pre-registered 15 MB/hour, quantify the workingSetSize versus private-bytes gap
+   at the plateau (partially answered: about 60% high and shrinking), and set
+   `memoryLimitMb` from the rule in `config/wall.json` `_memoryBaseline` rather
+   than by guessing. A limit inside the normal operating band was measured taking
+   memory _up_, from 1513 to 1885MB.
 2. **Walk the checklist in `docs/validation.md` "Still to verify".** Grouped by
    where each check can be done: (A) on the dev machine now, (B) blocked on the
    real dashboard URLs, (C) needs the show PC.
@@ -191,3 +208,79 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
 - Do not build markup with inline event handlers in `src/control-page.js`. The
   first version did and the escaping collapsed into an unparseable page. Use
   `data-` attributes and the delegated listener.
+- A new config knob goes in one of the tables in `src/config.js`
+  (`NON_NEGATIVE`, `BOOLEANS`, `WATCHDOG_NON_NEGATIVE`) **and** in the matching
+  `KNOWN_*` set. The tables exist because `memoryCheckMs` once shipped unchecked
+  while everything around it was covered, and `transitionMs`, `escDoubleMs` and
+  `backButton` were found the same way in the 2026-08-25 audit. The `KNOWN_*`
+  sets are what make `unknownKeys()` able to warn about a typo; a knob missing
+  from them is reported as unknown, so the test over every committed config
+  catches it.
+- Unknown config keys are a **warning, not a problem**. `validateConfig`'s list
+  is fatal, and these files are hand-edited on a show floor: refusing to boot over
+  a stray key is a worse failure than ignoring one. A leading `_` means
+  documentation and stays quiet.
+- Anything that writes a file the wall reads at boot writes a sibling and renames.
+  `src/config.js` `saveViews()` and `src/diag-log.js`'s rotation both do this, so
+  a crash part-way through cannot leave a truncated file behind.
+- `globalShortcut.register()` returns false when the OS refuses an accelerator.
+  Check it. Twelve were registered unchecked, including the admin exit, and a
+  collision is otherwise discovered at a venue.
+- Navigation and panel-source policy lives in `src/policy.js`, not in `main.js`.
+  Two separate questions kept apart on purpose: `allowedOrigins` is a
+  configurable misconfiguration guard, while the http/https scheme list and the
+  `persist:` partition rule are fixed, because no config should be able to point
+  a wall panel at the show PC's disk or at a session that loses its login.
+- Anything that mutates a panel validates the **whole** patch before applying any
+  of it, and returns `{ ok, reason }` rather than a boolean. A half-applied patch
+  leaves a panel with a new label and its old URL, and a caller that cannot say
+  why it refused produces a wall that silently ignores instructions.
+- `hardenView()` is for content views and `hardenPopup()` is for SSO popups, and
+  they are deliberately different. A popup gets the origin policy but **not** Esc
+  handling, because Esc in a login form belongs to the page and docking the wall
+  would close the popup over a half-entered password. It also gets no watchdog
+  reload: there is no configured URL to recover to, so a dead popup is closed.
+- The navigation policy is **three events, not one**: `will-navigate`,
+  `will-redirect`, and `will-frame-navigate` filtered to subframes. Measured
+  (`npm run probe:nav`): `will-navigate` is handed the URL a page asked for and
+  never the one it lands on, and it does not fire for a subframe at all, so on
+  its own it lets four of six navigation shapes through. All three route through
+  the same `isAllowed()`; do not add a fourth policy.
+- **Permissions are deny-by-default, per view, via `allowedPermissions`.** Note
+  the polarity is the opposite of `allowedOrigins`: empty origins means
+  permissive, empty permissions means none. Measured (`npm run probe:perm`): a
+  session with no handler grants microphone, camera and notifications silently
+  and leaves geolocation pending forever. Both `setPermissionRequestHandler` and
+  `setPermissionCheckHandler` are needed; neither alone closes the hole.
+- Permission handlers hang off `createContentView()`, not off startup. A brand-new
+  partition can appear at runtime from `addPanel()`, from a partition change in
+  `updatePanel()`, or from a preset naming one nothing has seen. The handler
+  resolves the requesting `webContents` to a view at call time rather than
+  capturing one, because panels may share a partition.
+- The overlay's CSP is `default-src 'none'` with no exceptions, which is why the
+  stylesheet lives in `src/overlay.css` rather than inline in `overlay.html`.
+  Adding an inline `<style>`, an inline `<script>`, or any remote asset to that
+  page will silently break it; put styles in the css file.
+- **`src/content-preload.js` cannot require anything but `electron`.** It is a
+  preload in a sandboxed renderer, where `require()` is limited to a handful of
+  built-ins. Pulling its throttle out into a shared module was tried and reverted:
+  it fails with "module not found", takes activity reporting to zero, and does it
+  in total silence - the page still renders and nothing crashes. Keep that file
+  self-contained; a few duplicated lines are cheaper than a wall that stops
+  knowing which panel is in use.
+- Every content view listens for `preload-error`, because that failure has no
+  other symptom. `src/overlay.js` is a plain `<script src>` rather than a preload
+  and is not subject to the same limit, but it cannot `require()` either.
+- **`src/layout.js` is loaded two ways** and must stay loadable both: the main
+  process and the tests `require()` it, and `src/overlay.html` serves it to the
+  renderer as a plain `<script>` before `overlay.js`. That is why it ends with a
+  guarded `module.exports` plus a `globalThis` assignment, and why it must never
+  import anything. It exists in that shape because the snapping used to be
+  written twice, in wall units here and window pixels there, and the two had
+  already drifted apart.
+- A `check()` added to the self-test must be **proved able to fail** by breaking
+  the thing it covers and watching it go red. Two ways this has bitten: a check
+  that passed because a popup had guarded the same partition as a side effect,
+  and one that passed because `uniqueId()` handed back a deleted id and with it
+  an already-guarded partition. Make the thing under test unmistakably new. Steps 16 and 17 were verified that
+  way; step 16's failure message reproduces the exact crash it guards against.

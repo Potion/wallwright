@@ -1,6 +1,6 @@
-appId: com.potion.wallwright
+appId: com.hyperquake.wallwright
 productName: Wallwright
-copyright: Potion
+copyright: Copyright (c) 2026 Hyperquake
 
 directories:
   output: dist

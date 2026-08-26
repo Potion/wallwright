@@ -29,6 +29,18 @@ function handleLogin(req, res, url) {
   res.end();
 }
 
+// A redirect chain. /login can already issue one 302, but it takes `next` raw and
+// cannot express a chain, and a chain is the interesting case: the question is
+// what the main process is told about the hops in the middle, not the last one.
+//   /redirect?to=/dash-2.html&n=3  ->  302, 302, 302, then /dash-2.html
+function handleRedirect(req, res, url) {
+  const to = url.searchParams.get('to') || '/dash-1.html';
+  const n = Number(url.searchParams.get('n') || 1);
+  const next = n > 1 ? `/redirect?to=${encodeURIComponent(to)}&n=${n - 1}` : to;
+  res.writeHead(302, { Location: next });
+  res.end();
+}
+
 function readCookie(req, name) {
   const raw = req.headers.cookie || '';
   const hit = raw
@@ -42,6 +54,17 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
   if (url.pathname === '/login') return handleLogin(req, res, url);
+
+  if (url.pathname === '/redirect') return handleRedirect(req, res, url);
+
+  // A 302 whose destination is NOT written in the request URL. This is the shape
+  // that matters: an origin policy inspecting the URL a page asked for cannot see
+  // where the server is about to send it. A session that has expired and bounces
+  // to an identity provider looks exactly like this.
+  if (url.pathname === '/sso-bounce') {
+    res.writeHead(302, { Location: '/dash-4.html' });
+    return res.end();
+  }
 
   if (url.pathname === '/whoami') {
     res.writeHead(200, { 'Content-Type': 'application/json' });

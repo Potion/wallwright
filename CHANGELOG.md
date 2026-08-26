@@ -16,6 +16,159 @@ app was called Forge until 2026-08-24; see `docs/identity.md` for why it is not
 called that any more. The git tags still point at the code those installers were
 built from, so nothing is unrecoverable.
 
+## Unreleased
+
+### The 72-hour soak ended early, and there is still no memory baseline
+
+The first attempt ran 6.9 of its 72 hours. It was shut down at the machine on
+2026-08-25T20:17:36Z, and the machine was needed for other work the next day, so
+it was harvested and torn down on 2026-08-26. The threshold is judged on the final
+24 hours of 72, so **there is no verdict**: `memoryLimitMb` stays 0 and
+`_memoryBaseline` stays `NOT MEASURED YET`. A re-run is planned for 2026-08-27 and
+starts from zero, because a memory curve cannot be resumed across a gap.
+
+The 6.9 hours are worth reading, and are written up in `docs/validation.md`. The
+`control` arm - a static page with no timers and no network, the one whose growth
+would indict the app rather than a dashboard - went from 73MB to 74MB. Nothing
+crashed, nothing failed to load, the watchdog never fired across 412 samples, and
+the two drift estimators agreed at about 3.4 MB/hour against a 15 MB/hour
+threshold. All of which is warm-up, not a result.
+
+The harness came out of it well: between the sampler, the per-panel series and the
+app log it dated the end to the second, proved it was a graceful `app.quit()`
+rather than a crash, and ruled out both a reboot and the one pre-registered
+invalidating condition. The log line that made that possible exists because of a
+deliberate choice - `will-quit` writes `stopping after Ns` so that "silence at the
+end of a soak log" cannot be mistaken for a clean finish.
+
+### Ownership
+
+- `copyright` is now `Copyright (c) 2026 Hyperquake`, and `package.json` names
+  `Jeff Crouse <jeff.crouse@hyperquake.com>` as author. Both feed the shipped
+  binaries: electron-builder writes the copyright into the Windows executable's
+  version resource and into `NSHumanReadableCopyright` on macOS.
+- **`appId` moved from `com.potion.wallwright` to `com.hyperquake.wallwright`.**
+  That is the bundle identity, so Windows treats a build from here on as a
+  different application from `v0.1.1`: an existing install is not upgraded in
+  place, it is installed alongside, and the old entry has to be uninstalled by
+  hand. Done now specifically because it is free now - no installer has been
+  distributed and no asset has ever been downloaded - and it stops being free the
+  moment one is.
+- `userData` is unaffected. Electron derives that folder from the application
+  name, not the appId, and the name is unchanged, so the tuned montage and every
+  `persist:` session carry across untouched.
+
+### Fixed
+
+- The watchdog could take the whole wall down. `scheduleReload()` looked up a
+  panel's index without guarding against `-1`, which is what it gets when a
+  handler fires for a spec that `deletePanel()` or `applyPreset()` has already
+  removed. The out-of-bounds lookup threw, and `uncaughtException` rethrows.
+- Upkeep never actually refused to rebuild a panel mid-SSO-login. The rule was
+  written and unit tested, but `popupOwner` was declared and read and never
+  written to, so `popupOpen` was permanently false.
+- A control-surface POST over the 1MB cap hung instead of answering. The cap
+  destroyed the request while only `'end'` could settle the promise, and `'end'`
+  never fires on a destroyed request. It now stops buffering, keeps draining, and
+  answers 413.
+- `saveViews()` wrote the live config with a plain `writeFileSync`. It now writes
+  a sibling and renames, so a crash part-way through cannot truncate the file the
+  wall boots from.
+- `transitionMs`, `escDoubleMs` and `backButton` are validated. All three reached
+  Electron as raw numbers, where a `NaN` silently disabled an animation, undid the
+  Esc policy, or put the Back button at unusable bounds.
+- `showHotspotHint`, `hideInactiveWhenActive`, `idleResetUrls` and
+  `memoryRelaunch` must now be real booleans. A quoted `"false"` used to read as
+  true, which for `idleResetUrls` meant a scheduled logout of every dashboard.
+- A `globalShortcut` the OS refuses is now logged. Twelve accelerators were
+  registered without checking the result, including the deliberate admin exit.
+- **SSO popups had no navigation policy at all.** `hardenView()` was never
+  applied to them, so the login window was the only one in the app that could
+  follow a redirect chain anywhere and open further windows freely. They now get
+  the same origin policy the content views get. Esc is deliberately still left to
+  the page there, because docking the wall would close the popup out from under a
+  half-entered password, and a popup whose renderer dies is now closed rather
+  than left holding its panel ineligible for upkeep.
+- **A panel could be pointed at any URL scheme and any partition.** `patch.url`
+  was `String()`-coerced straight into `loadURL`, so `file:`, `javascript:`,
+  `data:` and `chrome:` all worked, and `isAllowed` was never consulted on that
+  path because it guards only `will-navigate` and `setWindowOpenHandler`. A
+  partition without the `persist:` prefix silently became an in-memory session
+  that loses the login on the next rebuild. Both are now refused with a reason,
+  and the whole patch is validated before any of it is applied.
+- The rectangles arriving on `ww:layout` and `ww:addPanel` are checked. A
+  non-numeric field became `NaN`, passed through `clampGrid` untouched, reached
+  `setBounds`, and was written into the config file.
+- `POST /api/panel` answers 400 with a reason for a refused patch. It used to
+  answer 200 with the wall's status, which reads as "done".
+
+### Added
+
+- **The layout editor's snapping is one implementation, not two.** It was written
+  twice, in wall units in `src/layout.js` and in window pixels in
+  `src/overlay.js`, and the two had already drifted apart. `src/layout.js` now
+  holds the only copy, parameterised on its candidate edges and tolerance so it
+  serves both unit spaces, and the overlay loads it as a plain script.
+  `src/overlay.js` is 109 lines lighter, and the aspect-locked scale branch and
+  the proportional clamp have tests for the first time.
+- **Fixed a snap that moved a panel off the wall.** The wall-units half took the
+  first edge within tolerance rather than the closest, so a panel shorter than the
+  tolerance had its top edge snapped onto a line its bottom edge was already on.
+  `clampGrid` hid it. Found by collapsing the duplication above.
+- **The self-test drives a real pointer drag.** Every other check goes through IPC
+  and skips the editor's geometry entirely; this one presses the mouse down on a
+  panel frame, moves it, and asserts where the panel actually landed.
+- `captureWall` moved to `src/dev/capture-wall.js`, required lazily so it cannot
+  ship. Separately: `npm run capture` does not currently work on the dev machine,
+  which is pre-existing and is now written up in `docs/validation.md`.
+- **Four modules extracted from `main.js`, all at 100% coverage.**
+  `src/pages.js` (the three generated pages, including the `escapeHtml` that is
+  the only thing between an operator-typed label and a `data:` document),
+  `src/interaction.js` (the Esc policy and the fullscreen predicate),
+  `src/display.js` (which output the wall lands on, and how the layout is fitted
+  into it), and `src/watchdog.js` (the backoff ladder and the failure-log
+  suppression, both of which had been wrong before and fixed by hand).
+- **Every content view now listens for `preload-error`.** That failure had no
+  other symptom: the page renders, nothing crashes, and the wall silently stops
+  knowing which panel is in use, so the idle timer docks it under an operator and
+  the watchdog reloads a panel mid-login. The self-test now presses a key into a
+  panel and checks the activity arrives.
+- **Permissions are denied unless a panel asks for them.** Measured first
+  (`npm run probe:perm`): a session with no handler grants microphone, camera and
+  notifications silently, with no prompt, and leaves geolocation pending forever.
+  Nothing in the app had ever touched permissions. Both
+  `setPermissionRequestHandler` and `setPermissionCheckHandler` are now installed
+  per partition, because neither alone closes the hole: the first is what refuses
+  `getUserMedia`, the second is the only thing that stops
+  `navigator.permissions.query` reporting `granted`. A panel that genuinely needs
+  one names it in the new per-view `allowedPermissions`.
+- **The navigation policy now covers redirects and subframes.** Measured
+  (`npm run probe:nav`): `will-navigate` is handed the URL a page asked for and
+  never the one it lands on, and it does not fire for a subframe at all, so four
+  of six navigation shapes went straight past it - including a 302 whose target is
+  not named in the request, which is what an expired session bouncing to an
+  identity provider looks like. `will-redirect` and `will-frame-navigate` are now
+  policed too, through the same `isAllowed()`.
+- **A Content-Security-Policy on the overlay**, `default-src 'none'` with no
+  exceptions. The overlay is the one renderer with a privileged bridge attached.
+  Its stylesheet moved to `src/overlay.css` so `style-src` did not need an
+  `'unsafe-inline'` hole; `src/overlay.html` is 444 lines shorter.
+- `npm run probe:perm` and `npm run probe:nav`, both wired into
+  `probe-windows.yml`. One runner, `src/dev/probe-serve.js`, serves the mocks for
+  either and fails loudly if its server does not start, rather than silently
+  measuring whatever else holds the port.
+- `src/policy.js`: what a panel may load, and where it may navigate. The origin
+  policy moved out of `main.js`, where it had no tests despite deciding whether a
+  navigation or a popup is blocked, and it gained a fixed scheme allow-list.
+- Unknown config keys are warned about on load. `memoryLimitMB` or `escToGird`
+  used to validate, do nothing, and say nothing. A leading underscore still means
+  documentation, so `_comment`, `_memoryBaseline` and `_soak` stay quiet.
+
+### Changed
+
+- `engines.node` is now `>=22`, which is the oldest version CI actually exercises
+  and what the coverage thresholds require. `>=18` was never tested.
+
 ## 0.1.1 - 2026-08-24
 
 Published earlier as `v0.3.0`.
