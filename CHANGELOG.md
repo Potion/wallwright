@@ -32,6 +32,13 @@ on a private repo - self-hosted runners are free, so that objection is gone. And
 it is the only place the self-test _can_ run: it needs a real display, which a
 hosted Linux runner does not have.
 
+The macOS runner (`hqmbp26-crouse`, the development machine) runs the same three
+steps, also gating, so the only coverage `src/main.js` has now runs on both
+platforms the app ships to on every change. It catches the reverse case of the
+Windows job - something that works on Windows and not on POSIX - and it is where
+the app is actually developed, so a failure there is the fastest feedback
+available.
+
 The hosted Linux job stays, as the fifteen-second signal that does not depend on a
 self-hosted machine being reachable.
 
