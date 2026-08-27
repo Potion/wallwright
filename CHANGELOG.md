@@ -18,6 +18,52 @@ built from, so nothing is unrecoverable.
 
 ## Unreleased
 
+### The soak can be started from the repo, not from memory
+
+The first 72-hour run left a runbook that could tell you how to watch a run,
+harvest it and tear it down, but never how to **start** one. The teardown script
+existed only on the soak machine, so teardown deleted it along with the stage. The
+second run had to reconstruct all five Scheduled Task definitions from the notes in
+`docs/validation.md`.
+
+The whole procedure is in `scripts/` now: `soak-stage.sh` copies the build, harness
+and config from the Mac and hash-verifies the transfer; `soak-setup.ps1` expands the
+build, writes the task wrappers, registers the five tasks and starts them in
+dependency order; `soak-teardown.ps1` ends the run and re-enables the other
+project's tasks; `soak-proc.ps1` and `soak-grab.ps1` are the OS-side recorders.
+
+Staging deliberately stops short of starting. Staging is reversible and committing
+somebody else's machine for three days is not, which is the lesson of the first
+run: it ended because a person stopped it at the machine, having never been told a
+run was on. Confirming the machine is free is a documented precondition now.
+
+Three things the scripts refuse to paper over. The pre-flight **fails** rather than
+warns if a `%APPDATA%\Wallwright` profile or a stale `Soak*` task is left over,
+because starting on top of one both poisons the run and makes the next teardown
+delete something that was not ours. Setup refuses to start the app if the mock
+server is not answering on `:8787`, since both local arms would fail to load and a
+failed load at T0 is a pre-registered failure. And teardown retries its deletions:
+`taskkill` returns when the kill is signalled rather than when the kernel has
+finished, so a single attempt leaves the expanded build behind while reporting
+everything else gone.
+
+### The soak config follows the display
+
+`config/soak-72h.json` is authored at 1920x1080 for a landscape 3840x2160 panel. It
+was 1080x1920, for the same panel mounted in portrait, which is how the first run
+found it; the project that owns the machine rotated it back between the runs.
+
+Authored to match rather than rotating the screen back, because a shared machine is
+not this experiment's to reconfigure. The pre-registration survives it: what that
+fixed was the raster, and 3840x2160 at device pixel ratio 2 is the same 8.29
+megapixels as 2160x3840, so both runs remain comparable to each other and to a real
+wall. `wall.scale` is 1.0 either way. A landscape mounting is in fact one caveat
+better, since a wall is landscape.
+
+Caught at T0 from the app's own log, which said `falling back to the PRIMARY
+display` and `scaled to 0.563`. Checking that line before walking away is now a
+step in the runbook: six minutes here, 72 hours if it is first read at harvest.
+
 ### The self-test now gates every push, on Windows
 
 `npm run selftest` is the only coverage `src/main.js` has, and it only ran on a

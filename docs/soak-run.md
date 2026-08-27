@@ -1,24 +1,33 @@
 # The 72-hour soak: runbook
 
-**Status: NOT RUNNING. The first attempt ended early and a re-run is planned for
-Thursday 2026-08-27.**
+**Status: RUNNING. Second attempt, started `2026-08-27T19:47:42Z`, due to end
+about `2026-08-30T19:47:42Z`.**
 
-That attempt started `2026-08-25T13:24:29Z` and was shut down at the machine
-`2026-08-25T20:17:36Z`, 6.9 hours in, well short of the 72 it needed. It was
-harvested and torn down on 2026-08-26. See `docs/validation.md`, "The 72-hour run:
-ENDED EARLY", for what the partial data does and does not say - there is no
-verdict, and `memoryLimitMb` is still unset.
+The first attempt started `2026-08-25T13:24:29Z` and was shut down at the machine
+`2026-08-25T20:17:36Z`, 6.9 hours in, well short of the 72 it needed. It produced
+no verdict. See `docs/validation.md`, "The 72-hour run: ENDED EARLY", for what its
+partial data does and does not say.
 
-**Nothing below needs changing to run it again.** The harness did its job: the
-sampler, the per-panel series, the grabs and the app log between them dated the
-end, proved it was a graceful quit rather than a crash, and ruled out a reboot and
-a session hijack. One thing to add that is not a code change: **tell whoever else
-uses HQ-PROTO-MINI-2 that a run is in progress.** The run ended because someone
-stopped it at the machine, and no amount of harness can prevent that.
+**It ended because somebody stopped it at the machine, not because anything
+broke.** HQ-PROTO-MINI-2 belongs to another project and nobody outside this work
+knew a run was in progress. No harness can prevent that, so the fix is social and
+it is a precondition, not a courtesy: **before starting a run, confirm the machine
+is free for three full days and tell whoever else uses it.** Jeff confirmed that
+for this run on 2026-08-27.
 
-Everything below is written to be usable by somebody who was not there, from
-nothing but this file. The machine details, task table, harvest and teardown steps
-are all still current; the tense is the only thing that is off.
+Two things the first attempt got wrong about itself, both fixed here:
+
+- **The runbook could not actually start a run.** It documented how to watch one,
+  harvest one and tear one down, but never how to stage one, and the teardown
+  script existed only on the soak machine, so teardown deleted it along with the
+  stage. The second run had to reconstruct the five task definitions from
+  `docs/validation.md`. Staging and teardown are both in `scripts/` now, and
+  "Staging it from cold" below is the missing section.
+- **The display had been rotated back to landscape between the runs.** The config
+  was authored for the portrait mounting the first run found, so nothing matched
+  it, the app fell back to the primary display and scaled the layout to 0.563.
+  Caught at T0 from the app's own log and restarted six minutes later. See
+  "The geometry changed between the runs" below.
 
 ## What is running, and where
 
@@ -29,7 +38,7 @@ are all still current; the tense is the only thing that is off.
 | Stage   | `C:\Users\proto\wallwright-soak`                                                                |
 | Output  | `C:\Users\proto\wallwright-soak\out`                                                            |
 | App log | `C:\Users\Proto\AppData\Roaming\Wallwright\logs\wallwright.log`                                 |
-| Build   | git `ddafb04`, `Wallwright-0.1.1-x64.zip`, sha256 `020be292...`, from Actions run `32847419440` |
+| Build   | git `c384dcf`, `Wallwright-0.1.1-x64.zip`, sha256 `1b377dbe...`, from Actions run `33109052397` |
 | Config  | `config/soak-72h.json`, staged as `soak-config.json`                                            |
 
 The base command for everything here. Every call needs `</dev/null` or a read loop
@@ -52,6 +61,94 @@ which is a lesson this fleet already learned the hard way.
 | `SoakSampler` | polls `/api/status` every 60s          | Running                                                                                                                                                  |
 | `SoakProc`    | OS-side series every 60s               | Running                                                                                                                                                  |
 | `SoakGrab`    | screen grab every 30 min               | Ready between firings                                                                                                                                    |
+
+## Staging it from cold
+
+Everything is in the repo; nothing has to be reconstructed. Three scripts, and the
+only one you run by hand is the first:
+
+| script                      | runs on  | what                                                                      |
+| --------------------------- | -------- | ------------------------------------------------------------------------- |
+| `scripts/soak-stage.sh`     | the Mac  | copies build, harness, panel pages and config; hash-verifies; pre-flights |
+| `scripts/soak-setup.ps1`    | the wall | expands the build, writes the wrappers, registers the five tasks, starts  |
+| `scripts/soak-teardown.ps1` | the wall | ends it and gives the machine back                                        |
+
+**1. Build from the ref you intend to soak.** Not a stale artifact: the point of
+the run is a baseline for what ships.
+
+```sh
+gh workflow run build-windows.yml --ref main
+gh run download <run-id> -n wallwright-windows-x64 -D /tmp/build
+```
+
+**2. Stage it.** This copies everything and stops. It deliberately does not start
+the run, because staging is reversible and committing somebody else's machine for
+three days is not.
+
+```sh
+scripts/soak-stage.sh /tmp/build/Wallwright-0.1.1-x64.zip
+```
+
+It refuses to continue if the zip's sha256 does not survive the transfer, and it
+finishes by running the pre-flight, which changes nothing. The pre-flight fails
+rather than warns if `%APPDATA%\Wallwright` already exists, if a `Soak*` task is
+still registered, if node is missing, or if the panel pages did not arrive. A
+leftover profile means the previous teardown did not finish, and starting on top of
+it would both poison the run and make the next teardown delete something that was
+not ours.
+
+**3. Confirm the machine is free**, per the top of this file. This is the step that
+cost the first run.
+
+**4. Start it.**
+
+```sh
+ssh ... 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\proto\wallwright-soak\soak-setup.ps1' </dev/null
+```
+
+The setup script starts the mock server first and **refuses to start the app if
+`:8787` does not answer**, because both local arms would otherwise fail to load and
+a failed load at T0 is a pre-registered failure. It prints T0 and the projected end.
+
+**5. Check the geometry before walking away.** The single most important line in
+the app log, and the one that caught this run's first start:
+
+```sh
+ssh ... 'powershell -NoProfile -Command "Get-Content $env:APPDATA\Wallwright\logs\wallwright.log -TotalCount 6"' </dev/null
+```
+
+It must say `matched display by <w>x<h>` and `layout ... 1:1`. If it says
+`falling back to the PRIMARY display` or `scaled to 0.nnn`, stop and fix the config
+before the run gets any further: the pre-registration fixes `wall.scale` at 1.0, and
+a scaled layout is not the experiment that was registered.
+
+## The geometry changed between the runs
+
+The first run found this 4K panel mounted in **portrait**, 2160x3840, and
+`config/soak-72h.json` was authored at 1080x1920 to match. Between the two runs the
+project that owns the machine rotated it back to **landscape**, 3840x2160, so at
+200% scaling the app is handed 1920x1080.
+
+The config now follows the display rather than the other way round. Rotating a
+shared machine's screen back to suit this experiment is exactly the kind of
+unannounced interference that ended the first run, and it is not worth a verdict.
+
+**The pre-registration survives this intact**, because what it actually fixed was
+the pixel count, not the aspect:
+
+|                 | first run           | this run            |
+| --------------- | ------------------- | ------------------- |
+| mounting        | portrait 2160x3840  | landscape 3840x2160 |
+| logical window  | 1080x1920           | 1920x1080           |
+| raster at DPR 2 | **8.29 megapixels** | **8.29 megapixels** |
+| `wall.scale`    | 1.0                 | 1.0                 |
+| panels          | 2x2 of 540x960      | 2x2 of 960x540      |
+
+Raster memory and GPU load are driven by that pixel count, and it is unchanged, so
+the two memory series are comparable and both are comparable to a 3840x2160 wall.
+The four arms, the thresholds and the invalidating conditions are all untouched.
+One caveat genuinely improves: the first run had to note that a wall is landscape
+and this display was not. Now it is.
 
 ## Checking on it, without disturbing it
 
@@ -95,7 +192,8 @@ construction. `grafana` and `earth` are realistic but not actionable: if they cl
 and the local arms do not, a third-party page leaks and the answer is `refreshMs`
 on those panels, not app surgery.
 
-**An early reading is not a result.** One hour in, the total went 1380 to 1409MB.
+**An early reading is not a result.** One hour into the _first_ run the total went
+1380 to 1409MB.
 Extrapolated that is 29 MB/hour and over the line, and it is almost certainly
 warm-up. Do not quote it.
 
@@ -119,7 +217,7 @@ ssh ... 'powershell -NoProfile -Command "(Get-CimInstance Win32_OperatingSystem)
 Then, and only then:
 
 ```sh
-ssh ... 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\proto\wallwright-soak\teardown-soak.ps1' </dev/null
+ssh ... 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\proto\wallwright-soak\soak-teardown.ps1' </dev/null
 ```
 
 That script ends and unregisters all five tasks, kills the app and node, removes
@@ -127,7 +225,13 @@ the stage and the `%APPDATA%\Wallwright` profile (safe: pre-flight confirmed
 neither existed before), and **re-enables `FCATWallLauncher` and
 `FCATSoakSampler`**, which belong to another project and are disabled for the
 duration. Verify afterwards that both read `Ready` and that no `Soak*` task
-remains.
+remains; the script prints both.
+
+It retries the two deletions with a backoff rather than trying once. `taskkill`
+returns when the kill is _signalled_, not when the kernel has finished tearing the
+processes down, so the expanded build is still open for a second or two afterwards.
+A single attempt loses that race often enough to matter: on this run's first
+teardown it reported everything gone except `app\`, which was still there.
 
 ## What to do with the numbers
 
@@ -135,8 +239,10 @@ remains.
    numbers as evidence, caveats explicit. Include both memory series, the final-24h
    slope with R² and the median cross-check, the per-panel table with `control` as
    the headline row, the counters, and any downtime rows.
-2. Quantify the **workingSetSize versus private bytes gap** at the plateau. At T0 it
-   was 1380MB against 835MB, so the app's own figure read about 65% high. That
+2. Quantify the **workingSetSize versus private bytes gap** at the plateau. Two
+   minutes into this run, once the startup transient had cleared, it was 1326MB
+   against 777MB, so the app's own figure read about 71% high; the first run
+   started at 65% high and drifted down to 59% by hour 7. That
    number is what lets anyone interpret the app's own log line, and it has been an
    open question since the original 699MB datum.
 3. Set the shipped countermeasure from the data, using the rule already committed
@@ -149,10 +255,11 @@ remains.
 
 ## Caveats this run carries
 
-- **Not the show PC and not a wall.** The display is a 4K panel mounted in portrait
-  at 200% scaling, so the app runs at 1080x1920 logical. The raster is 2160x3840 =
-  8.29 megapixels, identical to a 3840x2160 wall, so GPU and raster load are
-  representative; the aspect and the panel arrangement are not.
+- **Not the show PC and not a wall.** The display is a 4K panel at 200% scaling, so
+  the app runs at 1920x1080 logical. The raster is 3840x2160 = 8.29 megapixels,
+  identical to a 3840x2160 wall, so GPU and raster load are representative; the
+  panel arrangement is not. The aspect now is, which is one caveat better than the
+  first run managed. See "The geometry changed between the runs".
 - **Not the real dashboards.** Nothing here speaks to whether a real IdP session
   survives idleness or a rebuild. That stays open until the URLs exist.
 - **One machine, one run, no replicate.** A strong lower bound on how bad things

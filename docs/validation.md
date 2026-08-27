@@ -631,6 +631,24 @@ screen, any RDP session, any human input, or the mock server dying. Each is
 detectable in the record afterwards, and a run that hits one is reported as partial
 rather than quietly stitched together.
 
+**Amendment, 2026-08-27, before the second run's T0.** The text above describes the
+display as portrait 2160x3840 and the window as 1080x1920, which is what the first
+run found. Between the runs the project that owns HQ-PROTO-MINI-2 rotated the panel
+back to **landscape**, 3840x2160, giving a 1920x1080 logical window at 200%
+scaling. `config/soak-72h.json` was re-authored to match, as a 2x2 of 960x540, and
+the display is now matched by resolution rather than falling back to primary.
+
+Nothing else changed, and nothing that was actually registered has moved: the
+threshold is still 15 MB/hour over the final 24 hours, the median cross-check still
+has to agree, the four arms are the same four pages, the countermeasures are still
+off, and the invalidating conditions are unchanged. What the pre-registration fixed
+about the geometry was the **raster**, and 3840x2160 at DPR 2 is the same 8.29
+megapixels as 2160x3840 at DPR 2, so the two runs' memory series remain comparable.
+`wall.scale` is 1.0 in both.
+
+Recorded here rather than edited into the text above, because a pre-registration
+that gets quietly rewritten after the fact is not a pre-registration.
+
 ### The 72-hour run: STARTED 2026-08-25T13:24:29Z
 
 Live on HQ-PROTO-MINI-2 as of that timestamp, from git `ddafb04` (shipped source
@@ -777,6 +795,106 @@ and `%APPDATA%\Wallwright` profile are gone.
 **A re-run starts from zero.** A memory curve cannot be resumed across a two-day
 gap, so Thursday is a fresh 72 hours, not a continuation. Nothing about the
 harness needs changing; it did its job, including telling us how it ended.
+
+### The 72-hour run, second attempt: STARTED 2026-08-27T19:47:42Z
+
+Live on HQ-PROTO-MINI-2 as of that timestamp, from git `c384dcf` (current `main`),
+artifact `Wallwright-0.1.1-x64.zip`, sha256 `1b377dbe...`, from Actions run
+`33109052397`, hash-verified after transfer. Due to end about
+`2026-08-30T19:47:42Z`.
+
+**A different binary from the first attempt, on purpose.** The first run soaked
+`ddafb04`. The audit has since rewritten 2,184 lines of shipped source: `main.js`
+and `layout.js` substantially, the overlay split into `overlay.css`, and
+`policy.js`, `watchdog.js`, `pages.js` and `display.js` extracted as modules. The
+deliverables of this run are `memoryLimitMb` and `_memoryBaseline` for what
+actually ships, and a baseline measured on `ddafb04` would describe code that no
+longer exists. The audit also touched the memory-relevant paths directly, which
+argues for soaking the new code rather than against it. The build passed lint,
+unit tests and the Windows self-test before it was staged.
+
+**The machine was cleared first.** The first run ended because somebody stopped it
+at the machine and nobody outside this work knew a run was on. Jeff confirmed on
+2026-08-27 that HQ-PROTO-MINI-2 is free for three full days and that its other
+users know. That confirmation is now a documented precondition in
+`docs/soak-run.md`, not a courtesy.
+
+**The first start was wrong, and the app's own log said so within seconds.**
+Staged and started at `19:41:18Z`, the log read:
+
+```
+warn falling back to the PRIMARY display "SL4364K" (id 3179642134)
+info layout 1080x1920 in a 1920x1080 window, scaled to 0.563
+```
+
+The display had been rotated from portrait back to **landscape** between the two
+runs by the project that owns the machine. `config/soak-72h.json` was still
+authored at 1080x1920, so no display matched it, the app fell back to primary, and
+`fitToDisplay` scaled the layout to 0.563. The pre-registration fixes `wall.scale`
+at 1.0, so this was not the registered experiment. Torn down and restarted six
+minutes later with the config re-authored for landscape:
+
+```
+info matched display by 1920x1080: "SL4364K" (id 3179642134)
+info layout 1920x1080 in a 1920x1080 window, 1:1
+```
+
+The config follows the display rather than the other way round. Rotating a shared
+machine's screen to suit this experiment is the same class of unannounced
+interference that ended the first run. The amendment and the reasoning are under
+"Pre-registration" above; the short version is that the raster is 8.29 megapixels
+either way, so the two runs stay comparable and both stay comparable to a
+3840x2160 wall.
+
+**Worth keeping: the geometry check is the one thing to verify before walking
+away.** It cost six minutes here and would have cost 72 hours if it had been read
+at harvest instead. It is now step 5 of the staging procedure.
+
+**At T0** the four arms came up in their own renderers, no crashes, no failed
+loads. Two minutes in, once the startup transient had cleared:
+
+| panel     | this run (t+2min) | first run (T0) |
+| --------- | ----------------- | -------------- |
+| `control` | 77MB              | 73MB           |
+| `heavy`   | 103MB             | 99MB           |
+| `grafana` | 248MB             | 250MB          |
+| `earth`   | 131MB             | 128MB          |
+
+Within a few MB of the first run across all four arms, on a different build and a
+different display orientation, which is a useful sign that the two runs are
+measuring the same thing.
+
+**Both memory series are recording.** At t+2min: `workingSetSize` 1326MB against
+private bytes 777MB, so the app's own figure reads about **71% high** on this
+machine. The first run started at 65% high and drifted down to 59% by hour 7, so
+this gap is expected to narrow as the run settles. The plateau figure is what
+matters and this is not it.
+
+**No verdict, and none is possible yet.** The harness is behaving correctly on
+exactly the point it was built for: three samples in, the summary reads
+
+```
+## Verdict: INSUFFICIENT DATA
+Too little to judge: 3 samples over 0.03h.
+```
+
+rather than the -8636 MB/hour its own OLS fit produced from those three points.
+`memoryLimitMb` stays 0 and `_memoryBaseline` stays `NOT MEASURED YET` until the
+final-24h window exists.
+
+**Staging and teardown are in the repo now.** The first attempt's runbook could
+tell you how to watch, harvest and end a run but never how to start one, and the
+teardown script lived only on the soak machine, so teardown deleted it along with
+the stage. This run had to reconstruct all five task definitions from the notes
+above. `scripts/soak-stage.sh`, `scripts/soak-setup.ps1`,
+`scripts/soak-teardown.ps1`, `scripts/soak-proc.ps1` and `scripts/soak-grab.ps1`
+are the whole procedure, and the pre-flight refuses to start on a dirty machine
+rather than warning about it.
+
+One thing the reconstruction found: teardown's `Remove-Item` loses a race.
+`taskkill` returns when the kill is signalled, not when the kernel has finished,
+so the expanded build is still open for a second or two. The first teardown
+reported everything removed except `app\`. It retries with a backoff now.
 
 ### Panel CRUD works end to end
 
