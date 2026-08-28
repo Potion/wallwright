@@ -938,6 +938,51 @@ figure reads about 42% high here, against 65% at the first run's T0. Not compara
 yet: this is one minute in and the first run's gap narrowed as it settled. The
 plateau figure is what step 2 of the harvest wants.
 
+**Checkpoint at 16.1 hours** (`2026-08-28T12:39Z`), recorded because a run this
+long deserves a record before its result, not because it is one:
+
+```
+968 samples, 968 ok, 0 failed, 0 restarts
+0 crashes, 0 failed loads, 0 watchdog reloads, 0 recycles
+0 sampler rows with ok=0, so no downtime at all
+```
+
+| panel     | first | last  | min   | max   |
+| --------- | ----- | ----- | ----- | ----- |
+| `control` | 74MB  | 74MB  | 74MB  | 74MB  |
+| `heavy`   | 103MB | 120MB | 102MB | 121MB |
+| `grafana` | 413MB | 251MB | 247MB | 413MB |
+| `earth`   | 142MB | 136MB | 124MB | 177MB |
+
+**`control` has not moved a megabyte in 16 hours**, at 74MB for every one of 968
+samples. That is the arm whose growth would be the only result indicting the
+product, and it is flat to the resolution of the measurement. `grafana` spiked to
+413MB during warm-up and settled to 251MB, ending below where it started, which is
+the shape the pre-registration predicted and the reason the verdict is judged on the
+final 24 hours rather than the whole run.
+
+`heavy` is the one line to watch: up 17MB, about 1.1 MB/hour, on a page that is
+leak-free by construction. It appears to have plateaued (max 121, current 120) and
+the magnitude is small against a 15 MB/hour whole-app threshold, but it is the only
+arm that is not obviously flat and it should be read again at harvest.
+
+```
+whole segment OLS    1.67 MB/hour  (R2 0.370)
+median cross-check   1.72 MB/hour
+```
+
+The two estimators agree in sign and magnitude, which is the pre-registered
+condition for trusting either. Private bytes went 890MB at t+1min to 912MB, about
+1.4 MB/hour, agreeing with the app's own series.
+
+**VRAM is flat**, 609 to 614 MiB for the whole run after the startup transient of
+731 MiB. This is the first run able to say that at all, and it is worth saying
+plainly: the discrete GPU is not accumulating.
+
+**None of the above is a verdict.** The summary's "final 24h" row currently just
+restates the whole run, because there are only 16.1 hours of it and
+`soak-stats.js` fits what it has. The threshold is the final 24 hours of 72.
+
 **No verdict is possible yet and none is being offered.** `memoryLimitMb` stays 0
 and `_memoryBaseline` stays `NOT MEASURED YET` until the final-24h window exists.
 
