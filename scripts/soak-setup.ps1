@@ -94,6 +94,42 @@ foreach ($t in 'FCATWallLauncher', 'FCATSoakSampler') {
   }
 }
 
+# The machine has to be idle, not merely available. A soak measures a baseline,
+# and a baseline taken next to a neighbour holding most of the VRAM at full
+# utilisation is not one: memoryLimitMb is derived directly from these numbers.
+#
+# This check exists because it was missed by hand. The second attempt was staged
+# on a machine where another project's station app had been running since the day
+# the FIRST attempt died, holding 7758 of 8188 MiB and 99% of the GPU. It went
+# unnoticed because the app was rendering on the integrated chip at the time, so
+# the two never contended and everything looked healthy. Nothing checked.
+$nvidiaSmi = (Get-Command nvidia-smi -ErrorAction SilentlyContinue).Source
+if ($nvidiaSmi) {
+  $q = & $nvidiaSmi --query-gpu=memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits 2>$null
+  $parts = ($q | Select-Object -First 1) -split ','
+  if ($parts.Count -ge 3) {
+    $used = [int]$parts[0].Trim(); $total = [int]$parts[1].Trim(); $util = [int]$parts[2].Trim()
+    $pct = if ($total -gt 0) { [math]::Round(($used / $total) * 100, 0) } else { 0 }
+    if ($pct -ge 50 -or $util -ge 50) {
+      Write-Host "  [FAIL] GPU is already busy: ${used}MiB of ${total}MiB (${pct}%) and ${util}% utilisation." -ForegroundColor Red
+      Write-Host "         Something else is using this machine. Find out what before starting:" -ForegroundColor Red
+      & $nvidiaSmi 2>$null
+      exit 1
+    }
+    Ok "GPU idle: ${used}MiB of ${total}MiB (${pct}%), ${util}% utilisation"
+  }
+} else {
+  Warn 'no nvidia-smi: cannot check GPU load, and the VRAM columns will be blank'
+}
+
+# Not conclusive on its own, but a foreign GUI process holding hours of CPU is
+# what a busy machine looks like from here even when the GPU reads idle.
+$busy = @(Get-Process -ErrorAction SilentlyContinue |
+  Where-Object { $_.CPU -gt 3600 -and $_.MainWindowHandle -ne 0 -and $_.Name -notmatch 'explorer|dwm' })
+foreach ($b in $busy) {
+  Warn "$($b.Name) (pid $($b.Id)) has $([math]::Round($b.CPU/3600,1))h of CPU and a window: is this machine really free?"
+}
+
 $stale = @(Get-ScheduledTask -TaskName 'Soak*' -ErrorAction SilentlyContinue)
 if ($stale.Count -gt 0) { Die "Soak* tasks already registered: $($stale.TaskName -join ', '). Run soak-teardown.ps1 first." }
 Ok 'no stale Soak* task'

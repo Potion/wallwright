@@ -15,8 +15,19 @@
   hour 4 is the single most important thing a soak could discover, and a sampler
   that dies with it records nothing.
 
-  Columns are fixed and match the first run's file byte for byte, so both runs
-  load with the same reader.
+  The first ten columns are the first run's, unchanged and in the same order, so a
+  positional reader of that file still works here. Three VRAM columns are appended
+  after them.
+
+  VRAM is not optional once the app renders on a discrete GPU. There, textures,
+  framebuffers and tiles live in dedicated video memory, which private bytes cannot
+  see at all: a VRAM leak would read as a perfectly flat curve, the healthiest
+  possible result. On integrated graphics the same allocations come out of system
+  RAM and the existing columns catch them. The series has to cover both, because
+  which one applies is a question about a cable.
+
+  Blank rather than zero when nvidia-smi is absent, so "no discrete GPU" is not
+  recorded as "no VRAM in use".
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File soak-proc.ps1 -Out C:\Users\proto\wallwright-soak\out
@@ -34,7 +45,7 @@ New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $csv = Join-Path $Out ("proc-" + $env:COMPUTERNAME + ".csv")
 
 if (-not (Test-Path $csv)) {
-  'iso_utc,uptime_s,procs,ws_mb,private_mb,handles,threads,avail_mb,commit_pct,cpu_pct_sum' |
+  'iso_utc,uptime_s,procs,ws_mb,private_mb,handles,threads,avail_mb,commit_pct,cpu_pct_sum,vram_used_mb,vram_total_mb,gpu_util_pct' |
     Out-File -FilePath $csv -Encoding ascii
 }
 
@@ -47,6 +58,9 @@ $commitLimitMb = [math]::Round($os.TotalVirtualMemorySize / 1KB, 1)
 $startedUtc = (Get-Date).ToUniversalTime()
 $prevCpu = @{}
 $prevStamp = $null
+
+# Resolved once: a Get-Command per minute for 72 hours is 4,320 pointless lookups.
+$nvidiaSmi = (Get-Command nvidia-smi -ErrorAction SilentlyContinue).Source
 
 while ($true) {
   try {
@@ -84,7 +98,20 @@ while ($true) {
     $usedMb = $commitLimitMb - [math]::Round($osNow.FreeVirtualMemory / 1KB, 1)
     $commitPct = if ($commitLimitMb -gt 0) { [math]::Round(($usedMb / $commitLimitMb) * 100, 1) } else { 0 }
 
-    $row = '{0},{1},{2},{3},{4},{5},{6},{7},{8},{9}' -f
+    $vramUsed = ''; $vramTotal = ''; $gpuUtil = ''
+    if ($nvidiaSmi) {
+      try {
+        # One GPU assumed, which is true here. Parsed defensively: a driver update
+        # mid-run that changes the output must cost blank cells, not the series.
+        $q = & $nvidiaSmi --query-gpu=memory.used,memory.total,utilization.gpu --format=csv,noheader,nounits 2>$null
+        $parts = ($q | Select-Object -First 1) -split ','
+        if ($parts.Count -ge 3) {
+          $vramUsed = $parts[0].Trim(); $vramTotal = $parts[1].Trim(); $gpuUtil = $parts[2].Trim()
+        }
+      } catch { }
+    }
+
+    $row = '{0},{1},{2},{3},{4},{5},{6},{7},{8},{9},{10},{11},{12}' -f
       $nowUtc.ToString('yyyy-MM-ddTHH:mm:ssZ'),
       [int]($nowUtc - $startedUtc).TotalSeconds,
       $procs.Count,
@@ -94,7 +121,10 @@ while ($true) {
       $threads,
       $availMb,
       $commitPct,
-      [math]::Round($cpuPct, 2)
+      [math]::Round($cpuPct, 2),
+      $vramUsed,
+      $vramTotal,
+      $gpuUtil
 
     Add-Content -Path $csv -Value $row -Encoding ascii
     $prevStamp = $nowUtc
