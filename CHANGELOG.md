@@ -18,6 +18,33 @@ built from, so nothing is unrecoverable.
 
 ## Unreleased
 
+### The soak pre-flight fails on a busy machine, and the series records VRAM
+
+Two soak attempts have now died because HQ-PROTO-MINI-2 was in use by another
+project and nothing checked. The second was staged beside
+`C:\HQ\SoDA\MS_Immersive_Tunnel.exe`, which had been holding 7758 of 8188 MiB of
+VRAM at 99% GPU utilisation since the day the first attempt died, 77 minutes after
+its last sample.
+
+Nothing noticed for half an hour because Wallwright was rendering on the integrated
+chip while SoDA had the discrete card, so the two never contended and every number
+looked healthy. A clean-looking series is not evidence of a clean machine.
+
+`soak-setup.ps1` now fails the pre-flight at or above 50% GPU memory or 50%
+utilisation and prints `nvidia-smi` so the neighbour is named, and warns about any
+foreign windowed process holding more than an hour of CPU. It fails rather than
+warns because the cost of finding out late is the whole 72 hours.
+
+`soak-proc.ps1` now records `vram_used_mb`, `vram_total_mb` and `gpu_util_pct`
+after the existing ten columns, which a positional reader of the old file can still
+skip. This is not bookkeeping: on a discrete GPU, textures and framebuffers live in
+video memory that private bytes cannot see, so a VRAM leak would read as the
+flattest and healthiest curve the harness can produce. On integrated graphics the
+same allocations come out of system RAM and were always visible. Which case applies
+is a question about which socket the video cable is in, so the series has to cover
+both. Blank rather than zero without `nvidia-smi`, so "no discrete GPU" is not
+recorded as "no VRAM in use".
+
 ### The soak can be started from the repo, not from memory
 
 The first 72-hour run left a runbook that could tell you how to watch a run,

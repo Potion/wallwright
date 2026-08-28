@@ -796,105 +796,150 @@ and `%APPDATA%\Wallwright` profile are gone.
 gap, so Thursday is a fresh 72 hours, not a continuation. Nothing about the
 harness needs changing; it did its job, including telling us how it ended.
 
-### The 72-hour run, second attempt: STARTED 2026-08-27T19:47:42Z
+### The 72-hour run, second attempt: ABANDONED BEFORE T0, machine not free
 
-Live on HQ-PROTO-MINI-2 as of that timestamp, from git `c384dcf` (current `main`),
-artifact `Wallwright-0.1.1-x64.zip`, sha256 `1b377dbe...`, from Actions run
-`33109052397`, hash-verified after transfer. Due to end about
-`2026-08-30T19:47:42Z`.
+**Superseded by the third attempt, which is running. See below.**
 
-**A different binary from the first attempt, on purpose.** The first run soaked
-`ddafb04`. The audit has since rewritten 2,184 lines of shipped source: `main.js`
-and `layout.js` substantially, the overlay split into `overlay.css`, and
-`policy.js`, `watchdog.js`, `pages.js` and `display.js` extracted as modules. The
-deliverables of this run are `memoryLimitMb` and `_memoryBaseline` for what
-actually ships, and a baseline measured on `ddafb04` would describe code that no
-longer exists. The audit also touched the memory-relevant paths directly, which
-argues for soaking the new code rather than against it. The build passed lint,
-unit tests and the Windows self-test before it was staged.
+Staged and started twice on 2026-08-27, torn down the same hour, and **no run is
+in progress**. `memoryLimitMb` stays 0 and `_memoryBaseline` stays
+`NOT MEASURED YET`. Roughly 30 minutes of data was collected and is not kept: it
+is worth less than the 6.9-hour partial that precedes it.
 
-**The machine was cleared first.** The first run ended because somebody stopped it
-at the machine and nobody outside this work knew a run was on. Jeff confirmed on
-2026-08-27 that HQ-PROTO-MINI-2 is free for three full days and that its other
-users know. That confirmation is now a documented precondition in
-`docs/soak-run.md`, not a courtesy.
+Three things were learned, and they are the reason this attempt was worth making.
 
-**The first start was wrong, and the app's own log said so within seconds.**
-Staged and started at `19:41:18Z`, the log read:
+**The build and the reason for it stand.** git `c384dcf` (then `main`), artifact
+sha256 `1b377dbe...`, from Actions run `33109052397`, green through lint, unit
+tests and the Windows self-test before staging. The first attempt soaked
+`ddafb04`; the audit has since rewritten 2,184 lines of shipped source, and the
+deliverables are `memoryLimitMb` and `_memoryBaseline` for what actually ships, so
+the old build would describe code that no longer exists. That reasoning is
+unchanged for the next attempt.
+
+**The geometry had moved, and the app's own log caught it in seconds.** The panel
+had been rotated portrait to landscape between the attempts, so the 1080x1920
+config matched nothing:
 
 ```
 warn falling back to the PRIMARY display "SL4364K" (id 3179642134)
 info layout 1080x1920 in a 1920x1080 window, scaled to 0.563
 ```
 
-The display had been rotated from portrait back to **landscape** between the two
-runs by the project that owns the machine. `config/soak-72h.json` was still
-authored at 1080x1920, so no display matched it, the app fell back to primary, and
-`fitToDisplay` scaled the layout to 0.563. The pre-registration fixes `wall.scale`
-at 1.0, so this was not the registered experiment. Torn down and restarted six
-minutes later with the config re-authored for landscape:
+Re-authored at 1920x1080 as a 2x2 of 960x540 and restarted six minutes later,
+giving `matched display by 1920x1080` and `layout ... 1:1`. See the amendment under
+"Pre-registration" for why the raster argument survives a change of orientation.
+Checking that line before walking away is now step 5 of staging: six minutes here,
+72 hours if it is first read at harvest.
+
+**The machine was not free, and that is the finding.** The video cable was moved
+from the motherboard to the NVIDIA RTX A1000 partway through, which is when the
+GPU became visible at all:
 
 ```
-info matched display by 1920x1080: "SL4364K" (id 3179642134)
-info layout 1920x1080 in a 1920x1080 window, 1:1
+C:\HQ\SoDA\MS_Immersive_Tunnel.exe  -station mini2
+started 2026-08-25 17:34 local, 36.9 hours of accumulated CPU
+99% utilisation, 89C, 7758 of 8188 MiB VRAM
 ```
 
-The config follows the display rather than the other way round. Rotating a shared
-machine's screen to suit this experiment is the same class of unannounced
-interference that ended the first run. The amendment and the reasoning are under
-"Pre-registration" above; the short version is that the raster is 8.29 megapixels
-either way, so the two runs stay comparable and both stay comparable to a
-3840x2160 wall.
+Sustained across repeated samples. That leaves about 430 MiB of VRAM for four
+panels, and a baseline measured beside it would not be a baseline.
 
-**Worth keeping: the geometry check is the one thing to verify before walking
-away.** It cost six minutes here and would have cost 72 hours if it had been read
-at harvest instead. It is now step 5 of the staging procedure.
+**It also dates the first run's death.** The first attempt's last sample is
+`2026-08-25T20:17:36Z`, 16:17 local. SoDA started at 17:34 local, 77 minutes
+later, and has run continuously since. "Somebody stopped it at the machine" now
+has a name attached. The social precondition was satisfied for this attempt in
+good faith and was still wrong, because the thing occupying the machine was a
+running process rather than a booked slot, and nobody thought to look.
 
-**At T0** the four arms came up in their own renderers, no crashes, no failed
-loads. Two minutes in, once the startup transient had cleared:
+**Why nothing noticed for half an hour.** Wallwright was rendering on the
+integrated chip while SoDA had the discrete card to itself, so the two never
+contended and every number looked healthy: 10 of 10 samples ok, private bytes flat
+at 783MB, per-panel figures within a few MB of the first run's. Moving the cable
+put them on the same chip. A clean-looking series is not evidence of a clean
+machine.
 
-| panel     | this run (t+2min) | first run (T0) |
-| --------- | ----------------- | -------------- |
-| `control` | 77MB              | 73MB           |
-| `heavy`   | 103MB             | 99MB           |
-| `grafana` | 248MB             | 250MB          |
-| `earth`   | 131MB             | 128MB          |
+One useful residue: Wallwright on the integrated chip demonstrably coexists with
+SoDA without perturbation, which is a real option if SoDA cannot be paused.
 
-Within a few MB of the first run across all four arms, on a different build and a
-different display orientation, which is a useful sign that the two runs are
-measuring the same thing.
+**Two gaps closed rather than noted.** `scripts/soak-setup.ps1` now **fails** the
+pre-flight when the GPU is at or above 50% memory or 50% utilisation, printing
+`nvidia-smi` so the neighbour is named. Verified against the live machine: it
+reports `used=7751 total=8188 util=99 pct=95` and refuses. And `soak-proc.ps1` now
+records `vram_used_mb`, `vram_total_mb` and `gpu_util_pct` alongside the existing
+ten columns, because the cable change created a blind spot: on a discrete GPU,
+textures and framebuffers live in video memory that private bytes cannot see, so a
+VRAM leak would read as a perfectly flat curve. Blank rather than zero when there
+is no `nvidia-smi`, so "no discrete GPU" is not recorded as "no VRAM in use".
 
-**Both memory series are recording.** At t+2min: `workingSetSize` 1326MB against
-private bytes 777MB, so the app's own figure reads about **71% high** on this
-machine. The first run started at 65% high and drifted down to 59% by hour 7, so
-this gap is expected to narrow as the run settles. The plateau figure is what
-matters and this is not it.
+**Before the next attempt:** confirm SoDA is stopped for the duration, not merely
+that the machine is nominally free. The pre-flight now enforces that, but a script
+refusing to start is a worse way to find out than asking.
 
-**No verdict, and none is possible yet.** The harness is behaving correctly on
-exactly the point it was built for: three samples in, the summary reads
+### The 72-hour run, third attempt: STARTED 2026-08-27T20:31:57Z
+
+Live on HQ-PROTO-MINI-2, due to end about `2026-08-30T20:31:57Z`. Same build as the
+abandoned second attempt: git `c384dcf`, sha256 `1b377dbe...`, Actions run
+`33109052397`. Same config, same four arms, same thresholds.
+
+**The blocker was cleared rather than worked around.** Jeff confirmed
+`MS_Immersive_Tunnel.exe` was left over from an old test and could be killed. Its
+two Scheduled Tasks were checked first, because a run cannot survive something that
+relaunches: both `SoDA_Tunnel` and `SoDA_Tunnel_Keys` are **one-shot time triggers
+that already fired** on 2026-08-25, with an empty `NextRunTime`, so nothing will
+start it again and neither task needed disabling. Another project's task
+definitions were left untouched.
+
+The GPU before and after:
 
 ```
-## Verdict: INSUFFICIENT DATA
-Too little to judge: 3 samples over 0.03h.
+before   99% util, 89C, 7758 MiB of 8188 used
+after     0% util, 72C,  467 MiB of 8188 used
 ```
 
-rather than the -8636 MB/hour its own OLS fit produced from those three points.
-`memoryLimitMb` stays 0 and `_memoryBaseline` stays `NOT MEASURED YET` until the
-final-24h window exists.
+**The video cable is now on the discrete GPU**, moved by Jeff during the second
+attempt, and the app is confirmed to be using it: `Wallwright.exe` appears in
+`nvidia-smi`'s process list, at 611 MiB and 24% utilisation. This is the first run
+whose GPU path is both known and recorded.
 
-**Staging and teardown are in the repo now.** The first attempt's runbook could
-tell you how to watch, harvest and end a run but never how to start one, and the
-teardown script lived only on the soak machine, so teardown deleted it along with
-the stage. This run had to reconstruct all five task definitions from the notes
-above. `scripts/soak-stage.sh`, `scripts/soak-setup.ps1`,
-`scripts/soak-teardown.ps1`, `scripts/soak-proc.ps1` and `scripts/soak-grab.ps1`
-are the whole procedure, and the pre-flight refuses to start on a dirty machine
-rather than warning about it.
+**A third estimator of how contaminated the second attempt was.** `commit_pct` read
+34.7% during the first run, 62.9% throughout the second, and 34.1% now. The middle
+figure was SoDA, and the machine is back to the state the first run measured.
 
-One thing the reconstruction found: teardown's `Remove-Item` loses a race.
-`taskkill` returns when the kill is signalled, not when the kernel has finished,
-so the expanded build is still open for a second or two. The first teardown
-reported everything removed except `app\`. It retries with a backoff now.
+**At T0**, `matched display by 1920x1080: "SL4364K"` and `layout 1920x1080 in a
+1920x1080 window, 1:1`, so no PRIMARY fallback and no layout scaling. The display id
+differs from the second attempt (`2715430223` against `3179642134`) because it is
+now enumerated through the NVIDIA adapter rather than the Intel one; the label and
+the resolution are the same panel.
+
+One minute in, all four arms in their own renderers, zero crashes, zero failed
+loads:
+
+| panel     | third attempt | second attempt | first attempt |
+| --------- | ------------- | -------------- | ------------- |
+| `control` | 74MB          | 77MB           | 73MB          |
+| `heavy`   | 102MB         | 103MB          | 99MB          |
+| `grafana` | 248MB         | 248MB          | 250MB         |
+| `earth`   | 131MB         | 131MB          | 128MB         |
+
+Three attempts, two builds, two display orientations and two GPUs, and the four
+arms land within a few MB of each other every time. That consistency is worth more
+than any single run: it says the per-panel figures are a property of the pages and
+the engine rather than of this machine's configuration.
+
+**The VRAM columns are live**, which is the point of adding them now that the app
+renders on a discrete card:
+
+```
+iso_utc,...,cpu_pct_sum,vram_used_mb,vram_total_mb,gpu_util_pct
+2026-08-27T20:32:57Z,...,58.25,610,8188,25
+```
+
+`workingSetSize` 1266MB against private bytes 890MB at t+1min, so the app's own
+figure reads about 42% high here, against 65% at the first run's T0. Not comparable
+yet: this is one minute in and the first run's gap narrowed as it settled. The
+plateau figure is what step 2 of the harvest wants.
+
+**No verdict is possible yet and none is being offered.** `memoryLimitMb` stays 0
+and `_memoryBaseline` stays `NOT MEASURED YET` until the final-24h window exists.
 
 ### Panel CRUD works end to end
 

@@ -1,33 +1,44 @@
 # The 72-hour soak: runbook
 
-**Status: RUNNING. Second attempt, started `2026-08-27T19:47:42Z`, due to end
-about `2026-08-30T19:47:42Z`.**
+**Status: RUNNING. Third attempt, started `2026-08-27T20:31:57Z`, due to end about
+`2026-08-30T20:31:57Z`.**
 
-The first attempt started `2026-08-25T13:24:29Z` and was shut down at the machine
-`2026-08-25T20:17:36Z`, 6.9 hours in, well short of the 72 it needed. It produced
-no verdict. See `docs/validation.md`, "The 72-hour run: ENDED EARLY", for what its
-partial data does and does not say.
+| attempt | started                | ended                  | got               |
+| ------- | ---------------------- | ---------------------- | ----------------- |
+| first   | `2026-08-25T13:24:29Z` | `2026-08-25T20:17:36Z` | 6.9h, no verdict  |
+| second  | `2026-08-27T19:47:42Z` | same hour, abandoned   | ~30min, discarded |
+| third   | `2026-08-27T20:31:57Z` | running                | -                 |
 
-**It ended because somebody stopped it at the machine, not because anything
-broke.** HQ-PROTO-MINI-2 belongs to another project and nobody outside this work
-knew a run was in progress. No harness can prevent that, so the fix is social and
-it is a precondition, not a courtesy: **before starting a run, confirm the machine
-is free for three full days and tell whoever else uses it.** Jeff confirmed that
-for this run on 2026-08-27.
+`memoryLimitMb` stays 0 and `_memoryBaseline` stays `NOT MEASURED YET` until this
+one finishes. `docs/validation.md` has all three write-ups.
 
-Two things the first attempt got wrong about itself, both fixed here:
+**Both earlier attempts died the same way: the machine was in use and this work did
+not know.** The first was displaced by `C:\HQ\SoDA\MS_Immersive_Tunnel.exe
+-station mini2`, which started 77 minutes after its last sample and then ran for two
+days, holding 7758 of 8188 MiB of VRAM at 99% GPU. The second was staged beside it
+and looked perfectly healthy for half an hour, because Wallwright was on the
+integrated chip and SoDA had the discrete card, so the two never contended.
 
-- **The runbook could not actually start a run.** It documented how to watch one,
-  harvest one and tear one down, but never how to stage one, and the teardown
-  script existed only on the soak machine, so teardown deleted it along with the
-  stage. The second run had to reconstruct the five task definitions from
-  `docs/validation.md`. Staging and teardown are both in `scripts/` now, and
-  "Staging it from cold" below is the missing section.
-- **The display had been rotated back to landscape between the runs.** The config
-  was authored for the portrait mounting the first run found, so nothing matched
-  it, the app fell back to the primary display and scaled the layout to 0.563.
-  Caught at T0 from the app's own log and restarted six minutes later. See
-  "The geometry changed between the runs" below.
+That process was confirmed to be leftover from an old test and killed before this
+attempt. Its two Scheduled Tasks are one-shot triggers that already fired, so
+nothing will relaunch it.
+
+**The lesson, for the next person staging this:** "is the machine free" is the wrong
+question and it passed twice while being wrong. Ask **what is running on it right
+now**, and look at the GPU, not just at memory and task lists. The pre-flight now
+enforces that, but a script refusing to start is a worse way to find out than
+asking.
+
+**Three checks before walking away from a start**, all of which have caught
+something real:
+
+1. `matched display by <w>x<h>` and `layout ... 1:1` in the app log. The display had
+   been rotated between attempts and the app fell back to primary at 0.563 scale.
+2. The GPU pre-flight line. It fails at or above 50% VRAM or 50% utilisation and
+   names the neighbour.
+3. `Wallwright.exe` present in `nvidia-smi`, if the wall is meant to be on a
+   discrete card. Which socket the cable is in changes what the memory series can
+   see.
 
 ## What is running, and where
 
@@ -39,6 +50,7 @@ Two things the first attempt got wrong about itself, both fixed here:
 | Output  | `C:\Users\proto\wallwright-soak\out`                                                            |
 | App log | `C:\Users\Proto\AppData\Roaming\Wallwright\logs\wallwright.log`                                 |
 | Build   | git `c384dcf`, `Wallwright-0.1.1-x64.zip`, sha256 `1b377dbe...`, from Actions run `33109052397` |
+| GPU     | **NVIDIA RTX A1000**, cable on the discrete card. Confirmed via `nvidia-smi` process list       |
 | Config  | `config/soak-72h.json`, staged as `soak-config.json`                                            |
 
 The base command for everything here. Every call needs `</dev/null` or a read loop
@@ -253,7 +265,7 @@ teardown it reported everything gone except `app\`, which was still there.
 4. Fill in the `_memoryBaseline` block with the measured `p95_24h`, `peak_72h` and
    drift, replacing the `NOT MEASURED YET` marker.
 
-## Caveats this run carries
+## Caveats a run here carries
 
 - **Not the show PC and not a wall.** The display is a 4K panel at 200% scaling, so
   the app runs at 1920x1080 logical. The raster is 3840x2160 = 8.29 megapixels,
@@ -265,6 +277,12 @@ teardown it reported everything gone except `app\`, which was still there.
 - **One machine, one run, no replicate.** A strong lower bound on how bad things
   are, weak evidence of how good.
 - SentinelOne runs on this machine at ~844MB and is a background variable.
+- **Which GPU draws the wall is a question about a cable**, and it changes what the
+  memory series can see. On the integrated chip, GPU allocations come out of system
+  RAM and the existing columns catch them. On the discrete card they live in VRAM,
+  invisible to private bytes, which is why `vram_used_mb` exists. Record which one
+  was in use, because `_memoryBaseline` only transfers to a show PC cabled the same
+  way. Nothing in this repo yet records how the show PC is cabled.
 - The `heavy` panel's DOM HUD overlaps the canvas-drawn counters. Cosmetic; the
   canvas text is the freeze detector and it works.
 
