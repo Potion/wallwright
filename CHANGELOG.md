@@ -284,6 +284,64 @@ handlers are still attached, so the watchdog arrives with an index of -1. It use
 to throw, and because `uncaughtException` rethrows, it took the whole wall down.
 Self-test step 16 already reproduces it, and now covers the guard as well.
 
+### The 72-hour soak finished, and there is finally a memory baseline
+
+Third attempt, and the first to reach a verdict. It ran the full 72.0 hours on
+HQ-PROTO-MINI-2 from `2026-08-27T20:31:56Z` and **passed**: 0.45 MB/hour over the
+final 24 hours against a threshold of 15 fixed before T0, with the median
+cross-check at 0.89 agreeing in sign and magnitude. 4320 of 4320 samples, no failed
+polls, one `runId` for the whole run, zero crashes, zero failed loads, zero watchdog
+reloads, and no reboot inside the window.
+
+The `control` arm is the one that mattered, because it is a static page with no
+timers, no network and no DOM changes, so growth there would have been growth in
+Electron or in Wallwright rather than in anybody's dashboard. It did not climb: a 73
+to 79MB band across three days, +0.021 MB/hour over the scored window, and a step
+back down at h+66.5. `heavy` settled at exactly 121MB from h+24 onward, which
+retires the 1.1 MB/hour reading the 16-hour checkpoint flagged as the one line to
+watch; it was warm-up being extrapolated.
+
+`_memoryBaseline` in `config/wall.json` is filled in from the run: `p95_24h` 1367,
+`peak_72h` 1537, `driftMbPerHour` 0.45, which the committed rule turns into
+`memoryLimitMb` 2000 and `memoryHardLimitMb` 2750, **and both are now set**. The
+memory countermeasure is live for the first time; it has shipped inert since it was
+written.
+
+Switching it on was gated on one question about a cable. The baseline was measured
+with the video on a discrete GPU, where textures and framebuffers live in VRAM and
+never enter the number the limit is compared against; on integrated graphics they
+come out of system RAM and do. Jeff confirmed the show PC's HDMI is always in the
+discrete GPU port, so the path matches and the baseline transfers. If one ever runs
+off the motherboard port, the baseline is void.
+
+The limit is a runaway guard rather than a tuned figure, and the write-up says so:
+it was measured against the soak lineup, not the real Honeywell dashboards, which do
+not exist yet and are the thing most likely to move `p95_24h`.
+
+Two long-open questions are also closed. The `workingSetSize` versus private-bytes
+gap is **1.44 and stable** across the whole run, not the drifting figure the two
+partial runs suggested, so the app's own memory line reads about 44% high against
+Task Manager. And the `URL drift samples: 4320` line that prints above `Verdict:
+PASS` is not the contradiction it looks like: the verdict never consulted it, and
+what it records is `grafana` and `earth` normalising their own URLs once at load,
+with the two local arms never drifting at all.
+
+The run is nonetheless **reported as partial**, because any human input is a
+pre-registered invalidating condition and it took one, at `2026-08-29T00:58Z`. The
+argument for the verdict is in `docs/validation.md` rather than the disclosure being
+left out: `lastUsedSecAgo` shows exactly one input instant, never on the other three
+arms, 19.6 hours before the scored window opens.
+
+The write-up is `docs/validation.md` under "The 72-hour run, third attempt:
+COMPLETE", and the harvested series, the app log and the summary are committed under
+`docs/soak/2026-08-30-complete/`.
+
+HQ-PROTO-MINI-2 was torn down on 2026-08-31 once the archive was taken and
+hash-verified, and it is given back: no stage, no app profile, no `Soak*` task, and
+the other project's `FCATWallLauncher` and `FCATSoakSampler` re-enabled. The app had
+run 90.8 hours continuously by then, the last 18.7 of them past the scored window
+and flat to within a megabyte.
+
 ### The soak pre-flight fails on a busy machine, and the series records VRAM
 
 Two soak attempts have now died because HQ-PROTO-MINI-2 was in use by another

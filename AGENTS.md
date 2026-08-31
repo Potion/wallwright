@@ -80,26 +80,46 @@ See "Overlay compositing on Windows: WORKS" in `docs/validation.md`. None of the
 countermeasure ships switched off because the number that would engage it has to
 come from a measured baseline.
 
-**The 72-hour soak ENDED EARLY and must be re-run.** It ran 6.9 of 72 hours on
-HQ-PROTO-MINI-2 and was shut down at the machine on 2026-08-25T20:17:36Z; the
-machine was then needed for other work, so it was harvested and torn down on
-2026-08-26. **No verdict**: the threshold is judged on the final 24 hours of 72, so
-`_memoryBaseline` stays `NOT MEASURED YET` and `memoryLimitMb` stays 0. The 6.9
-hours are still worth reading - the `control` arm was flat, nothing crashed, and
-the drift estimators agreed at ~3.4 MB/hour - and are written up in
-`docs/validation.md` under "The 72-hour run: ENDED EARLY". Data in
-`docs/soak/2026-08-25-partial/`.
+**The 72-hour soak is DONE and it PASSED.** The third attempt ran the full 72.0
+hours on HQ-PROTO-MINI-2, `2026-08-27T20:31:56Z` to `2026-08-30T20:32:07Z`, and was
+harvested on 2026-08-31. **0.45 MB/hour over the final 24 hours against a
+pre-registered 15**, median cross-check 0.89 agreeing, 4320/4320 samples, zero
+crashes, zero restarts, zero watchdog reloads, no reboot. The `control` arm, the
+only one whose growth would have indicted the product, did not climb. `heavy`
+plateaued at exactly 121MB from h+24 onward, which closes the one question the
+16-hour checkpoint left open. Written up in `docs/validation.md` under "The 72-hour
+run, third attempt: COMPLETE"; data in `docs/soak/2026-08-30-complete/`.
 
-Planned re-run: **Thursday 2026-08-27**. It starts from zero; a memory curve cannot
-be resumed across a gap. `docs/soak-run.md` is the runbook and needs no changes -
-the harness worked, including telling us how it ended. The machine is currently
-released: no `Soak*` task remains and both `FCAT*` tasks are back to `Ready`.
+**It is reported as partial, and deliberately so.** One human input instant reached
+the `control` panel at `2026-08-29T00:58Z` when somebody closed an unrelated app on
+that machine. Any human input is a pre-registered invalidating condition, so it is
+disclosed and argued rather than omitted: `lastUsedSecAgo` proves it was exactly one
+event, it never touched the other three arms, and it is 19.6 hours before the scored
+window opens. The verdict stands on a clean final 24 hours.
 
-Two things to know before touching that machine. It belongs to another project, and
-`FCATWallLauncher` and `FCATSoakSampler` are disabled for the duration and are
-re-enabled by the teardown script. And **do not RDP to it**: a remote session
-hijacks console session 1 and blanks the physical display, which is a
-pre-registered invalidating condition.
+**The memory countermeasure is switched ON**, for the first time since it was
+written. `_memoryBaseline` is filled in with `p95_24h` 1367, `peak_72h` 1537 and
+`driftMbPerHour` 0.45, and `config/wall.json` now ships `memoryLimitMb` **2000** and
+`memoryHardLimitMb` **2750** from the committed rule. What unblocked it: Jeff
+confirmed on 2026-08-31 that the show PC's HDMI is always in the discrete GPU port,
+the same path the baseline was measured on, so it transfers. If a show PC ever runs
+off the motherboard port the baseline is void and must be re-measured.
+
+**The limit is a guard, not a tuned figure.** It was measured against the soak
+lineup, not the real Honeywell dashboards, which are the thing most likely to move
+`p95_24h`. Re-measure when the real URLs land.
+
+Also settled by the run: the `workingSetSize` versus private-bytes gap, open since
+the original 699MB datum, is **1.44 and stable**, not the drifting figure the
+partial runs suggested. The app's own number reads about 44% high.
+
+**The machine is torn down and given back**, on 2026-08-31, after the archive was
+taken and hash-verified. Checked independently of the teardown script's own output:
+stage and `%APPDATA%\Wallwright` gone, no Wallwright or node processes, no `Soak*`
+task, and all three `FCAT*` tasks back to `Ready`. The app had reached 90.8 hours of
+continuous uptime. It belongs to another project, so if you stage a run there again:
+**do not RDP to it**, because a remote session hijacks console session 1 and blanks
+the physical display, which is a pre-registered invalidating condition.
 
 Parked, and now largely moot: making the self-hosted runner photograph the wall.
 The question it existed to answer has been answered another way, on a machine that
@@ -110,35 +130,37 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
 
 ## Build / harden next (TODO)
 
-1. **Re-run the soak, Thursday 2026-08-27.** The first attempt got 6.9 of 72
-   hours; see `docs/soak-run.md` for the runbook and `docs/validation.md` for what
-   the partial run did and did not settle. Re-stage the build, start it, and this
-   time **tell whoever else uses that machine that it is running**: the run was
-   ended by hand at the machine, which nothing in the harness can prevent. When it
-   finishes: harvest before tearing down, judge the final 24 hours against the
-   pre-registered 15 MB/hour, quantify the workingSetSize versus private-bytes gap
-   at the plateau (partially answered: about 60% high and shrinking), and set
-   `memoryLimitMb` from the rule in `config/wall.json` `_memoryBaseline` rather
-   than by guessing. A limit inside the normal operating band was measured taking
-   memory _up_, from 1513 to 1885MB.
-2. **Walk the checklist in `docs/validation.md` "Still to verify".** Grouped by
+1. **Re-measure the memory baseline once the real dashboards are wired.** The
+   countermeasure is now on at `memoryLimitMb` 2000, but that came from the soak
+   lineup, not from the real Honeywell dashboards. They are the one thing most
+   likely to move `p95_24h`, and a limit that lands inside the normal operating band
+   is worse than no limit: measured, it took memory _up_ from 1513 to 1885MB while
+   recycling every five seconds. Treat 2000 as a runaway guard until then, and
+   re-derive it from `_memoryBaseline`'s rule against real content.
+2. **Fix the two harness defects the run exposed**, before any fourth soak. The
+   grab task's console knocks the window to scale 0.999 and the geometry check
+   cannot see it; the sampler should record the app's reported scale as a column.
+   And `urlDrifted` is a per-sample state reported under an event's name, which
+   makes a passing summary read as a failure. Both are written up in
+   `docs/validation.md`.
+3. **Walk the checklist in `docs/validation.md` "Still to verify".** Grouped by
    where each check can be done: (A) on the dev machine now, (B) blocked on the
    real dashboard URLs, (C) needs the show PC.
-3. **Real URLs and wall geometry.** Set the dashboard URLs, the wall resolution,
+4. **Real URLs and wall geometry.** Set the dashboard URLs, the wall resolution,
    the panel rectangles and the per-panel `zoom` against the real dashboards.
    Everything else is guesswork until this lands.
-4. **Scope `allowedOrigins`** to the real Honeywell IdP and app domains once
+5. **Scope `allowedOrigins`** to the real Honeywell IdP and app domains once
    known. Enforcement already exists for `will-navigate` and
    `setWindowOpenHandler`, so this is a config edit. It is a misconfiguration
    guard, not hardening: only administrators have input.
-5. **Code signing**, both platforms. No certificates yet. README "Signing" lists
+6. **Code signing**, both platforms. No certificates yet. README "Signing" lists
    exactly which secrets each needs. Unsigned builds are warned about by
    SmartScreen and quarantined by Gatekeeper, and a signed build is easier for
    Honeywell IT to approve.
-6. **Auto-launch on boot and crash restart**, for unattended operation.
-7. **Cursor auto-hide when idle.** Needs a native Windows approach; there is no
+7. **Auto-launch on boot and crash restart**, for unattended operation.
+8. **Cursor auto-hide when idle.** Needs a native Windows approach; there is no
    cross-platform Electron API.
-8. **Decide `hideInactiveWhenActive`** (default off). **The liveness half is
+9. **Decide `hideInactiveWhenActive`** (default off). **The liveness half is
    answered: on Windows it costs nothing.** Self-test steps 22 and 30 measure a
    backgrounded panel at about 1Hz on Windows whether the option is on or off,
    because Chromium already throttles an occluded renderer there. On macOS the
@@ -148,9 +170,10 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
    safe to enable rather than known to be worth enabling, and the default is
    deliberately unchanged. See "`hideInactiveWhenActive` costs nothing on
    Windows" in `docs/validation.md`.
-9. **Sustained run against the real dashboards**, once the URLs exist, for session
-   expiry rather than memory. Four live public dashboards measured 1513MB.
-10. Optional polish: an idle countdown before auto-return, and a manual "reset
+10. **Sustained run against the real dashboards**, once the URLs exist, for
+    session expiry rather than memory. Four live public dashboards measured
+    1513MB.
+11. Optional polish: an idle countdown before auto-return, and a manual "reset
     panel" action.
 
 ## Open decisions (need Jeff)

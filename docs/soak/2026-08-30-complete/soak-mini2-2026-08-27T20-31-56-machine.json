@@ -1,0 +1,15 @@
+{
+  "label": "mini2",
+  "host": "HQ-Proto-Mini-2",
+  "platform": "win32-x64",
+  "release": "10.0.26200",
+  "cpu": "Intel(R) Core(TM) i7-14700",
+  "cpus": 28,
+  "totalMemGb": 31.6,
+  "node": "v24.13.1",
+  "startedIso": "2026-08-27T20:31:56.601Z",
+  "url": "http://127.0.0.1:8901/api/status",
+  "intervalSec": 60,
+  "plannedHours": 72,
+  "thresholdMbPerHour": 15
+}

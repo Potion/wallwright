@@ -1,16 +1,38 @@
 # The 72-hour soak: runbook
 
-**Status: RUNNING. Third attempt, started `2026-08-27T20:31:57Z`, due to end about
-`2026-08-30T20:31:57Z`.**
+**Status: COMPLETE. The third attempt ran the full 72 hours and PASSED**, at 0.45
+MB/hour over the final 24 against a 15 MB/hour threshold. Harvested 2026-08-31; the
+write-up is `docs/validation.md` under "The 72-hour run, third attempt: COMPLETE"
+and the data is in `docs/soak/2026-08-30-complete/`.
 
 | attempt | started                | ended                  | got               |
 | ------- | ---------------------- | ---------------------- | ----------------- |
 | first   | `2026-08-25T13:24:29Z` | `2026-08-25T20:17:36Z` | 6.9h, no verdict  |
 | second  | `2026-08-27T19:47:42Z` | same hour, abandoned   | ~30min, discarded |
-| third   | `2026-08-27T20:31:57Z` | running                | -                 |
+| third   | `2026-08-27T20:31:57Z` | `2026-08-30T20:32:07Z` | **72.0h, PASS**   |
 
-`memoryLimitMb` stays 0 and `_memoryBaseline` stays `NOT MEASURED YET` until this
-one finishes. `docs/validation.md` has all three write-ups.
+**Torn down on 2026-08-31 and the machine is given back.** Verified independently of
+the script's own output: stage and `%APPDATA%\Wallwright` gone, no Wallwright or
+node processes, no `Soak*` task, all three `FCAT*` tasks `Ready`, GPU back to 420 of
+8188 MiB at 0%. The app had reached 90.8 hours of continuous uptime.
+
+**Two things this run taught, for whoever stages the next one.** Both are in the
+validation write-up in full:
+
+1. **The geometry walk-away check below is weaker than it reads.** It passed, and
+   the very first screen grab invalidated it twelve seconds later by knocking the
+   window to 1920x1079 and scale 0.999, where it stayed for 28.4 hours before
+   anyone knew. The app logs layout only on change, so one look at the top of the
+   log cannot see this. Run the grab task's console hidden, and record the app's
+   reported scale as a sampler column so a geometry change shows up in the series.
+2. **The scheduled tasks' console windows sit on top of the wall** for the whole
+   run, occluding part of two panels. Harmless to the result, and visible in every
+   one of the 180 grabs.
+
+`_memoryBaseline` in `config/wall.json` is filled in from this run, and the
+countermeasure is now switched on at `memoryLimitMb` 2000 / `memoryHardLimitMb` 2750. That was gated on the show PC using the same GPU path as the test machine,
+which Jeff confirmed on 2026-08-31: the HDMI is always in the discrete GPU port.
+`docs/validation.md` has all three write-ups.
 
 **Both earlier attempts died the same way: the machine was in use and this work did
 not know.** The first was displaced by `C:\HQ\SoDA\MS_Immersive_Tunnel.exe

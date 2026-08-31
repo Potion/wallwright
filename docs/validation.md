@@ -986,6 +986,398 @@ restates the whole run, because there are only 16.1 hours of it and
 **No verdict is possible yet and none is being offered.** `memoryLimitMb` stays 0
 and `_memoryBaseline` stays `NOT MEASURED YET` until the final-24h window exists.
 
+Everything above is the record as it stood at 16.1 hours and is left as written. The
+run went on to complete; the result is the next section.
+
+### The 72-hour run, third attempt: COMPLETE, verdict PASS
+
+Ran the full 72.0 hours, `2026-08-27T20:31:56Z` to `2026-08-30T20:32:07Z`, and
+harvested on 2026-08-31 before anything was torn down. Build git `c384dcf`,
+HQ-PROTO-MINI-2, discrete RTX A1000. Data in `docs/soak/2026-08-30-complete/`.
+
+**Verdict: PASS**, against the threshold pre-registered before T0.
+
+```
+final 24h OLS        0.45 MB/hour  (R2 0.288, 1440 samples)
+median cross-check   0.89 MB/hour  (head 1299MB, tail 1362MB)
+threshold           15    MB/hour
+```
+
+The two estimators agree in sign and magnitude, which is the pre-registered
+condition for trusting either. The whole-run fit is 0.80 MB/hour, and the app ended
+**below** where it started: 1537MB at T0, 1406MB at the last sample, min 1261, mean 1339. The 1537 is the startup sample alone; the second sample is 1267.
+
+It is not a marginal pass. 0.45 MB/hour is a thirty-third of the threshold, and it
+is the kind of number that only means anything because the failure conditions that
+do not involve memory were also checked, one at a time, below.
+
+**Nothing failed, and there is no downtime to report:**
+
+```
+4320 samples, 4320 ok, 0 failed        0 crashes         0 failed loads
+0 rows with ok=0, so no outage at all  0 watchdog reloads, 0 deferrals
+one runId (83acd2e6) for all 72h       0 recycles, 0 memory limit hits
+```
+
+One `runId` across the whole run is the restart check: a restart drops memory back
+to a few hundred MB and would show as a new id. There was no reboot either, which
+matters because a reboot invalidates the curve and must not be stitched over: last
+boot was **2026-08-11**, sixteen days before T0, and the System log has no 1074,
+6005, 6008 or 41 event inside the window.
+
+**The per-panel result, which is the part that makes a leak attributable:**
+
+| panel     | first | last  | min   | max   | final-24h       | URL drift |
+| --------- | ----- | ----- | ----- | ----- | --------------- | --------- |
+| `control` | 74MB  | 77MB  | 73MB  | 79MB  | **+0.021 MB/h** | 0         |
+| `heavy`   | 103MB | 121MB | 102MB | 121MB | **0.000 MB/h**  | 0         |
+| `grafana` | 413MB | 252MB | 244MB | 413MB | +0.006 MB/h     | 4320      |
+| `earth`   | 142MB | 173MB | 124MB | 177MB | +0.036 MB/h     | 4319      |
+
+**`control` did not climb**, which is the pre-registered condition that would have
+indicted the product rather than the pages. It moved inside a 73 to 79MB band all
+run and fits at +0.021 MB/hour over the final 24 hours, with a median cross-check of
+exactly zero. The honest description is a staircase, not a slope: it sat at 74MB for
+the first 34 hours, then stepped up a megabyte roughly every 6.5 hours, then stepped
+back **down** from 79 to 77 at h+66.5. Something that steps down is not
+accumulating. Even at the whole-run rate of 0.075 MB/hour it would take about six
+months to reach 400MB, and the step down says even that overstates it.
+
+**`heavy` was warm-up, and this closes the question the 16-hour checkpoint left
+open.** At the checkpoint it was up 17MB in 16 hours, about 1.1 MB/hour, on a page
+that is leak-free by construction, and it was the one arm not obviously flat:
+
+```
+h+0  103MB    h+24  121MB    h+48  121MB
+h+6  119MB    h+28  121MB    h+60  121MB
+h+12 120MB    h+36  121MB    h+72  121MB
+```
+
+Exactly 121MB at every checkpoint from h+24 on, and a final-24h slope of 0.000. It
+plateaued and stayed there for two full days. The 1.1 MB/hour reading was warm-up
+being extrapolated, which is the same mistake the pre-registration warns about and
+the reason the verdict is judged on the final window.
+
+`grafana` spiked to 413MB in warm-up and settled to 252MB, ending 161MB **below**
+where it started, exactly the shape predicted. `earth` oscillates between 124 and
+177MB as it repaints and ends within that band.
+
+**The process-type split**, first sample against last, showing where the small
+whole-run drift actually went:
+
+```
+Tab      1059 -> 864 MB     Browser  123 -> 135 MB
+GPU       285 -> 337 MB     Utility   70 ->  69 MB
+```
+
+Renderer memory fell by 195MB over three days. What rose is the GPU process, by
+52MB, on a machine where the app is on a discrete card.
+
+#### Nothing froze, which a flat memory curve cannot tell you
+
+A stalled renderer holds its memory perfectly flat, so the flattest possible curve
+is also what a frozen wall looks like. That is why the grabs exist, and a PASS is
+exactly when they have to be read rather than filed.
+
+180 grabs at a perfect 30-minute cadence, 178 consecutive gaps of exactly 30
+minutes and not one missed firing. Two consecutive grabs from inside the scored
+window, `2026-08-30T20:02:40Z` and `20:32:40Z`, were read against each other.
+
+The cleanest number is the `heavy` panel's local fetch counter, which is unobscured
+and advanced **51489 to 51849** across that half hour: 360 fetches in 1800 seconds,
+one every five seconds exactly as configured, so its network loop was still running
+72 hours in. The canvas frame counter advanced by about 108,000 over the same
+interval, which is **60 fps sustained**, and its end-of-run value of roughly 15.55M
+frames is what 60fps for 72 hours predicts (60 x 3600 x 72 = 15.55M). The stripe
+animation had moved and the `earth` globe had rotated between the two frames.
+
+Read the frame figures as approximate: the `heavy` page's DOM HUD overlaps the
+canvas-drawn counter, which makes individual digits ambiguous in a half-size grab.
+The fetch counter, the animation and the globe are unambiguous on their own, and all
+three say the same thing. **Nothing was frozen, throttled or dropping frames.**
+
+**Handles and threads were checked for the leak a memory series would miss**, and
+there is none: handles 5285 to 5256 (peak 5293), threads 323 to 353, process count
+pinned at 9 for all 4320 samples.
+
+**VRAM is flat and low.** 610 MiB at the start, 545 at the end, peak 926 of 8188
+MiB, which is 11.3% against the 50% pre-flight gate. GPU utilisation averaged 19.7%.
+Available system memory never fell below 20392MB and commit never exceeded 38.6%,
+so nothing here was measured under pressure.
+
+#### The workingSetSize versus private-bytes gap, answered
+
+This has been open since the original 699MB datum and it was step 2 of the harvest.
+The answer is **1.44, and stable**, so the app's own figure reads about 44% high:
+
+| point   | ws_mb  | private_mb | ratio |
+| ------- | ------ | ---------- | ----- |
+| T0+2min | 1259.8 | 881.8      | 1.429 |
+| h+12    | 1326.8 | 911.7      | 1.455 |
+| h+24    | 1328.1 | 914.5      | 1.452 |
+| h+48    | 1357.4 | 961.5      | 1.412 |
+| h+71.9  | 1364.5 | 944.9      | 1.444 |
+
+Mean 1.444 across the whole run, 1.437 across the final 24 hours, range 1.242 to
+1.454. **It does not drift.** The earlier partial readings suggested it did (65%
+high falling to 59% across the first run's seven hours, 42% at one minute into this
+one), and a full run says those were startup transient and sampling noise rather
+than a trend. The gap is what it is because `workingSetSize` counts shared pages
+once per process that maps them, and the process count here was constant at 9.
+
+Anyone comparing the app's own log line to Task Manager needs that 1.44. It also
+means a limit expressed in the app's units is about 1/1.44 of that in private bytes:
+the 2000MB below is about 1389MB of private bytes.
+
+The OS-side series carries the verdict independently and agrees:
+
+```
+private bytes, final 24h   0.579 MB/hour     (app metric: 0.45)
+private bytes, whole run   0.731 MB/hour     (app metric: 0.80)
+p50 943.7MB, p95 962.6MB, p99 981.2MB over the final 24h, peak 1133.6MB over 72h
+```
+
+#### Disclosure: one human input instant, and the run is reported as partial
+
+**Any human input is a pre-registered invalidating condition**, and the run took
+one. It is disclosed here rather than left to be found, and the pre-registration
+says such a run is reported as partial rather than quietly stitched together, so
+that is what this is: a complete 72-hour series with one recorded interference,
+argued rather than omitted.
+
+**What happened.** `FCATTable.exe` was launched from its on-demand Scheduled Task
+at `2026-08-29T00:39:58Z`, 28.1 hours in, by a person; Jeff confirmed at the time it
+was deliberate and nearly finished. Closing it at about `00:58Z` landed input on the
+`control` panel.
+
+**What the record proves about it**, and this is why it is one event rather than an
+unknown amount of interference. `lastUsedSecAgo` is null until that moment and then
+counts upward for the rest of the run:
+
+```
+control:  2614 of 4320 samples non-null, first at 2026-08-29T00:58:23Z
+          exactly ONE implied input instant, 2026-08-29T00:58Z
+          monotonically increasing for 43.6h afterwards, zero resets
+heavy, grafana, earth:  0 of 4320 non-null. Input never reached them
+```
+
+A second touch would reset that counter, and it never resets. So the artifact of one
+event ageing is not to be mistaken for ongoing interaction, and the other three arms
+were never touched at all.
+
+**Why it does not reach the verdict.** The scored window opens at
+`2026-08-29T20:32Z`. The input is at `00:58Z` the same day, **19.6 hours before the
+window opens**, and no part of it is inside the scored data. Its behavioural effect
+is nil in this configuration: `lastUsedSecAgo` exists only to defer watchdog reloads
+and recycles, and both are off, which the counters confirm at 0 and 0. Wallwright
+private bytes were flat at 916MB across the FCATTable boundary with no step in any
+panel, VRAM went 613 to 910 MiB at its worst, 11% of the card against the 50% gate,
+and afterwards fell to 524 MiB, below where it had been before. `earth` blipped 137
+to 162 to 138MB on the repaint and `control` did not rise, going 74 to 73MB.
+
+The conservative reading is the one to take: this is a 72-hour run with a clean
+scored window and a disclosed interference 19.6 hours outside it, not an unblemished
+72 hours.
+
+#### The geometry check passed and was invalidated twelve seconds later
+
+A finding about the harness, not the app, and the more useful of the two because it
+will recur. The runbook's single most important walk-away check is that the app log
+says `1:1` and not `scaled to 0.nnn`, because the pre-registration fixes `wall.scale`
+at 1.0. It said `1:1`. Twelve seconds later it stopped being true, and nothing
+noticed for 28.4 hours.
+
+The app logs layout only when it changes, which is what hid this. Reading all 249
+layout lines rather than the first six:
+
+```
+T0-12s      layout 1920x1080 in a 1920x1080 window, 1:1
+T0+12s      layout 1920x1080 in a 1920x1079 window, scaled to 0.999   <- first grab
+            ... 28.4 hours with no further layout line ...
+h+28.44     layout 1920x1080 in a 1920x1080 window, 1:1               <- FCATTable closed
+h+28.51 on  0.999 then 1:1 again, every 30 minutes, at :02:40 and :32:40
+```
+
+So the window lost one pixel of height to the **first screen grab** and stayed at
+scale 0.999 for the first 28.4 hours of the run. The human closing FCATTable is what
+restored it to 1920x1080. From then on each `SoakGrab` firing dips it for about half
+a second and it springs back: 245 of the 249 layout lines are that cadence, and they
+line up exactly with the grab timestamps.
+
+**The scored window is unaffected**, which is why the verdict stands: the final 24
+hours ran at the registered 1920x1080 and 1:1 apart from roughly 48 half-second
+dips, and the whole 0.999 period is in the unscored first 28.4 hours. The deviation
+is also tiny in the terms the pre-registration actually fixed, which was the raster:
+1920x1079 at DPR 2 is 8.286 megapixels against 8.294, a difference of 0.09%.
+
+**What to fix before a fourth run.** `soak-grab.ps1` does nothing but
+`CopyFromScreen`, so the resize is a side effect of the Scheduled Task's console
+appearing in session 1, not of the capture. Two cheap changes would close it: have
+the grab task run its console hidden, and have the sampler record the app's reported
+scale as a column so a geometry change is visible in the series instead of only in a
+log line that is written once. The current runbook check is weaker than it reads,
+because it verifies a condition at the one moment the harness has not yet perturbed.
+
+**A related caveat the grabs also revealed: scheduled-task console windows sit on
+top of the wall for the entire run.** Three of them at T0, one by the end, occluding
+part of `control` and part of `heavy`. This was constant from T0 rather than a change
+mid-run, and the frame counter proves painting continued underneath, but occlusion
+can only bias memory downward, so it belongs in the caveats and not in the argument
+for the result.
+
+#### The URL drift flag reads as a failure and is not one
+
+`URL drift samples: 4320` prints directly above `Verdict: PASS` in the summary, and
+the pre-registration lists "any URL drift" among the things that fail a run whatever
+the memory did. Those two lines look like a contradiction and they are not, so the
+record should say why rather than leave it for a reader to trip over.
+
+They do not actually conflict, because the verdict is computed from the memory slope
+alone: `summarize()` in `src/dev/soak-stats.js` reports `urlDriftSamples` alongside
+the result and never feeds it into the pass or fail. The drift condition was written
+for a panel that wanders off to somewhere it was not configured to be, which is a
+real failure mode for an unattended wall.
+
+What was actually recorded is the two remote pages normalising their own URLs at
+load, once each, on the first sample they appear in:
+
+| panel     | drift samples | what it appended                   |
+| --------- | ------------- | ---------------------------------- |
+| `grafana` | 4320 of 4320  | `?from=now-6h&to=now&timezone=utc` |
+| `earth`   | 4319 of 4320  | a `#current/wind/...` fragment     |
+| `control` | 0             | never drifts                       |
+| `heavy`   | 0             | never drifts                       |
+
+The counts are high because the flag is a per-sample comparison against the
+configured URL, not an event count: one normalisation at load is then true for every
+subsequent sample. `grafana` shows 4320 because it had already normalised by the
+first sample and `earth` 4319 because it did so by the second. Neither page ever
+navigated anywhere else, and the two local arms, which are the ones that would
+matter, never drift at all.
+
+**This also explains the 2026-08-25 partial**, which recorded the same thing as
+412 of 412 and left it unexplained. Same two pages, same cause.
+
+The flag is doing its job and the summary is not lying; it is reporting a per-sample
+state under a name that sounds like an event. Worth narrowing to a comparison
+against the post-load URL, or renaming, before anyone reads a future run cold.
+
+#### The measured baseline, and the countermeasure switched on
+
+The run's purpose was to produce these four numbers, in the app's own metric because
+that is what `upkeep.js` compares against at runtime:
+
+```
+p95_24h         1367 MB
+peak_72h        1537 MB     (the T0 startup sample; steady state is 1261 to 1406)
+driftMbPerHour  0.45
+p50_24h 1359, p99_24h 1382, max_24h 1406
+```
+
+Through the rule already committed in `config/wall.json` and implemented as
+`memoryLimitFromBaseline()`, that gives **`memoryLimitMb` 2000** and
+**`memoryHardLimitMb` 2750**.
+
+That answer is robust to the one judgement call in it. `peak_72h` of 1537 is a single
+startup sample and there is a fair argument for excluding it, but the p95 term
+dominates the maximum either way, so the limit is 2000 whether the peak is taken as
+1537, as 1406 excluding the first hour, or as 1406 from the final 24 hours alone. It
+did not need deciding.
+
+`_memoryBaseline` is filled in with those measurements, and **`config/wall.json` now
+ships `memoryLimitMb` 2000 and `memoryHardLimitMb` 2750**. The memory countermeasure
+is switched on for the first time; it has shipped inert since it was written.
+
+**What unblocked it was a question about a cable.** The baseline was measured with
+the video cable on a discrete A1000, where textures and framebuffers live in VRAM
+and never enter the number the limit is compared against. On integrated graphics the
+same allocations come out of system RAM and do enter it, so a baseline from one path
+does not transfer to the other, and 2000MB shipped to a machine cabled the other way
+would be a guess wearing a measurement's clothes. Jeff confirmed on 2026-08-31 that
+the HDMI on the show PC is always in the discrete GPU port. Same path, so the
+baseline transfers. **If a show PC ever runs off the motherboard port, this baseline
+is void and has to be re-measured**, which is why the reason is written down here
+and in `_memoryBaseline.gpu_path` rather than left as folklore.
+
+**One caveat that survives, and it is the more likely of the two to bite.** These
+figures come from the soak lineup: a static page, a synthetic WebGL page,
+`play.grafana.org` and `earth.nullschool.net`. They do **not** come from the real
+Honeywell dashboards, which did not exist when this was measured. Real dashboards
+are the single thing most likely to move `p95_24h`, and the rule's headroom is 1.35x
+over a p95 measured on other content. So 2000 is honestly described as a guard
+against runaway growth, not as a tuned figure, and it should be re-measured when the
+real URLs land. That is already a separate item in `AGENTS.md`.
+
+The reason this is worth being careful about rather than just picking a round
+number: a limit inside the normal operating band is worse than no limit, because it
+rebuilds a panel on every check. Measured, that took memory **up** from 1513 to
+1885MB while recycling every five seconds. 2000 sits 633MB above the measured p95
+and 594MB above the highest single sample in the scored window, so it is outside the
+band with room to spare on this content.
+
+#### What this run does not settle
+
+- **Not the real dashboards.** `grafana` and `earth` are realistic, public and
+  stateless. Nothing here says whether a real Honeywell IdP session survives three
+  days of idleness or a panel rebuild.
+- **Not the show PC and not a wall.** 8.29 megapixels of raster is representative;
+  a 2x2 of 960x540 on a 4K desktop panel is not the panel arrangement, and
+  SentinelOne at about 844MB is a background variable this machine has and another
+  might not.
+- **One machine, one run, no replicate.** A strong lower bound on how bad things
+  get, weak evidence of how good.
+- The `heavy` DOM HUD still overlaps the canvas counters. Cosmetic, and it made the
+  frame counter harder to read at harvest than it needed to be.
+
+#### Afterwards, and the teardown
+
+The sampler stopped itself at 72 hours as designed, and the app was deliberately
+left running so the machine could be given back on Jeff's say-so rather than
+automatically. `soak-proc.ps1` loops forever and kept recording, which turned into a
+free extension of the result:
+
+```
+18.7 further hours past the scored window
+private bytes 949.0MB -> 948.2MB      OLS +0.315 MB/hour at R2 0.034
+process count 9 throughout, VRAM 543 MiB at the end
+90.8 hours of continuous uptime when it was finally killed
+```
+
+Read the endpoints rather than that fit: 0.8MB of movement across eighteen hours is
+the series not going anywhere, and an R2 of 0.034 says the slope is fitting noise.
+Which is the useful part. The last thing this app did before being killed was hold
+1369MB steady for most of a day, on a build that had by then been rendering four
+panels continuously for nearly four days.
+
+**Torn down on 2026-08-31**, on Jeff's go-ahead, after the archive was taken and
+verified. `soak-teardown.ps1` reported clean on every step, and the state was then
+checked independently rather than taken from the script's own output:
+
+```
+stage removed, %APPDATA%\Wallwright removed
+0 Wallwright processes, 0 node processes, 0 Soak* tasks
+FCATWallLauncher Ready, FCATSoakSampler Ready, FCATTableLauncher Ready
+GPU back to 420 of 8188 MiB at 0% utilisation
+```
+
+The other project's two tasks are re-enabled and the machine is given back.
+
+**The app log has no `stopping after Ns` line, and that is not a mystery to solve
+later.** Teardown kills with `taskkill /F`, so no `will-quit` handler runs. A plain
+`taskkill` was tried first, specifically to get that line into the record, and the
+kiosk window did not take the `WM_CLOSE`: all nine processes were still up ten
+seconds later. So this run ends with an ordinary memory line at
+`2026-08-31T11:17:35-04:00` and was ended by teardown's hard kill. Worth knowing,
+because the first run's write-up leans on that line to prove it quit gracefully, and
+its absence here means something different from what it would have meant there.
+
+**Evidence.** The scored series, the per-panel CSV, the raw JSONL and the summary in
+`docs/soak/2026-08-30-complete/` were hash-verified against the machine immediately
+before teardown and are byte-identical to what was harvested. The `proc` CSV and the
+app log in that directory are the final versions, running past the scored window to
+the moment of the kill. The 183 screen grabs are in
+`docs/soak/soak-2026-08-30-complete.zip`, which is gitignored like the partial's.
+
 ### Panel CRUD works end to end
 
 `src/main.js` has no unit tests, so `WALLWRIGHT_SELFTEST=1` drives the real path:
