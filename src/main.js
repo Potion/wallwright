@@ -2911,6 +2911,156 @@ function selfTest() {
     exitEdit({ save: false });
     await soon(200);
 
+    // ---- 21: promoting and docking does not reload the panel ---------------
+    //
+    // The SPEC guarantee, and the reason `docs/validation.md` group A leads with
+    // it: return-to-grid must not reload, or every promote costs an operator
+    // whatever they had typed. The checklist asked somebody to promote a panel,
+    // watch a "Loaded at" timestamp and judge whether it changed. A mark set on
+    // the renderer's window answers the same question without a human, and
+    // without a page to load: if the view reloaded, the global is gone.
+    step(21, 'promote and dock do not reload the panel');
+    // Earlier steps add and delete panels - step 19 deletes `a` - so nothing here
+    // may assume the config it started with. Top the list back up to two rather
+    // than indexing into whatever survived.
+    const spares = [];
+    while (config.views.length < 2) {
+      spares.push(addPanel({ x: 0, y: 0, width: 320, height: 240 }).id);
+      await soon(150);
+    }
+    await until(() => contentViews.length === config.views.length && !!contentViews[1]);
+    step(21, `running against ${config.views.length} panels: ${ids()}`);
+    const markOf = (i, js) => contentViews[i].webContents.executeJavaScript(js, true);
+    await markOf(0, 'window.__wwMark = "before-promote"; window.__wwMark');
+    activate(0);
+    await until(() => state.mode === 'active' && state.activeIndex === 0);
+    const markWhileActive = await markOf(0, 'window.__wwMark || null');
+    check(21, 'the mark survives being promoted', markWhileActive === 'before-promote');
+
+    dockGrid({ animate: false });
+    await until(() => state.mode === 'grid');
+    const markAfterDock = await markOf(0, 'window.__wwMark || null');
+    check(
+      21,
+      'the mark survives returning to the grid',
+      markAfterDock === 'before-promote',
+      `got ${JSON.stringify(markAfterDock)}; a null here means the view reloaded`
+    );
+
+    // ---- 22: a background panel keeps running -------------------------------
+    //
+    // Chromium throttles timers in backgrounded content, and a wall whose other
+    // three dashboards freeze the moment one is promoted is a wall showing stale
+    // numbers. Checked with a real interval in the other panel's renderer rather
+    // than by watching mock 4's ticker by eye.
+    step(22, 'a backgrounded panel keeps running');
+    await markOf(
+      1,
+      'window.__wwTicks = 0; clearInterval(window.__wwT); window.__wwT = setInterval(() => window.__wwTicks++, 50); 1'
+    );
+    activate(0);
+    await until(() => state.mode === 'active' && state.activeIndex === 0);
+    await soon(1200);
+    const ticks = await markOf(1, 'window.__wwTicks || 0');
+    await markOf(1, 'clearInterval(window.__wwT); 1');
+    // Generously under 1200/50, because a loaded runner and Chromium's own
+    // background throttling both legitimately slow this down. The question is
+    // whether it stopped, not whether it kept perfect time.
+    check(
+      22,
+      'its timers still fired while another panel was fullscreen',
+      ticks >= 3,
+      `${ticks} ticks in 1200ms; 0 means the renderer was frozen`
+    );
+    dockGrid({ animate: false });
+    await until(() => state.mode === 'grid');
+
+    // ---- 23: one Esc docks the wall ----------------------------------------
+    //
+    // config/selftest.json sets escToGrid "single". Esc is handled per view in
+    // hardenView() rather than as a globalShortcut, precisely so it reaches the
+    // panel first, which means the only honest test sends the key to the panel.
+    step(23, 'a single Esc returns to the grid');
+    activate(0);
+    await until(() => state.mode === 'active' && state.activeIndex === 0);
+    const esc = (type) =>
+      contentViews[0].webContents.sendInputEvent({ type, keyCode: 'Escape' });
+    esc('keyDown');
+    esc('keyUp');
+    const docked = await until(() => state.mode === 'grid', 3000);
+    check(
+      23,
+      'Esc docked the wall',
+      docked,
+      `mode=${state.mode}, escToGrid=${config.escToGrid}`
+    );
+
+    // ---- 24: per-panel zoom does not leak ----------------------------------
+    //
+    // Promoting re-applies zoom, and the checklist's worry is that it applies the
+    // promoted panel's factor to its neighbours. Asked of the real webContents
+    // rather than of the config, because the config is what we set.
+    step(24, 'per-panel zoom does not leak across panels');
+    const realZoom = config.views[0].zoom;
+    config.views[0].zoom = 0.75;
+    const zoomOf = (i) => contentViews[i].webContents.getZoomFactor();
+    activate(0);
+    await until(() => state.mode === 'active' && state.activeIndex === 0);
+    // Sampled while promoted as well as after docking. Checking only the docked
+    // state was measurably too weak: showPanelsInGrid() re-applies every panel's
+    // own factor on the way out, so a leak injected into activate() was scrubbed
+    // before the assertion ran, and the check passed against code that leaked.
+    const activeA = zoomOf(0);
+    const activeB = zoomOf(1);
+    dockGrid({ animate: false });
+    await until(() => state.mode === 'grid');
+    const zoomA = zoomOf(0);
+    const zoomB = zoomOf(1);
+    check(
+      24,
+      'the promoted panel got its own factor',
+      Math.abs(activeA - 0.75) < 0.01,
+      `a=${activeA}`
+    );
+    check(
+      24,
+      'the other panel was not zoomed while it was promoted',
+      Math.abs(activeB - 1) < 0.01,
+      `b=${activeB} while a was fullscreen at 0.75`
+    );
+    check(
+      24,
+      'the zoomed panel kept its own factor',
+      Math.abs(zoomA - 0.75) < 0.01,
+      `a=${zoomA}`
+    );
+    check(
+      24,
+      'its neighbour still was not, after docking',
+      Math.abs(zoomB - 1) < 0.01,
+      `b=${zoomB}`
+    );
+    config.views[0].zoom = realZoom;
+    refreshLayout();
+
+    // ---- 25: idle auto-return ----------------------------------------------
+    //
+    // idleReturnMs is 0 in the self-test config, so this arms it briefly rather
+    // than waiting four minutes, then puts it back. Only administrators have
+    // input, so this timer is what actually returns the wall to the grid in
+    // normal operation: it is not an edge case here, it is the common path.
+    step(25, 'the wall returns to the grid when left alone');
+    const realIdle = config.idleReturnMs;
+    config.idleReturnMs = 600;
+    activate(0);
+    await until(() => state.mode === 'active' && state.activeIndex === 0);
+    resetIdle();
+    const autoDocked = await until(() => state.mode === 'grid', 5000);
+    check(25, 'it docked itself', autoDocked, `mode=${state.mode} after idleReturnMs=600`);
+    config.idleReturnMs = realIdle;
+    clearIdle();
+    for (const id of spares) deletePanel(id);
+
     if (failures.length) {
       warn(`selftest FAILED (${failures.length}): ${failures.join('; ')}`);
     } else {

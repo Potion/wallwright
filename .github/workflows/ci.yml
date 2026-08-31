@@ -115,10 +115,13 @@ jobs:
       - run: npm test
 
       # The only coverage src/main.js has: it drives the real app over real IPC.
-      # 62 assertions covering panel CRUD, the overlay in every mode, preset
+      # 73 assertions covering panel CRUD, the overlay in every mode, preset
       # recall, the refresh and recycle timers, the watchdog's guard against a
       # deleted panel, the SSO popup rule, permission guarding, the overlay CSP,
-      # and a synthetic pointer drag through the layout editor's geometry.
+      # a synthetic pointer drag through the layout editor's geometry, and the
+      # promote/dock guarantees: no reload on return, backgrounded panels still
+      # running, single-Esc docking, per-panel zoom not leaking, and idle
+      # auto-return.
       #
       # **Gating on purpose. Never add continue-on-error here.** A step marked
       # that way reports a failed conclusion as `success`, which is exactly how a

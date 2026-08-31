@@ -18,6 +18,35 @@ built from, so nothing is unrecoverable.
 
 ## Unreleased
 
+### Five things the checklist asked a person to look at, now asserted
+
+`AGENTS.md` has long carried a convention: add a `check()` to the self-test for
+behaviour you would otherwise verify by eye, and make sure it can actually fail.
+`docs/validation.md` then carried seventeen things to verify by eye, none of them
+ticked. The mechanical ones are now self-test steps 21 to 25, running on every push
+on both target platforms. The self-test is 73 assertions, up from 64.
+
+- **No reload on promote or dock** (21), the `SPEC.md` guarantee that stops every
+  promote costing an operator whatever they had typed. A mark on the renderer's
+  `window` survives both, or the view reloaded.
+- **A backgrounded panel keeps running** (22), with a real interval in the other
+  panel's renderer. A wall whose other three dashboards freeze the moment one is
+  promoted is a wall showing stale numbers.
+- **One Esc docks the wall** (23), sent to the panel's own `webContents`, because
+  Esc is handled per view rather than as a `globalShortcut`.
+- **Per-panel zoom does not leak** (24).
+- **Idle auto-return** (25), which arms `idleReturnMs` briefly rather than waiting
+  minutes. Only administrators have input, so this timer is the common path back
+  to the grid, not an edge case.
+
+Each was proven to fail against the behaviour it guards before being counted, and
+one of them did not. The first version of the zoom check sampled only after
+docking, and a leak injected into `activate()` did not trip it: `showPanelsInGrid()`
+re-applies each panel's own factor on the way out, so the fault was scrubbed before
+the assertion ran. It now samples while promoted as well, and catches it. A check
+that passes against broken code is worse than no check, which is the whole reason
+the convention says to try to break it.
+
 ### The last duplications, and one comment that had stopped being true
 
 Phase 6, and the end of the audit.

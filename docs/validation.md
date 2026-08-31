@@ -1356,19 +1356,33 @@ these are the things the automated tests and the dev harness cannot settle.
 
 ### A. On the dev machine, now
 
-All mechanical, all just need hands and eyes. Run `npm run dev`.
+**Five of these are no longer a checklist.** `AGENTS.md` has carried a convention
+saying to add a `check()` to the self-test for anything you would otherwise verify
+by eye, and this list was seventeen things to verify by eye, none of them ticked.
+The mechanical ones are now self-test steps 21 to 25, so they run on every push on
+both target platforms instead of being a box somebody ticks once. Each was proven
+to fail against the behaviour it guards before being counted; the one that did not
+fail on the first attempt is written up under step 24, because a check that passes
+against broken code is worse than no check.
+
+What is left below genuinely needs a person: it is either a judgement about how
+something looks, or a gesture at the machine that no harness can make.
+
+Run `npm run dev`.
 
 - [ ] **Session persistence across restart.** Sign in on mock 1, quit
       (`Cmd/Ctrl+Shift+Q`), relaunch. Still signed in? Proves the `persist:`
       partition actually persists.
-- [ ] **Page state survives dock/undock.** Sign in on mock 1, type into the
-      scratch field, promote, Esc, promote again. The "Loaded at" timestamp must
-      not change and the typed text must still be there. A changed timestamp
-      means the view reloaded, which `SPEC.md` forbids.
-- [ ] **Esc docks the wall.** With `escToGrid: "single"`, promote a panel and
-      press Esc once: it should return to the grid. On mock 2, confirm the
-      consequence too, that the page's own Esc-to-close modal no longer fires.
-      That is the accepted tradeoff, not a bug.
+- [x] **Page state survives dock/undock.** **Automated: self-test step 21.** A
+      mark set on the renderer's `window` must survive a promote and a dock; a
+      reload would take it with it, which is what `SPEC.md` forbids. Proven to
+      fail by making `activate()` reload every panel.
+- [x] **Esc docks the wall.** **Automated: self-test step 23**, which sends a
+      real Esc to the promoted panel's `webContents`, because Esc is handled per
+      view rather than as a `globalShortcut`. Proven to fail by setting
+      `escToGrid: "double"`. The consequence on mock 2, that the page's own
+      Esc-to-close modal no longer fires, is still a by-eye check: it is a
+      tradeoff to look at, not an assertion.
 - [ ] **Keyboard focus.** Type into mock 2's input while it is promoted. If
       nothing appears, the `webContents.focus()` call in `activate()` is not
       taking effect and the wireless keyboard will have no target at the wall.
@@ -1379,13 +1393,21 @@ All mechanical, all just need hands and eyes. Run `npm run dev`.
       the mock 3 popup and keep typing in it for over 15 seconds. The wall must
       not dock and close the popup underneath you. This is why the content
       preload is injected into popups.
-- [ ] **Per-panel zoom.** Mock 4 is at `zoom: 0.75` while its neighbours are at
-      1.0. Its text should be visibly smaller, and promoting it then returning
-      must not leak zoom onto any other panel.
-- [ ] **Background liveness.** Mock 4's tick counter must keep counting while
-      another panel is promoted fullscreen.
-- [ ] **Idle auto-return.** Promote a panel, stop touching it, confirm it docks
-      after ~15s and is still signed in afterwards.
+- [x] **Per-panel zoom.** **Automated: self-test step 24**, which reads the real
+      `getZoomFactor()` off both panels **while one is promoted and again after
+      docking**. Sampling only the docked state was measurably too weak:
+      `showPanelsInGrid()` re-applies each panel's own factor on the way out, so
+      an injected leak was scrubbed before the assertion ran and the check passed
+      against code that leaked. Whether the text looks right is still by eye.
+- [x] **Background liveness.** **Automated: self-test step 22**, which runs a
+      real `setInterval` in the backgrounded panel's renderer and asserts it
+      still fired while another panel was fullscreen. Deliberately a loose
+      threshold: Chromium legitimately throttles background timers, and the
+      question is whether it stopped, not whether it kept time.
+- [x] **Idle auto-return.** **Automated: self-test step 25**, which arms
+      `idleReturnMs` briefly rather than waiting minutes, then restores it.
+      Proven to fail by making `resetIdle()` never arm the timer. Still signed in
+      afterwards is covered separately by `npm run probe:session`.
 - [ ] **Watchdog, both paths.** Kill a background panel's renderer from Activity
       Monitor and confirm a backoff reload in the log. Then kill the _promoted_
       panel's renderer and confirm the log says `deferring reload ... until it is
