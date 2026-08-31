@@ -1863,8 +1863,14 @@ Run `npm run dev`.
       fail by making `fatalPage()` return an empty body. Pointing
       `WALLWRIGHT_CONFIG` at a broken file end to end is still manual: the
       self-test runs inside an already-booted app.
-- [ ] **Single-instance lock.** Launch twice. The second should refuse and exit
-      rather than fighting over the wall. Never exercised.
+- [x] **Single-instance lock.** **Observed 2026-08-31, by accident.** A local
+      `npm run selftest` collided with the macOS CI runner's own self-test on the
+      same machine: the second process logged `another instance is already
+running; exiting` and quit, leaving the first alone. That is
+      `requestSingleInstanceLock()` returning false, `fatal()`, then `app.quit()`,
+      before any window or config work. Caveat: both were unpackaged dev runs from
+      different checkouts, which share a lock because `setName()` runs first and
+      decides `userData`. A packaged install takes the same path. See below.
 - [ ] **Promote/return animation.** `transitionMs` is 220. Animated `setBounds`
       is confirmed not to throw, but the animation itself has not been watched.
 - [x] **`hideInactiveWhenActive`.** **Measured: self-test steps 22 and 30.** On
@@ -2469,6 +2475,39 @@ What nothing covers: `pickWallDisplay()`, the Esc policy, fullscreen handling,
 the watchdog's backoff, layout scaling, and the whole of `src/overlay.js`
 including the drag, snap and inspector interactions. Those are only ever
 exercised by hand.
+
+### The single-instance lock, exercised by accident
+
+The checklist above carried "launch twice, never exercised" from the beginning.
+It has now been exercised, though not deliberately.
+
+Running `npm run selftest` locally while the macOS CI runner was part-way through
+its own self-test produced, from the second process:
+
+```
+[wallwright] diagnostics log: .../Wallwright/logs/wallwright.log
+[wallwright] another instance is already running; exiting
+```
+
+and it exited. The first run was untouched. That is exactly the intended path in
+`src/main.js`: `requestSingleInstanceLock()` returns false, `openDiagLog()` runs
+so the reason reaches the log file, `fatal()` prints it, and `app.quit()` follows,
+all before a window or a config is touched.
+
+**Two things worth keeping from it.**
+
+The lock is shared across _checkouts_, not per directory. The runner's copy lives
+in `~/actions-runner/_work/wallwright/wallwright` and this one in
+`~/Developer/wallwright`, and they still contended, because `setName()` runs
+before anything reads `userData` and both resolve to the same application
+identity. That is correct, and it is also a **practical trap on this machine**:
+`npm run selftest` cannot be run locally while CI is running one, and the failure
+looks like a broken self-test rather than a busy machine. It reports zero
+assertions and exits non-zero.
+
+Still not covered: two _packaged_ installs, and whether the `second-instance`
+handler's `win.focus()` does anything useful on a kiosk window. Both need the show
+PC.
 
 ### Settings are editable at runtime, and one ladder inversion was found doing it
 
