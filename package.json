@@ -1,7 +1,7 @@
 {
   "name": "wallwright",
   "productName": "Wallwright",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "author": "Jeff Crouse <jeff.crouse@hyperquake.com>",
   "description": "Wallwright: a montage of live, interactive web pages laid out on one large LED wall, arrangeable at the wall itself. Electron + WebContentsView.",

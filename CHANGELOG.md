@@ -18,6 +18,49 @@ built from, so nothing is unrecoverable.
 
 ## Unreleased
 
+_Nothing yet._
+
+## 0.1.2 - 2026-08-31
+
+The first release since the audit, and the first with evidence behind it rather
+than intent. Three things make it worth taking over 0.1.1 even though nothing is
+deployed yet.
+
+**Security.** Chromium 150 to 152, via Electron 43.4.1 to 44.1.0. On top of that,
+several holes closed since the last tag: SSO popups had no navigation policy at
+all, a panel could be pointed at any URL scheme and any partition, permissions are
+now deny-by-default with a per-view escape hatch, the overlay has a CSP, and the
+navigation policy now covers `will-redirect` and `will-frame-navigate` rather than
+only `will-navigate`. That last one mattered: four of six redirect shapes used to
+slip straight past enforcement, including the one that looks exactly like an
+expired session bouncing to an identity provider.
+
+**Longevity, measured.** A completed 72-hour soak at 0.45 MB/hour against a
+pre-registered 15, with the `control` arm flat. The memory countermeasure is
+switched on for the first time, at a limit derived from that run rather than
+guessed. The watchdog is bounded; it used to reload a broken URL every thirty
+seconds forever.
+
+**It is checked now, not just documented.** The self-test runs on Windows and
+macOS on every push and is 85 assertions, up from 21 at the last tag. Coverage
+thresholds, `eslint:recommended`, and an assertion over the built `.asar` that the
+dev harness did not ship.
+
+### Known limitations
+
+- **Unsigned on both platforms.** SmartScreen warns and Gatekeeper quarantines.
+  Certificates are still to be obtained; see README "Signing".
+- **`memoryLimitMb` is 2000, measured against the soak lineup**, not against the
+  real Honeywell dashboards, which do not exist yet. Treat it as a guard against
+  runaway growth rather than a tuned figure, and re-derive it when the real URLs
+  land. `config/wall.json` also still ships `example.com` placeholders, so the file
+  is edited before deployment anyway.
+- **`selfTest()` still ships inside `main.js`**, roughly 600 lines, inert without
+  both `WALLWRIGHT_DEV=1` and `WALLWRIGHT_SELFTEST=1`. Moving it out of the bundle
+  was on the audit's list and was not done.
+- **Not verified on the show PC**, and nothing here speaks to the real dashboards:
+  no evidence about whether a real IdP session survives three days of idleness.
+
 ### The watchdog, the discard path and the fatal page, all asserted
 
 Second batch of the group A conversion. The self-test is 85 assertions, up from 73.

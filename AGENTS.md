@@ -50,9 +50,15 @@ and the decisions that need Jeff before some of it can be finalized.
 
 ## Where this was left
 
-Released as **v0.1.1** with Windows and macOS artifacts, built on Potion's
-self-hosted runners. `npm test` is 270 tests, `npm run selftest` is 85 end to end
-assertions, and both gate every build. CI is green.
+**`package.json` is 0.1.2 and `CHANGELOG.md` has its section written.** The
+artifacts only exist once a `v0.1.2` tag is pushed, which is what
+`build-windows.yml` and `build-mac.yml` fire on; until then **v0.1.1** is still the
+newest published release. The headline of 0.1.2 is Electron 43.4.1 to 44.1.0
+(Chromium 150 to 152) plus the navigation, permission and popup hardening done
+since the last tag.
+
+`npm test` is 270 tests, `npm run selftest` is 85 end to end assertions, and both
+gate every build. CI is green.
 
 The app is **Wallwright**, the repository is `Potion/wallwright`, and the npm
 package is `wallwright`. The `hon-` prefix is gone with the rest of the Honeywell
