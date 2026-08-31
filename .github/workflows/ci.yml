@@ -115,7 +115,7 @@ jobs:
       - run: npm test
 
       # The only coverage src/main.js has: it drives the real app over real IPC.
-      # 73 assertions covering panel CRUD, the overlay in every mode, preset
+      # 85 assertions covering panel CRUD, the overlay in every mode, preset
       # recall, the refresh and recycle timers, the watchdog's guard against a
       # deleted panel, the SSO popup rule, permission guarding, the overlay CSP,
       # a synthetic pointer drag through the layout editor's geometry, and the

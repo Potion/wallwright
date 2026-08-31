@@ -3083,6 +3083,196 @@ function selfTest() {
     check(25, 'it docked itself', autoDocked, `mode=${state.mode} after idleReturnMs=600`);
     config.idleReturnMs = realIdle;
     clearIdle();
+
+    // ---- 26: the watchdog recovers a crashed background panel --------------
+    //
+    // No unit test can reach this: it needs a real renderer to kill. The ladder
+    // is covered in test/watchdog.test.js; what was unproven is that a real
+    // render-process-gone is wired to it at all.
+    //
+    // Both halves of the rule, because the first attempt at this step only wrote
+    // the second and failed against correct code. Every panel in
+    // config/selftest.json has an empty url, and scheduleReload() returns early
+    // for those on purpose - a placeholder cannot fail, so retrying it is noise.
+    // A test that does not know that reads "no reload" as a broken watchdog.
+    step(26, 'the watchdog reloads a panel whose renderer died');
+    config.views.forEach((v) => {
+      touched.delete(v.id);
+      present.delete(v.id);
+    });
+    dockGrid({ animate: false });
+    await until(() => state.mode === 'grid');
+    const bgSpec = config.views[1];
+    const bgId = bgSpec.id;
+    const scratchURL = dataUrl('<body style="background:#111;color:#eee">selftest</body>');
+
+    watchdog.delete(bgId);
+    const emptyUrlCrashes = counters.snapshot().totals.crashes || 0;
+    contentViews[1].webContents.forcefullyCrashRenderer();
+    await until(() => (counters.snapshot().totals.crashes || 0) > emptyUrlCrashes, 8000);
+    await soon(1500); // a clear multiple of the 1000ms base delay
+    check(
+      26,
+      'a panel with no url is not retried, because a placeholder cannot fail',
+      !wd(bgId).pending && wd(bgId).attempts === 0,
+      `attempts=${wd(bgId).attempts}`
+    );
+
+    // Now give it something that can actually be reloaded. A data: url, so this
+    // still needs no network and cannot be flaky because a site was slow.
+    bgSpec.url = scratchURL;
+    loadPanel(contentViews[1], bgSpec);
+    await until(() => !contentViews[1].webContents.isLoading(), 10000);
+    watchdog.delete(bgId);
+    const crashesBefore = counters.snapshot().totals.crashes || 0;
+    const reloadsBefore26 = counters.snapshot().totals.watchdogReloads || 0;
+    contentViews[1].webContents.forcefullyCrashRenderer();
+    const sawCrash = await until(
+      () => (counters.snapshot().totals.crashes || 0) > crashesBefore,
+      8000
+    );
+    check(26, 'the crash was noticed', sawCrash, `crashes was ${crashesBefore}`);
+    const scheduled = await until(() => !!wd(bgId).pending || wd(bgId).attempts > 0, 8000);
+    check(
+      26,
+      'a reload was scheduled for it',
+      scheduled,
+      `attempts=${wd(bgId).attempts} deferred=${wd(bgId).deferred}`
+    );
+    const reloaded = await until(
+      () => (counters.snapshot().totals.watchdogReloads || 0) > reloadsBefore26,
+      10000
+    );
+    check(26, 'and the reload actually ran', reloaded);
+    bgSpec.url = '';
+    loadPanel(contentViews[1], bgSpec);
+
+    // ---- 27: and defers one somebody is looking at -------------------------
+    //
+    // The half that protects an operator. A promoted panel is in use by
+    // definition, so a crash must NOT be reloaded under them; it waits for the
+    // dock. docs/validation.md calls this "the one that protects an operator's
+    // login" and it had never been exercised end to end.
+    step(27, 'the watchdog defers a crashed panel that is promoted');
+    const upSpec = config.views[0];
+    const upId = upSpec.id;
+    upSpec.url = scratchURL;
+    loadPanel(contentViews[0], upSpec);
+    await until(() => !contentViews[0].webContents.isLoading(), 10000);
+    watchdog.delete(upId);
+    activate(0);
+    await until(() => state.mode === 'active' && state.activeIndex === 0);
+    const defersBefore = counters.snapshot().totals.watchdogDeferrals || 0;
+    const reloadsBefore = counters.snapshot().totals.watchdogReloads || 0;
+    contentViews[0].webContents.forcefullyCrashRenderer();
+    const deferred = await until(
+      () => (counters.snapshot().totals.watchdogDeferrals || 0) > defersBefore,
+      8000
+    );
+    check(27, 'the reload was deferred, not run', deferred, `deferred=${wd(upId).deferred}`);
+    // The negative half, which is the assertion that actually matters. Waited a
+    // clear multiple of the 1000ms base delay, so "not yet" cannot pass as
+    // "never".
+    await soon(2500);
+    check(
+      27,
+      'nothing reloaded it while it was promoted',
+      (counters.snapshot().totals.watchdogReloads || 0) === reloadsBefore,
+      `watchdogReloads went ${reloadsBefore} -> ${counters.snapshot().totals.watchdogReloads}`
+    );
+    dockGrid({ animate: false });
+    await until(() => state.mode === 'grid');
+    const reloadedAfterDock = await until(
+      () => (counters.snapshot().totals.watchdogReloads || 0) > reloadsBefore,
+      10000
+    );
+    check(27, 'and docking released it', reloadedAfterDock);
+    upSpec.url = '';
+    loadPanel(contentViews[0], upSpec);
+
+    // ---- 28: Shift+Esc does not write the config -------------------------
+    //
+    // Esc-to-save is covered by step 14's neighbours. This is the other half, and
+    // the guarantee is specifically about the file: the overlay's Shift+Esc sends
+    // editExit({ discard: true }), which is exitEdit({ save: false }).
+    step(28, 'discarding a layout edit leaves the config file alone');
+    const cfgBefore = fs.readFileSync(configPath, 'utf8');
+    const editVictim = config.views[0];
+    const gridBefore = { ...editVictim.grid };
+    enterEdit();
+    await until(() => state.mode === 'edit');
+    editVictim.grid = { ...gridBefore, x: gridBefore.x + 40 };
+    exitEdit({ save: false });
+    await until(() => state.mode !== 'edit');
+    check(
+      28,
+      'the config file on disk is byte-identical',
+      fs.readFileSync(configPath, 'utf8') === cfgBefore
+    );
+    // Reported rather than asserted. Discard skips the write; it does not put the
+    // in-memory layout back, so the wall keeps showing the dragged position until
+    // it restarts. That may be fine and it may be surprising given the overlay
+    // labels the key "discard", but it is a product question, not a regression,
+    // and a self-test is the wrong place to decide it.
+    step(
+      28,
+      `after discard, in-memory grid.x is ${editVictim.grid.x} (was ${gridBefore.x}); ` +
+        'discard skips the save, it does not revert the live layout'
+    );
+    editVictim.grid = gridBefore;
+    refreshLayout();
+
+    // ---- 29: the fatal-config page renders ---------------------------------
+    //
+    // pages.js is unit tested, but docs/validation.md notes the rendered page has
+    // never actually been looked at. This looks at it: the real string, through
+    // the real dataUrl(), in a real renderer.
+    step(29, 'the fatal-config page renders readable text');
+    const fatalMsg = `selftest-fatal-${RUN_ID}`;
+    const probeView = contentViews[1];
+    probeView.webContents.loadURL(dataUrl(fatalPage(APP_NAME, fatalMsg, configPath)));
+    await until(() => !probeView.webContents.isLoading(), 10000);
+    const fatalText = await probeView.webContents.executeJavaScript(
+      'document.body ? document.body.innerText : ""',
+      true
+    );
+    check(29, 'it shows the message it was given', String(fatalText).includes(fatalMsg));
+    check(29, 'and names the config file', String(fatalText).includes('config'));
+    loadPanel(probeView, config.views[1]);
+
+    // ---- 30: hideInactiveWhenActive, measured -------------------------------
+    //
+    // An open product decision rather than a regression guard, so this measures
+    // and reports, and only asserts the part that would be a bug: that hidden
+    // panels come back. Step 22 already measured the option OFF - full rate on
+    // macOS, about 1Hz on Windows - and the comparison is the whole point.
+    step(30, 'hideInactiveWhenActive, measured rather than assumed');
+    const realHide = config.hideInactiveWhenActive;
+    config.hideInactiveWhenActive = true;
+    await markOf(
+      1,
+      'window.__wwTicks = 0; clearInterval(window.__wwT); window.__wwT = setInterval(() => window.__wwTicks++, 50); 1'
+    );
+    activate(0);
+    await until(() => state.mode === 'active' && state.activeIndex === 0);
+    await soon(watchMs);
+    const hiddenTicks = await markOf(1, 'window.__wwTicks || 0');
+    await markOf(1, 'clearInterval(window.__wwT); 1');
+    step(
+      30,
+      `hidden panel ran ${hiddenTicks} ticks of a 50ms interval in ${watchMs}ms ` +
+        `(step 22 measured ${ticks} with the option off, same run)`
+    );
+    dockGrid({ animate: false });
+    await until(() => state.mode === 'grid');
+    config.hideInactiveWhenActive = realHide;
+    refreshLayout();
+    check(
+      30,
+      'every panel is visible again after docking',
+      contentViews.every((cv) => cv && cv.getVisible && cv.getVisible() !== false)
+    );
+
     for (const id of spares) deletePanel(id);
 
     if (failures.length) {

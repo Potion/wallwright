@@ -51,7 +51,7 @@ and the decisions that need Jeff before some of it can be finalized.
 ## Where this was left
 
 Released as **v0.1.1** with Windows and macOS artifacts, built on Potion's
-self-hosted runners. `npm test` is 270 tests, `npm run selftest` is 73 end to end
+self-hosted runners. `npm test` is 270 tests, `npm run selftest` is 85 end to end
 assertions, and both gate every build. CI is green.
 
 The app is **Wallwright**, the repository is `Potion/wallwright`, and the npm

@@ -1408,14 +1408,20 @@ Run `npm run dev`.
       `idleReturnMs` briefly rather than waiting minutes, then restores it.
       Proven to fail by making `resetIdle()` never arm the timer. Still signed in
       afterwards is covered separately by `npm run probe:session`.
-- [ ] **Watchdog, both paths.** Kill a background panel's renderer from Activity
-      Monitor and confirm a backoff reload in the log. Then kill the _promoted_
-      panel's renderer and confirm the log says `deferring reload ... until it is
-no longer active`, and that it only reloads after docking. The second path
-      is the one that protects an operator's login.
-- [ ] **Discarding a layout edit.** Esc-to-save is confirmed. Confirm the other
-      half: edit, press Shift+Esc, and the change must be dropped rather than
-      written to config.
+- [x] **Watchdog, both paths.** **Automated: self-test steps 26 and 27**, which
+      kill a real renderer with `forcefullyCrashRenderer()`. 26 covers the
+      background path and also asserts the rule it first tripped over: a panel
+      with no url is deliberately _not_ retried, because a placeholder cannot
+      fail. 27 is the one that protects an operator's login, and its load-bearing
+      assertion is the negative one, that nothing reloaded the panel while it was
+      promoted. Proven to fail by disabling the safety rule, which reddens it with
+      `watchdogReloads went 1 -> 2`.
+- [x] **Discarding a layout edit.** **Automated: self-test step 28**, which
+      asserts the config file is byte-identical after a discard. It also records
+      something the checklist did not ask about: discard skips the save, it does
+      **not** put the live layout back, so the wall keeps showing the dragged
+      position until it restarts. See "Discard does not revert the live layout"
+      below.
 - [ ] **Editing the production config.** Layout edit mode writes to whatever
       `WALLWRIGHT_CONFIG` points at. Run once against `config/wall.json`, edit, save,
       and check `git diff` is a clean readable change to `grid` and `zoom` only,
@@ -1423,10 +1429,12 @@ no longer active`, and that it only reloads after docking. The second path
 - [ ] **Cmd/Ctrl+F toggle.** Flips between owning the display and an 85% window.
       Confirmed working on macOS; confirm the windowed layout is still correct
       and that toggling back restores 1:1.
-- [ ] **The fatal-config path.** Point `WALLWRIGHT_CONFIG` at a deliberately broken
-      file. A readable error page should appear instead of a stack trace. The
-      code path exists and is unit tested, but the rendered page has never
-      actually been looked at.
+- [x] **The fatal-config path.** **Automated: self-test step 29**, which renders
+      the real `fatalPage()` through the real `dataUrl()` in a real renderer and
+      reads the text back, so the page has now actually been looked at. Proven to
+      fail by making `fatalPage()` return an empty body. Pointing
+      `WALLWRIGHT_CONFIG` at a broken file end to end is still manual: the
+      self-test runs inside an already-booted app.
 - [ ] **Single-instance lock.** Launch twice. The second should refuse and exit
       rather than fighting over the wall. Never exercised.
 - [ ] **Promote/return animation.** `transitionMs` is 220. Animated `setBounds`
