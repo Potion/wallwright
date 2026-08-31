@@ -1439,14 +1439,15 @@ Run `npm run dev`.
       rather than fighting over the wall. Never exercised.
 - [ ] **Promote/return animation.** `transitionMs` is 220. Animated `setBounds`
       is confirmed not to throw, but the animation itself has not been watched.
-- [ ] **`hideInactiveWhenActive`.** Default `false`. Flip it to `true` and check
-      whether the hidden panels keep running or get throttled. **Half answered
-      already, and the premise moved:** with this option `false`, self-test step
-      22 measures a backgrounded panel at about 1Hz on Windows and at the full
-      rate on macOS, so occlusion alone throttles on the deployment target. The
-      question is now "throttled versus hidden" rather than "full rate versus
-      throttled". See "Windows throttles a backgrounded panel to about 1Hz"
-      above.
+- [x] **`hideInactiveWhenActive`.** **Measured: self-test steps 22 and 30.** On
+      Windows a backgrounded panel runs at about 1Hz whether the option is on or
+      off, so turning it on costs nothing on the deployment target; on macOS the
+      occluded case runs at the full rate, which makes the option look expensive
+      on a dev machine and will mislead anyone who evaluates it there. The
+      liveness half of the trade is settled. **What is left is a different
+      question, now under group A's successor work:** how much GPU load hiding
+      actually saves, which needs the real 4K wall rather than this harness. See
+      "`hideInactiveWhenActive` costs nothing on Windows" above.
 
 ### B. Needs the real dashboards
 
@@ -1648,6 +1649,58 @@ config and every deployed `userData` copy to settle a question of taste.
 lint and prettier. The self-test is what carries this, since none of `src/main.js`
 has unit tests, and it drives preset recall, edit mode, select mode, panel CRUD and
 a real pointer drag, which between them exercise all five extractions.
+
+### `hideInactiveWhenActive` costs nothing on Windows, because occlusion already throttles
+
+Measured by self-test steps 22 and 30, which run the same 50ms interval in a
+panel's renderer while a _different_ panel is promoted, once with the option off
+and once with it on, in the same run on both platforms.
+
+| platform               | occluded (`false`, today's default)   | hidden (`true`)    |
+| ---------------------- | ------------------------------------- | ------------------ |
+| macOS `hqmbp26-crouse` | **60 ticks** in 3000ms, the full rate | 3 ticks, about 1Hz |
+| Windows `PROTO1-P8`    | **3 ticks**, about 1Hz                | 3 ticks, about 1Hz |
+
+**On Windows the two columns are the same number.** Chromium already throttles an
+occluded renderer to roughly 1Hz there, so hiding it as well changes nothing that
+this measurement can see. Windows is the deployment target.
+
+That answers the question `AGENTS.md` has carried since the option was written,
+which was framed as "hiding a view may throttle it" and treated throttling as the
+cost of turning it on. On the machine that matters, **that cost is already being
+paid** whether the option is on or off.
+
+**What is settled and what is not.** The liveness cost of turning it on is zero on
+Windows: measured, not argued. The _benefit_ is still unmeasured. Nothing here says
+how much GPU load hiding four 4K panels actually saves, only that it does not cost
+anything in update rate. So the option is now safe to enable, rather than known to
+be worth enabling, and the remaining work is to measure the GPU side rather than
+the liveness side.
+
+**The default has deliberately not been changed.** Enabling it is a one-line config
+edit whenever somebody wants the headroom, and doing it on the strength of a
+half-measured trade is exactly the kind of decision this file exists to prevent.
+
+**A caveat on the macOS column, because it will mislead somebody otherwise.** A dev
+machine shows backgrounded panels running at full speed and hidden ones crawling,
+which makes the option look expensive. That impression is a property of macOS and
+does not transfer. Anyone evaluating this on the dev machine will reach the
+opposite conclusion from the correct one.
+
+#### Discard does not revert the live layout
+
+Also found by this batch, and reported rather than changed, because it is a product
+question. The overlay labels Shift+Esc "discard", and it sends
+`editExit({ discard: true })`, which is `exitEdit({ save: false })`. That skips the
+write to `config/wall.json` and nothing else: the in-memory `config.views` keeps the
+edit, so a panel dragged during the session **stays where it was dragged** until the
+app restarts.
+
+Self-test step 28 asserts the guarantee that is actually documented, that the file
+on disk is byte-identical, and logs the in-memory position rather than asserting it.
+Whether "discard" should also put the layout back is a decision for Jeff: the
+current behaviour is defensible, since the wall is a live thing and yanking panels
+back under somebody could be worse, but it is not what the word implies.
 
 ### Windows throttles a backgrounded panel to about 1Hz; macOS does not
 

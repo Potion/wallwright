@@ -18,6 +18,52 @@ built from, so nothing is unrecoverable.
 
 ## Unreleased
 
+### The watchdog, the discard path and the fatal page, all asserted
+
+Second batch of the group A conversion. The self-test is 85 assertions, up from 73.
+
+Steps 26 and 27 kill a real renderer with `forcefullyCrashRenderer()`, and neither
+watchdog path had ever been exercised end to end. 26 covers the background path;
+27 is the half that protects an operator's login, and its load-bearing assertion is
+the negative one, that nothing reloaded the panel while somebody had it promoted.
+Disabling the safety rule reddens it with `watchdogReloads went 1 -> 2`.
+
+26 also asserts a rule its own first version tripped over. Every panel in
+`config/selftest.json` has an empty url, and `scheduleReload()` returns early for
+those on purpose, because a placeholder cannot fail and retrying it is noise. The
+first attempt therefore read correct behaviour as a broken watchdog. Both halves of
+the rule are asserted now.
+
+28 asserts the config file is byte-identical after Shift+Esc. 29 renders the real
+`fatalPage()` in a real renderer and reads the text back, so the page this project
+had never actually looked at has now been looked at.
+
+**And `hideInactiveWhenActive` is answered, after being open since the option was
+written.** Steps 22 and 30 measure the same 50ms interval in a backgrounded panel,
+once with the option off and once on, on both platforms:
+
+| platform | occluded (off)                | hidden (on)        |
+| -------- | ----------------------------- | ------------------ |
+| macOS    | 60 ticks in 3000ms, full rate | 3 ticks, about 1Hz |
+| Windows  | 3 ticks, about 1Hz            | 3 ticks, about 1Hz |
+
+On Windows, the deployment target, the two columns are the same number: Chromium
+already throttles an occluded renderer, so hiding it as well costs nothing this can
+measure. The framing in `AGENTS.md`, that hiding "may throttle" the view, treated
+that as the cost of enabling it, and on the machine that matters the cost is
+already being paid either way.
+
+The liveness half is settled; the benefit half is not. Nothing here measures how
+much GPU load hiding four 4K panels saves. So the option is safe to enable rather
+than known to be worth enabling, and **the default is deliberately unchanged**. The
+macOS column is also a trap worth naming: a dev machine makes the option look
+expensive, and anyone evaluating it there reaches the opposite conclusion from the
+correct one.
+
+Reported and not changed: Shift+Esc skips the save but does not put the live layout
+back, so a panel dragged during a session stays dragged until the app restarts,
+while the overlay labels that key "discard".
+
 ### Five things the checklist asked a person to look at, now asserted
 
 `AGENTS.md` has long carried a convention: add a `check()` to the self-test for

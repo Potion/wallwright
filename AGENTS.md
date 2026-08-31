@@ -138,14 +138,16 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
 6. **Auto-launch on boot and crash restart**, for unattended operation.
 7. **Cursor auto-hide when idle.** Needs a native Windows approach; there is no
    cross-platform Electron API.
-8. **Decide `hideInactiveWhenActive`** (default off). Several live dashboards on
-   a 4K wall is real GPU load, but hiding a view may throttle it. **The premise
-   has moved:** self-test step 22 measured a backgrounded panel at about 1Hz on
-   Windows against the full rate on macOS, with this option already `false`, so
-   occlusion alone throttles on the deployment target. The trade is "throttled
-   versus hidden", not "full rate versus throttled", which weakens the
-   GPU-headroom argument. Measuring the `true` case is still worth doing; see
-   "Windows throttles a backgrounded panel" in `docs/validation.md`.
+8. **Decide `hideInactiveWhenActive`** (default off). **The liveness half is
+   answered: on Windows it costs nothing.** Self-test steps 22 and 30 measure a
+   backgrounded panel at about 1Hz on Windows whether the option is on or off,
+   because Chromium already throttles an occluded renderer there. On macOS the
+   same panel runs at the full rate when merely occluded, so a dev machine makes
+   the option look expensive and will mislead you. What is still unmeasured is
+   the benefit: how much GPU load hiding four 4K panels actually saves. So it is
+   safe to enable rather than known to be worth enabling, and the default is
+   deliberately unchanged. See "`hideInactiveWhenActive` costs nothing on
+   Windows" in `docs/validation.md`.
 9. **Sustained run against the real dashboards**, once the URLs exist, for session
    expiry rather than memory. Four live public dashboards measured 1513MB.
 10. Optional polish: an idle countdown before auto-return, and a manual "reset
