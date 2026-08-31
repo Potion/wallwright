@@ -163,7 +163,16 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
    exactly which secrets each needs. Unsigned builds are warned about by
    SmartScreen and quarantined by Gatekeeper, and a signed build is easier for
    Honeywell IT to approve.
-7. **Auto-launch on boot and crash restart**, for unattended operation.
+7. **~~Auto-launch on boot~~ built; crash restart is scripted and unrun.** The
+   `autoStart` setting registers a login item, reconciled at every boot and
+   toggleable from the control page. It is unverified on Windows: the only Windows
+   machine here is a CI runner, and registering a login item on one is not an
+   acceptable side effect of a build. **A login item cannot cover a crash** - it
+   fires once at logon, and a main process that has died cannot restart itself -
+   so that half is `scripts/wallwright-autostart.ps1`, a Scheduled Task with
+   restart-on-failure, committed deliberately unrun. Both are in
+   `docs/validation.md` group C. Do not use the two together: they launch two
+   copies at logon and the second one exits on the single-instance lock.
 8. **Cursor auto-hide when idle.** Needs a native Windows approach; there is no
    cross-platform Electron API.
 9. **Decide `hideInactiveWhenActive`** (default off). **The liveness half is
@@ -256,6 +265,14 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
   went red.
 - The control surface is unauthenticated by design and binds to loopback. If
   that ever changes, it needs auth first, not a comment.
+- **Auto-start is two mechanisms for two failures, and they do not substitute for
+  each other.** `src/autostart.js` is the login item: it answers "the machine
+  rebooted". Only something outside this process can answer "the app died", which
+  is `scripts/wallwright-autostart.ps1`. Anything that runs a GUI app from a
+  Scheduled Task must make the exe the action itself, never a `.cmd` or
+  `powershell` wrapper: the wrapper returns immediately, the task completes, and
+  restart-on-failure becomes decoration. `docs/soak-run.md` has the run where
+  that was discovered.
 - Anything that reloads a panel on a timer must skip panels in use. `eligible()`
   in `src/main.js` is the single check and upkeep, the memory ladder and the
   watchdog all route through it; do not write a second one. It replaced an earlier

@@ -112,6 +112,28 @@ jobs:
       # runner cannot catch a violation of that.
       - run: npm run lint
 
+      # scripts/*.ps1 run on a show PC and on the soak machine, never here, so
+      # nothing else would notice a syntax error until somebody was standing in
+      # front of the wall. Parsing is not running: this proves the file is valid
+      # PowerShell, not that it does the right thing. That distinction matters
+      # most for wallwright-autostart.ps1, which is committed deliberately unrun.
+      - name: Parse the PowerShell scripts
+        shell: pwsh
+        run: |
+          $bad = 0
+          Get-ChildItem scripts -Filter *.ps1 | ForEach-Object {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) {
+              $bad++
+              Write-Host "::error file=scripts/$($_.Name)::$($errors.Count) parse error(s)"
+              $errors | ForEach-Object { Write-Host "  line $($_.Extent.StartLineNumber): $($_.Message)" }
+            } else {
+              Write-Host "  ok  $($_.Name)"
+            }
+          }
+          if ($bad) { exit 1 }
+
       - run: npm test
 
       # The only coverage src/main.js has: it drives the real app over real IPC.

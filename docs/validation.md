@@ -1741,6 +1741,42 @@ Not chased further because it is orthogonal to the audit and may simply need the
 permission granted to the terminal. The next person to touch the README images
 will hit it first.
 
+### The login item API, read without setting it
+
+`npm run probe` Q5, added 2026-08-31 with the auto-start work. Read-only on
+purpose: registering a login item writes into the account of whoever runs the
+probe, and the macOS CI job runs on `hqmbp26-crouse`, a person's own machine.
+
+On macOS, Electron 44.1.0:
+
+```json
+"loginItem": {
+  "keys": ["executableWillLaunchAtLogin", "openAtLogin", "status", "wasOpenedAtLogin"],
+  "openAtLogin": false,
+  "hasExecutableWillLaunchAtLogin": true,
+  "wasOpenedAtLogin": false
+},
+"hasSetLoginItemSettings": true,
+"packaged": false,
+"execPath": ".../node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
+```
+
+Two things worth having asked.
+
+**`executableWillLaunchAtLogin` is present on macOS**, which the Electron docs
+describe as Windows-only. So the field cannot be used as a platform probe, and
+`src/autostart.js` does not: it branches on `process.platform`.
+
+**And `execPath` is the argument for the guard in `desiredLoginItem()`.**
+Unpackaged, it is the Electron binary inside `node_modules`, not Wallwright.
+Honouring `autoStart` in a dev run would put "start Electron at login" into
+somebody's account, pointed at a path that disappears with the next `npm ci`.
+That is why the function returns `openAtLogin: false` with a reason whenever
+`app.isPackaged` is false, rather than trusting nobody will set the flag while
+developing.
+
+`openAtLogin: false` on the dev machine also confirms the probe changed nothing.
+
 ## Still to verify
 
 Grouped by where each item can actually be done. Nothing here is known broken;
@@ -1880,8 +1916,33 @@ macOS passing does not settle the target platform. This group is the real risk.
 - [ ] **Run a dmg on a Mac that did not build it.** The arm64 dmg was verified
       by mounting it and reading the bundle, but never installed and launched
       from a quarantined download, which is the path anyone else will take.
-- [ ] **Auto-launch on boot and crash restart.** Not built. Required for
-      unattended operation.
+- [~] **Auto-launch on boot.** **Built, and unverified on Windows.** The
+  `autoStart` setting registers a login item through
+  `app.setLoginItemSettings()`, reconciled at every boot and toggleable from the
+  control page. The decision logic is unit-tested in `test/autostart.test.js` and
+  the API shape is probed above, but **no login item has ever actually been
+  registered on Windows**, because the only Windows machines available are CI
+  runners and a person's development Mac, and writing to either one's login items
+  is not an acceptable side effect of a build. Confirm on the show PC: tick it,
+  log out, log in, and see the wall come up.
+- [ ] **Crash restart, via `scripts/wallwright-autostart.ps1`.** Written and
+      **never run**. A login item cannot do this: it fires once at logon, and a
+      main process that has died cannot restart itself. The script registers a
+      Scheduled Task with `RestartCount`/`RestartInterval`, an
+      `InteractiveToken` principal for console session 1, `ExecutionTimeLimit`
+      PT0S and `Priority` 4. The load-bearing detail is that its action is the
+      **exe directly**: `docs/soak-run.md` records `SoakWall` sitting in state
+      _Ready_ rather than _Running_ because PowerShell does not block on a GUI
+      app, and a completed task cannot restart anything. CI parses every
+      `scripts/*.ps1` on the Windows runner, which proves the file is valid
+      PowerShell and nothing more. Confirm four things on the show PC: the task
+      reads **Running** while the app is up, `taskkill` brings it back,
+      Ctrl+Shift+Q does **not**, and the machine auto-logs-in so an at-logon
+      trigger fires at all.
+- [ ] **That the login item and the task are not both on.** They are two
+      answers to the same question and together they launch two copies at logon.
+      The single-instance lock means the second exits, so this is survivable
+      rather than dangerous, but it should be checked rather than discovered.
 - [x] **Overlay alpha compositing on Windows.** Confirmed 2026-08-25 on
       HQ-PROTO-MINI-2. See "Overlay compositing on Windows: WORKS" above. The
       blocker was never the code and not really the runner either: it needed a
