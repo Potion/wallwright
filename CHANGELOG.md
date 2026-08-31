@@ -18,7 +18,31 @@ built from, so nothing is unrecoverable.
 
 ## Unreleased
 
-_Nothing yet._
+### The shipped config is heavy now, and the control surface is on
+
+`config/wall.json` shipped four `example.com` placeholders, which meant nothing
+about the default resembled what a wall actually carries: no WebGL, no live data,
+no dashboard that keeps working after it has loaded. It now ships two Grafana Play
+boards, `earth.nullschool.net` and `windy.com`. Every one was checked to respond
+before being committed.
+
+Two of them, the Grafana board and earth, are content the 72-hour soak measured,
+so `memoryLimitMb` 2000 is now derived against something related to what ships.
+**Only related, not identical**, and `_memoryBaseline.recheck_when` says so: two of
+the four soak arms were local pages served by the dev harness on
+`localhost:8787`, and `src/dev` does not ship, so they could not be used here.
+The limit transfers approximately. It is still a runaway guard rather than a tuned
+figure until it is re-derived against the real dashboards.
+
+**The control surface now ships enabled**, on `127.0.0.1:8901`. It was `port: 0`,
+which is off. This is a real change in default posture and not a tidy-up: every
+install now opens a loopback listener it did not open before. The surface is
+unauthenticated by design and the guard is the bind address, per `AGENTS.md`, and
+it is turned on because it is where the settings live. `control.port: 0` still
+turns it off.
+
+Unchanged and still blocked on the real dashboards: `allowedOrigins` is still
+empty, and the per-panel `zoom` values are still 1 rather than tuned.
 
 ## 0.1.2 - 2026-08-31
 
