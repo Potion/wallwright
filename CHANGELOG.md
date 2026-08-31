@@ -44,6 +44,38 @@ turns it off.
 Unchanged and still blocked on the real dashboards: `allowedOrigins` is still
 empty, and the per-panel `zoom` values are still 1 rather than tuned.
 
+### A layout save was deleting every panel's permission grants
+
+Asking a simple question — can `allowedOrigins` be edited from the new settings
+panel? — turned up two silent failures around the per-panel security fields. The
+answer to the question is **no, and it should not be**: `allowedOrigins` is
+per-view, the settings panel edits three top-level scalars, and scoping it is a
+deliberate config edit. But the checking found this.
+
+**`serializeView()` wrote `allowedOrigins` and forgot `allowedPermissions`.**
+`saveViews()` rewrites **every** view, so dragging one panel in the editor and
+pressing Esc deleted the permission grants of all of them. It failed closed —
+absent means none, the opposite polarity to `allowedOrigins` — so nothing broke
+loudly. A dashboard simply stopped being allowed its camera, with nothing in the
+log to say why. That matters more since 0.1.2, where permissions became
+deny-by-default precisely because a session with no handler grants microphone and
+camera in silence.
+
+**And `updatePanel()` accepted fields it cannot apply, in silence.** Posting
+`{"patch":{"allowedOrigins":["https://idp.example.com"]}}` to `/api/panel`
+answered **HTTP 200** and did nothing at all. That is worse than refusing: the
+caller is left believing a navigation guard is in place when none is. Four fields
+are patchable — `url`, `label`, `zoom`, `partition` — and anything else is now a
+400 that names it and says the two security lists are edited in the config file.
+`grid` arrives by the editor's own path and `id` is identity, so neither belongs
+here either.
+
+**A malformed `zoom` was the same defect in different clothes**, dropped on the
+floor while the caller was told ok. It is refused now.
+
+The self-test is 101 assertions, up from 96. Both new refusals were proven to
+redden.
+
 ### A settings panel, so tuning a limit is not an RDP session
 
 `memoryLimitMb` was measured from a 72-hour soak and then written into a JSON

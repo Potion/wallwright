@@ -39,6 +39,11 @@ function fakeWall() {
         if (patch && patch.url === 'file:///etc/passwd') {
           return { ok: false, reason: 'file: is not allowed for a panel' };
         }
+        const patchable = ['url', 'label', 'zoom', 'partition'];
+        const unknown = Object.keys(patch || {}).filter((k) => !patchable.includes(k));
+        if (unknown.length) {
+          return { ok: false, reason: 'not a patchable field: ' + unknown.join(', ') };
+        }
         return { ok: true };
       },
       // Mirrors the real action: a verdict, and no notFound, because there is
@@ -365,6 +370,35 @@ test('settings is a POST route only', async () => {
   const wall = fakeWall();
   await withServer(wall.actions, async (base) => {
     const r = await request(base, 'GET', '/api/settings');
+    assert.equal(r.status, 404);
+  });
+});
+
+// A field the wall cannot apply must come back as a 400 that names it. It used
+// to be a 200: the caller was told the patch had been applied when nothing had
+// happened, which for allowedOrigins means believing a navigation guard is in
+// place when it is not.
+test('a panel patch naming an unapplicable field is a 400, not a silent 200', async () => {
+  const wall = fakeWall();
+  await withServer(wall.actions, async (base) => {
+    const r = await request(base, 'POST', '/api/panel', {
+      id: 'a',
+      patch: { allowedOrigins: ['https://idp.example.com'] },
+    });
+    assert.equal(r.status, 400);
+    assert.match(json(r).error, /allowedOrigins/);
+  });
+});
+
+// The distinction the route has always drawn and must keep drawing: a panel that
+// does not exist is a 404, a patch that is refused is a 400.
+test('an unapplicable field on a missing panel is still a 404', async () => {
+  const wall = fakeWall();
+  await withServer(wall.actions, async (base) => {
+    const r = await request(base, 'POST', '/api/panel', {
+      id: 'nope',
+      patch: { allowedOrigins: [] },
+    });
     assert.equal(r.status, 404);
   });
 });

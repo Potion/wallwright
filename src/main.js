@@ -27,7 +27,13 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
-const { loadConfig, saveViews, saveSettings, settingsVerdict } = require('./config');
+const {
+  loadConfig,
+  saveViews,
+  saveSettings,
+  settingsVerdict,
+  panelPatchVerdict,
+} = require('./config');
 const { clampGrid, snapGrid, snapNewGrid } = require('./layout');
 const {
   isOriginAllowed,
@@ -726,6 +732,13 @@ function updatePanel(id, patch) {
   if (i < 0) return { ok: false, notFound: true, reason: `no panel "${id}"` };
   const v = config.views[i];
 
+  // Shape and fields first, then the value rules. Neither existed once: a patch
+  // naming a field this cannot apply - allowedOrigins, allowedPermissions,
+  // refreshMs - was accepted in silence and answered ok, which left the caller
+  // believing a security-relevant field had been set when nothing had happened.
+  const shape = panelPatchVerdict(patch);
+  if (!shape.ok) return shape;
+
   // Checked before anything is applied, so a rejected patch cannot leave the
   // panel half-updated with a new label and its old URL. Neither field was
   // checked at all before: patch.url was String()-coerced and handed straight to
@@ -743,7 +756,9 @@ function updatePanel(id, patch) {
   }
 
   if (patch.label !== undefined) v.label = String(patch.label);
-  if (patch.zoom !== undefined && Number.isFinite(patch.zoom) && patch.zoom > 0) {
+  // No second guard on the value: panelPatchVerdict() has already refused a zoom
+  // that is not a positive number, rather than dropping it and answering ok.
+  if (patch.zoom !== undefined) {
     v.zoom = patch.zoom;
     contentViews[i].webContents.setZoomFactor(panelZoom(i));
   }
@@ -2732,6 +2747,39 @@ function selfTest() {
       'a valid patch still applies',
       goodPatch.ok === true && guarded.label === 'accepted by selftest'
     );
+
+    // A field this cannot apply used to be accepted in silence: the caller was
+    // told ok and nothing happened, which is the worst answer for a
+    // security-relevant field like allowedOrigins. It is refused by name now, and
+    // the reason says where those two are edited instead.
+    const notPatchable = updatePanel(guarded.id, {
+      allowedOrigins: ['https://anything.example.com'],
+    });
+    check(
+      18,
+      'a field updatePanel cannot apply is refused, not ignored',
+      notPatchable.ok === false,
+      notPatchable.reason
+    );
+    check(
+      18,
+      'and the refusal names it',
+      /allowedOrigins/.test(notPatchable.reason || ''),
+      notPatchable.reason
+    );
+    check(
+      18,
+      'the panel really did not gain it',
+      guarded.allowedOrigins === undefined ||
+        (Array.isArray(guarded.allowedOrigins) && guarded.allowedOrigins.length === 0)
+    );
+
+    // Same defect wearing different clothes: a malformed zoom was dropped on the
+    // floor while the caller was told ok.
+    const zoomBefore = guarded.zoom;
+    const badZoom = updatePanel(guarded.id, { zoom: 'big' });
+    check(18, 'a malformed zoom is refused', badZoom.ok === false, badZoom.reason);
+    check(18, 'and the zoom is unchanged', guarded.zoom === zoomBefore);
 
     const missing = updatePanel('no-such-panel', { label: 'x' });
     check(

@@ -11,6 +11,8 @@ const {
   saveViews,
   saveSettings,
   settingsVerdict,
+  panelPatchVerdict,
+  serializeView,
 } = require('../src/config');
 
 const good = () => ({
@@ -728,4 +730,104 @@ test('what saveSettings writes still loads', () => {
   const loaded = loadConfig(f);
   assert.strictEqual(loaded.memoryLimitMb, 2000);
   assert.strictEqual(loaded.autoStart, true);
+});
+
+// ---- what survives a layout save -------------------------------------------
+
+// saveViews rewrites EVERY view, so anything serializeView forgets is deleted
+// from all of them the first time somebody drags one panel and presses Esc.
+// allowedPermissions was forgotten, and it failed closed and silently: absent
+// means no permissions, so a dashboard simply stopped being allowed its camera.
+test('allowedPermissions survives being serialized', () => {
+  const out = serializeView({
+    ...view(),
+    allowedPermissions: ['media', 'geolocation'],
+  });
+  assert.deepStrictEqual(out.allowedPermissions, ['media', 'geolocation']);
+});
+
+test('both per-panel security lists survive a real layout save', () => {
+  const body = good();
+  body.views[0].allowedOrigins = ['https://idp.example.com'];
+  body.views[0].allowedPermissions = ['media'];
+  const f = tmpConfig(body);
+
+  // Exactly what exitEdit({ save: true }) does: hand back every view.
+  saveViews(f, withDefaults(JSON.parse(fs.readFileSync(f, 'utf8'))).views);
+
+  const after = JSON.parse(fs.readFileSync(f, 'utf8')).views[0];
+  assert.deepStrictEqual(after.allowedOrigins, ['https://idp.example.com']);
+  assert.deepStrictEqual(after.allowedPermissions, ['media']);
+});
+
+// Empty is the default for both and must not be written back as though it had
+// been authored - and for allowedPermissions the empty array and the absent key
+// mean the same thing anyway.
+test('neither list is invented when it is empty', () => {
+  const out = serializeView({ ...view(), allowedOrigins: [], allowedPermissions: [] });
+  assert.ok(!('allowedOrigins' in out));
+  assert.ok(!('allowedPermissions' in out));
+});
+
+// ---- which panel fields a patch may carry -----------------------------------
+
+test('the four patchable fields are accepted', () => {
+  for (const patch of [
+    { url: 'https://x/2' },
+    { label: 'renamed' },
+    { zoom: 1.5 },
+    { partition: 'persist:other' },
+  ]) {
+    assert.strictEqual(panelPatchVerdict(patch).ok, true, JSON.stringify(patch));
+  }
+});
+
+// The whole point of this change: these used to answer ok and do nothing, which
+// left the caller believing a security-relevant field had been set.
+test('a field updatePanel cannot apply is refused by name, not ignored', () => {
+  for (const key of [
+    'allowedOrigins',
+    'allowedPermissions',
+    'refreshMs',
+    'recycleMs',
+    'neverRecycle',
+    'grid',
+    'id',
+  ]) {
+    const v = panelPatchVerdict({ [key]: 1 });
+    assert.strictEqual(v.ok, false, key + ' should be refused');
+    assert.match(v.reason, new RegExp(key));
+  }
+});
+
+test('the refusal says where the config-file fields are edited instead', () => {
+  const v = panelPatchVerdict({ allowedOrigins: ['https://x'] });
+  assert.match(v.reason, /config file/);
+});
+
+test('one good field beside one bad one is refused entirely', () => {
+  const v = panelPatchVerdict({ label: 'fine', allowedOrigins: [] });
+  assert.strictEqual(v.ok, false);
+  assert.match(v.reason, /allowedOrigins/);
+});
+
+// Same defect as an unknown key in different clothes: it was dropped on the
+// floor while the caller was told ok.
+test('a zoom that is not a positive number is refused, not dropped', () => {
+  for (const bad of ['big', 0, -1, NaN, Infinity, null]) {
+    assert.strictEqual(panelPatchVerdict({ zoom: bad }).ok, false, String(bad));
+  }
+  assert.strictEqual(panelPatchVerdict({ zoom: 0.5 }).ok, true);
+});
+
+test('an empty or malformed panel patch is refused rather than a no-op', () => {
+  for (const bad of [{}, null, undefined, [], 'url=x', 7]) {
+    assert.strictEqual(panelPatchVerdict(bad).ok, false, JSON.stringify(bad));
+  }
+});
+
+// An empty url is "not set yet", which is the normal state of a panel the editor
+// has just drawn, so it must stay patchable.
+test('an empty url is still a legal patch', () => {
+  assert.strictEqual(panelPatchVerdict({ url: '' }).ok, true);
 });
