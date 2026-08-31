@@ -50,9 +50,15 @@ and the decisions that need Jeff before some of it can be finalized.
 
 ## Where this was left
 
-Released as **v0.1.1** with Windows and macOS artifacts, built on Potion's
-self-hosted runners. `npm test` is 264 tests, `npm run selftest` is 62 end to end
-assertions, and both gate every build. CI is green.
+**`package.json` is 0.1.2 and `CHANGELOG.md` has its section written.** The
+artifacts only exist once a `v0.1.2` tag is pushed, which is what
+`build-windows.yml` and `build-mac.yml` fire on; until then **v0.1.1** is still the
+newest published release. The headline of 0.1.2 is Electron 43.4.1 to 44.1.0
+(Chromium 150 to 152) plus the navigation, permission and popup hardening done
+since the last tag.
+
+`npm test` is 270 tests, `npm run selftest` is 85 end to end assertions, and both
+gate every build. CI is green.
 
 The app is **Wallwright**, the repository is `Potion/wallwright`, and the npm
 package is `wallwright`. The `hon-` prefix is gone with the rest of the Honeywell
@@ -80,26 +86,46 @@ See "Overlay compositing on Windows: WORKS" in `docs/validation.md`. None of the
 countermeasure ships switched off because the number that would engage it has to
 come from a measured baseline.
 
-**The 72-hour soak ENDED EARLY and must be re-run.** It ran 6.9 of 72 hours on
-HQ-PROTO-MINI-2 and was shut down at the machine on 2026-08-25T20:17:36Z; the
-machine was then needed for other work, so it was harvested and torn down on
-2026-08-26. **No verdict**: the threshold is judged on the final 24 hours of 72, so
-`_memoryBaseline` stays `NOT MEASURED YET` and `memoryLimitMb` stays 0. The 6.9
-hours are still worth reading - the `control` arm was flat, nothing crashed, and
-the drift estimators agreed at ~3.4 MB/hour - and are written up in
-`docs/validation.md` under "The 72-hour run: ENDED EARLY". Data in
-`docs/soak/2026-08-25-partial/`.
+**The 72-hour soak is DONE and it PASSED.** The third attempt ran the full 72.0
+hours on HQ-PROTO-MINI-2, `2026-08-27T20:31:56Z` to `2026-08-30T20:32:07Z`, and was
+harvested on 2026-08-31. **0.45 MB/hour over the final 24 hours against a
+pre-registered 15**, median cross-check 0.89 agreeing, 4320/4320 samples, zero
+crashes, zero restarts, zero watchdog reloads, no reboot. The `control` arm, the
+only one whose growth would have indicted the product, did not climb. `heavy`
+plateaued at exactly 121MB from h+24 onward, which closes the one question the
+16-hour checkpoint left open. Written up in `docs/validation.md` under "The 72-hour
+run, third attempt: COMPLETE"; data in `docs/soak/2026-08-30-complete/`.
 
-Planned re-run: **Thursday 2026-08-27**. It starts from zero; a memory curve cannot
-be resumed across a gap. `docs/soak-run.md` is the runbook and needs no changes -
-the harness worked, including telling us how it ended. The machine is currently
-released: no `Soak*` task remains and both `FCAT*` tasks are back to `Ready`.
+**It is reported as partial, and deliberately so.** One human input instant reached
+the `control` panel at `2026-08-29T00:58Z` when somebody closed an unrelated app on
+that machine. Any human input is a pre-registered invalidating condition, so it is
+disclosed and argued rather than omitted: `lastUsedSecAgo` proves it was exactly one
+event, it never touched the other three arms, and it is 19.6 hours before the scored
+window opens. The verdict stands on a clean final 24 hours.
 
-Two things to know before touching that machine. It belongs to another project, and
-`FCATWallLauncher` and `FCATSoakSampler` are disabled for the duration and are
-re-enabled by the teardown script. And **do not RDP to it**: a remote session
-hijacks console session 1 and blanks the physical display, which is a
-pre-registered invalidating condition.
+**The memory countermeasure is switched ON**, for the first time since it was
+written. `_memoryBaseline` is filled in with `p95_24h` 1367, `peak_72h` 1537 and
+`driftMbPerHour` 0.45, and `config/wall.json` now ships `memoryLimitMb` **2000** and
+`memoryHardLimitMb` **2750** from the committed rule. What unblocked it: Jeff
+confirmed on 2026-08-31 that the show PC's HDMI is always in the discrete GPU port,
+the same path the baseline was measured on, so it transfers. If a show PC ever runs
+off the motherboard port the baseline is void and must be re-measured.
+
+**The limit is a guard, not a tuned figure.** It was measured against the soak
+lineup, not the real Honeywell dashboards, which are the thing most likely to move
+`p95_24h`. Re-measure when the real URLs land.
+
+Also settled by the run: the `workingSetSize` versus private-bytes gap, open since
+the original 699MB datum, is **1.44 and stable**, not the drifting figure the
+partial runs suggested. The app's own number reads about 44% high.
+
+**The machine is torn down and given back**, on 2026-08-31, after the archive was
+taken and hash-verified. Checked independently of the teardown script's own output:
+stage and `%APPDATA%\Wallwright` gone, no Wallwright or node processes, no `Soak*`
+task, and all three `FCAT*` tasks back to `Ready`. The app had reached 90.8 hours of
+continuous uptime. It belongs to another project, so if you stage a run there again:
+**do not RDP to it**, because a remote session hijacks console session 1 and blanks
+the physical display, which is a pre-registered invalidating condition.
 
 Parked, and now largely moot: making the self-hosted runner photograph the wall.
 The question it existed to answer has been answered another way, on a machine that
@@ -110,40 +136,50 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
 
 ## Build / harden next (TODO)
 
-1. **Re-run the soak, Thursday 2026-08-27.** The first attempt got 6.9 of 72
-   hours; see `docs/soak-run.md` for the runbook and `docs/validation.md` for what
-   the partial run did and did not settle. Re-stage the build, start it, and this
-   time **tell whoever else uses that machine that it is running**: the run was
-   ended by hand at the machine, which nothing in the harness can prevent. When it
-   finishes: harvest before tearing down, judge the final 24 hours against the
-   pre-registered 15 MB/hour, quantify the workingSetSize versus private-bytes gap
-   at the plateau (partially answered: about 60% high and shrinking), and set
-   `memoryLimitMb` from the rule in `config/wall.json` `_memoryBaseline` rather
-   than by guessing. A limit inside the normal operating band was measured taking
-   memory _up_, from 1513 to 1885MB.
-2. **Walk the checklist in `docs/validation.md` "Still to verify".** Grouped by
+1. **Re-measure the memory baseline once the real dashboards are wired.** The
+   countermeasure is now on at `memoryLimitMb` 2000, but that came from the soak
+   lineup, not from the real Honeywell dashboards. They are the one thing most
+   likely to move `p95_24h`, and a limit that lands inside the normal operating band
+   is worse than no limit: measured, it took memory _up_ from 1513 to 1885MB while
+   recycling every five seconds. Treat 2000 as a runaway guard until then, and
+   re-derive it from `_memoryBaseline`'s rule against real content.
+2. **Fix the two harness defects the run exposed**, before any fourth soak. The
+   grab task's console knocks the window to scale 0.999 and the geometry check
+   cannot see it; the sampler should record the app's reported scale as a column.
+   And `urlDrifted` is a per-sample state reported under an event's name, which
+   makes a passing summary read as a failure. Both are written up in
+   `docs/validation.md`.
+3. **Walk the checklist in `docs/validation.md` "Still to verify".** Grouped by
    where each check can be done: (A) on the dev machine now, (B) blocked on the
    real dashboard URLs, (C) needs the show PC.
-3. **Real URLs and wall geometry.** Set the dashboard URLs, the wall resolution,
+4. **Real URLs and wall geometry.** Set the dashboard URLs, the wall resolution,
    the panel rectangles and the per-panel `zoom` against the real dashboards.
    Everything else is guesswork until this lands.
-4. **Scope `allowedOrigins`** to the real Honeywell IdP and app domains once
+5. **Scope `allowedOrigins`** to the real Honeywell IdP and app domains once
    known. Enforcement already exists for `will-navigate` and
    `setWindowOpenHandler`, so this is a config edit. It is a misconfiguration
    guard, not hardening: only administrators have input.
-5. **Code signing**, both platforms. No certificates yet. README "Signing" lists
+6. **Code signing**, both platforms. No certificates yet. README "Signing" lists
    exactly which secrets each needs. Unsigned builds are warned about by
    SmartScreen and quarantined by Gatekeeper, and a signed build is easier for
    Honeywell IT to approve.
-6. **Auto-launch on boot and crash restart**, for unattended operation.
-7. **Cursor auto-hide when idle.** Needs a native Windows approach; there is no
+7. **Auto-launch on boot and crash restart**, for unattended operation.
+8. **Cursor auto-hide when idle.** Needs a native Windows approach; there is no
    cross-platform Electron API.
-8. **Decide `hideInactiveWhenActive`** (default off). Several live dashboards on
-   a 4K wall is real GPU load, but hiding a view may throttle it. Mock 4's ticker
-   exists to measure this.
-9. **Sustained run against the real dashboards**, once the URLs exist, for session
-   expiry rather than memory. Four live public dashboards measured 1513MB.
-10. Optional polish: an idle countdown before auto-return, and a manual "reset
+9. **Decide `hideInactiveWhenActive`** (default off). **The liveness half is
+   answered: on Windows it costs nothing.** Self-test steps 22 and 30 measure a
+   backgrounded panel at about 1Hz on Windows whether the option is on or off,
+   because Chromium already throttles an occluded renderer there. On macOS the
+   same panel runs at the full rate when merely occluded, so a dev machine makes
+   the option look expensive and will mislead you. What is still unmeasured is
+   the benefit: how much GPU load hiding four 4K panels actually saves. So it is
+   safe to enable rather than known to be worth enabling, and the default is
+   deliberately unchanged. See "`hideInactiveWhenActive` costs nothing on
+   Windows" in `docs/validation.md`.
+10. **Sustained run against the real dashboards**, once the URLs exist, for
+    session expiry rather than memory. Four live public dashboards measured
+    1513MB.
+11. Optional polish: an idle countdown before auto-return, and a manual "reset
     panel" action.
 
 ## Open decisions (need Jeff)
@@ -185,7 +221,18 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
   `docs/validation.md`.
 - npm scripts must run on Windows too, so no `FOO=1 cmd` prefixes and no shell
   loops. Put the environment setup inside the node script instead.
-- Nothing under `src/dev/` ships: `electron-builder.yml` excludes it.
+- Nothing under `src/dev/` ships: `electron-builder.yml` excludes it, and two
+  things now enforce that rather than trusting it. `test/packaging.test.js` asserts
+  the config on every push, including that the `!src/dev/**` negation still comes
+  **after** the `src/**/*` include that would otherwise match it, because the order
+  is load-bearing and swapping two adjacent lines looks harmless in review.
+  `npm run check:asar` reads the built artifact in the build workflows. Adding
+  anything to the `files` list means re-reading both.
+- A new top-level `src/*.js` needs a `test/<name>.test.js`, or an entry in
+  `KNOWN_UNTESTED` in `test/packaging.test.js` **and** in the table in
+  `docs/validation.md`. The coverage thresholds cannot catch a module with no tests
+  at all: Node's reporter only lists files the test process loaded, so an untested
+  module is absent from the report rather than shown as 0%.
 - The README is the non-developer entry point: what the thing does, with
   screenshots, before any build instructions. Regenerate the images with
   `npm run capture` after a visible change to the wall or the editor.
@@ -199,14 +246,35 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
   check the code, not just the log.
 - New logic that could live without electron should. Extraction is what got
   `src/layout.js` and `src/control-server.js` to full coverage; anything left in
-  `main.js` is testable only by the self-test.
+  `main.js` is testable only by the self-test. This cuts finer than whole
+  functions: `memorySnapshot()` is one call to `app.getAppMetrics()` wrapped in a
+  try, and the arithmetic over the result is `summarizeMetrics()` in
+  `src/upkeep.js`, where a captured payload can be handed to it. A function that
+  reaches for an Electron API in the middle of a calculation is two functions.
 - Add a `check()` to the self-test for behaviour you would otherwise verify by
   eye, and make sure it can actually fail. It once only logged, so nothing ever
   went red.
 - The control surface is unauthenticated by design and binds to loopback. If
   that ever changes, it needs auth first, not a comment.
-- Anything that reloads a panel on a timer must skip panels in use. `inUse()` is
-  the single check; do not write a second one.
+- Anything that reloads a panel on a timer must skip panels in use. `eligible()`
+  in `src/main.js` is the single check and upkeep, the memory ladder and the
+  watchdog all route through it; do not write a second one. It replaced an earlier
+  `inUse()`, which this list named until 2026-08-31.
+- **One helper per repeated decision, and these four are the ones that exist.**
+  `loadPanel(view, v)` is the only place that decides what a panel loads, including
+  what an empty URL means; `indexOfId(id)` is the only id-to-index lookup;
+  `contentWebPreferences(v)` is the security posture for both surfaces that render
+  a third party's page; `showPanelsInGrid()` and `raiseOverlay()` are the mode-entry
+  sequences. Each of the first three existed already and was being bypassed by
+  inline copies that agreed with it only by coincidence. `contentWebPreferences` is
+  the one to be careful with: a second copy that drifts on `contextIsolation` or
+  `sandbox` is a security regression that still logs people in perfectly.
+- Ask `panelStateAt(i)` for one panel and `panelStates()` for all of them. Building
+  the whole array to index one element out of it is what made the upkeep tick
+  quadratic: `eligible()` did it, and `runUpkeep()` calls `eligible()` once per
+  panel per second. `panelStateAt()` returns null for an index whose panel is gone,
+  which is a real case rather than a defensive one, because `deletePanel()` splices
+  a spec out while that view's handlers are still attached.
 - Do not build markup with inline event handlers in `src/control-page.js`. The
   first version did and the escaping collapsed into an unparseable page. Use
   `data-` attributes and the delegated listener.

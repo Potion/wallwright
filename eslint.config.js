@@ -26,7 +26,18 @@ const globals = {
   },
 };
 
+// eslint:recommended is the baseline, applied to the same file set as the rules
+// below rather than globally, so it does not start linting dist/ or the mock
+// pages. The rules after it are additions and tightenings, not replacements: where
+// both define a rule, the later object wins, which is why `no-unused-vars` is
+// restated with the `_` prefix exemption this repo uses.
+const js = require('@eslint/js');
+
 module.exports = [
+  {
+    ...js.configs.recommended,
+    files: ['src/**/*.js', 'test/**/*.js', 'eslint.config.js'],
+  },
   {
     files: ['src/**/*.js', 'test/**/*.js', 'eslint.config.js'],
     languageOptions: {

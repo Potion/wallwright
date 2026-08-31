@@ -18,6 +18,373 @@ built from, so nothing is unrecoverable.
 
 ## Unreleased
 
+_Nothing yet._
+
+## 0.1.2 - 2026-08-31
+
+The first release since the audit, and the first with evidence behind it rather
+than intent. Three things make it worth taking over 0.1.1 even though nothing is
+deployed yet.
+
+**Security.** Chromium 150 to 152, via Electron 43.4.1 to 44.1.0. On top of that,
+several holes closed since the last tag: SSO popups had no navigation policy at
+all, a panel could be pointed at any URL scheme and any partition, permissions are
+now deny-by-default with a per-view escape hatch, the overlay has a CSP, and the
+navigation policy now covers `will-redirect` and `will-frame-navigate` rather than
+only `will-navigate`. That last one mattered: four of six redirect shapes used to
+slip straight past enforcement, including the one that looks exactly like an
+expired session bouncing to an identity provider.
+
+**Longevity, measured.** A completed 72-hour soak at 0.45 MB/hour against a
+pre-registered 15, with the `control` arm flat. The memory countermeasure is
+switched on for the first time, at a limit derived from that run rather than
+guessed. The watchdog is bounded; it used to reload a broken URL every thirty
+seconds forever.
+
+**It is checked now, not just documented.** The self-test runs on Windows and
+macOS on every push and is 85 assertions, up from 21 at the last tag. Coverage
+thresholds, `eslint:recommended`, and an assertion over the built `.asar` that the
+dev harness did not ship.
+
+### Known limitations
+
+- **Unsigned on both platforms.** SmartScreen warns and Gatekeeper quarantines.
+  Certificates are still to be obtained; see README "Signing".
+- **`memoryLimitMb` is 2000, measured against the soak lineup**, not against the
+  real Honeywell dashboards, which do not exist yet. Treat it as a guard against
+  runaway growth rather than a tuned figure, and re-derive it when the real URLs
+  land. `config/wall.json` also still ships `example.com` placeholders, so the file
+  is edited before deployment anyway.
+- **`selfTest()` still ships inside `main.js`**, roughly 600 lines, inert without
+  both `WALLWRIGHT_DEV=1` and `WALLWRIGHT_SELFTEST=1`. Moving it out of the bundle
+  was on the audit's list and was not done.
+- **Not verified on the show PC**, and nothing here speaks to the real dashboards:
+  no evidence about whether a real IdP session survives three days of idleness.
+
+### The watchdog, the discard path and the fatal page, all asserted
+
+Second batch of the group A conversion. The self-test is 85 assertions, up from 73.
+
+Steps 26 and 27 kill a real renderer with `forcefullyCrashRenderer()`, and neither
+watchdog path had ever been exercised end to end. 26 covers the background path;
+27 is the half that protects an operator's login, and its load-bearing assertion is
+the negative one, that nothing reloaded the panel while somebody had it promoted.
+Disabling the safety rule reddens it with `watchdogReloads went 1 -> 2`.
+
+26 also asserts a rule its own first version tripped over. Every panel in
+`config/selftest.json` has an empty url, and `scheduleReload()` returns early for
+those on purpose, because a placeholder cannot fail and retrying it is noise. The
+first attempt therefore read correct behaviour as a broken watchdog. Both halves of
+the rule are asserted now.
+
+28 asserts the config file is byte-identical after Shift+Esc. 29 renders the real
+`fatalPage()` in a real renderer and reads the text back, so the page this project
+had never actually looked at has now been looked at.
+
+**And `hideInactiveWhenActive` is answered, after being open since the option was
+written.** Steps 22 and 30 measure the same 50ms interval in a backgrounded panel,
+once with the option off and once on, on both platforms:
+
+| platform | occluded (off)                | hidden (on)        |
+| -------- | ----------------------------- | ------------------ |
+| macOS    | 60 ticks in 3000ms, full rate | 3 ticks, about 1Hz |
+| Windows  | 3 ticks, about 1Hz            | 3 ticks, about 1Hz |
+
+On Windows, the deployment target, the two columns are the same number: Chromium
+already throttles an occluded renderer, so hiding it as well costs nothing this can
+measure. The framing in `AGENTS.md`, that hiding "may throttle" the view, treated
+that as the cost of enabling it, and on the machine that matters the cost is
+already being paid either way.
+
+The liveness half is settled; the benefit half is not. Nothing here measures how
+much GPU load hiding four 4K panels saves. So the option is safe to enable rather
+than known to be worth enabling, and **the default is deliberately unchanged**. The
+macOS column is also a trap worth naming: a dev machine makes the option look
+expensive, and anyone evaluating it there reaches the opposite conclusion from the
+correct one.
+
+Reported and not changed: Shift+Esc skips the save but does not put the live layout
+back, so a panel dragged during a session stays dragged until the app restarts,
+while the overlay labels that key "discard".
+
+### Five things the checklist asked a person to look at, now asserted
+
+`AGENTS.md` has long carried a convention: add a `check()` to the self-test for
+behaviour you would otherwise verify by eye, and make sure it can actually fail.
+`docs/validation.md` then carried seventeen things to verify by eye, none of them
+ticked. The mechanical ones are now self-test steps 21 to 25, running on every push
+on both target platforms. The self-test is 73 assertions, up from 64.
+
+- **No reload on promote or dock** (21), the `SPEC.md` guarantee that stops every
+  promote costing an operator whatever they had typed. A mark on the renderer's
+  `window` survives both, or the view reloaded.
+- **A backgrounded panel keeps running** (22), with a real interval in the other
+  panel's renderer. A wall whose other three dashboards freeze the moment one is
+  promoted is a wall showing stale numbers.
+- **One Esc docks the wall** (23), sent to the panel's own `webContents`, because
+  Esc is handled per view rather than as a `globalShortcut`.
+- **Per-panel zoom does not leak** (24).
+- **Idle auto-return** (25), which arms `idleReturnMs` briefly rather than waiting
+  minutes. Only administrators have input, so this timer is the common path back
+  to the grid, not an edge case.
+
+**The Windows runner then failed two of them, and both were the test's fault, not
+the app's.** Which is the job doing exactly what it exists for.
+
+Step 24 expected a zoom factor of 0.75 and got 0.6. The app was right:
+`panelZoom()` is `zoom * layout.scale`, and `PROTO1-P8` fits a 1280x800 wall into
+a 1024x768 display at 0.8. The assertion had a scale of 1.0 baked into it, which is
+invisible on a dev machine where the scale _is_ 1.0. **That is the second time that
+exact mistake has been made here**, after three steps once passed wall units to
+`ww:addPanel` for the same reason, and the second time this runner is the only
+thing that caught it. It compares against `panelZoom()` now.
+
+Step 22 expected at least three ticks of a 50ms interval and got one. That one is
+not a test bug but a finding: **Windows throttles an occluded renderer to about
+1Hz, and macOS runs it at the full rate** - 1 tick in 1200ms against 60 in 3000ms,
+with `hideInactiveWhenActive` `false` in both cases, so the panel was visible and
+merely covered. On the deployment target, promoting one dashboard drops the other
+three to roughly one update a second. Nothing is broken, but "the other panels keep
+running" is a weaker promise on the show platform than the dev machine suggests.
+The step now asserts the renderer did not stop and logs the observed count, because
+asserting a rate would be asserting one platform's behaviour and calling the other
+a failure.
+
+That also part-answers the open `hideInactiveWhenActive` question, whose premise
+was that leaving it off keeps panels at full rate. On Windows it does not, so the
+trade is "throttled versus hidden" rather than "full rate versus throttled", and
+the GPU-headroom argument for it is correspondingly weaker.
+
+Each was proven to fail against the behaviour it guards before being counted, and
+one of them did not. The first version of the zoom check sampled only after
+docking, and a leak injected into `activate()` did not trip it: `showPanelsInGrid()`
+re-applies each panel's own factor on the way out, so the fault was scrubbed before
+the assertion ran. It now samples while promoted as well, and catches it. A check
+that passes against broken code is worse than no check, which is the whole reason
+the convention says to try to break it.
+
+### The last duplications, and one comment that had stopped being true
+
+Phase 6, and the end of the audit.
+
+`loadPanel()` has always carried a comment calling itself "the one place that
+decides" what an empty URL means, so the watchdog could not disagree with every
+other load path. It was not the one place. Three other sites built the same
+`v.url || placeholderURL(v)` expression inline and called `loadURL` themselves:
+creating a view, applying a URL change, and the control surface's reload. They
+agreed with it by coincidence, and none of them got the catch that is there
+because a torn-down `webContents` throws synchronously. All six load sites route
+through it now.
+
+Checked rather than assumed while in there: `loadURL` rejects on `ERR_ABORTED`,
+which is routine, and `unhandledRejection` logs at fatal level. That looked like it
+might mean spurious fatal lines in the log. It does not, and the completed soak
+says so: zero unhandled rejections in 5787 lines over 90 hours. Left alone, but
+there is now one place to change it if that ever stops being true.
+
+`indexOfId()` existed and four other places inlined the same `findIndex` anyway,
+one of them a local arrow inside `checkMemory()` that shadowed it with an identical
+body. All four call the helper now.
+
+A scan for repeated four-line runs found three blocks, and collapsed them into
+`contentWebPreferences(v)`, `showPanelsInGrid()` and `raiseOverlay()`. **The first
+is the one that mattered**: `contextIsolation: true`, `nodeIntegration: false`,
+`sandbox: true` and the shared activity preload were written out twice, for the two
+surfaces that display somebody else's page. Divergence there is a security
+regression, not an inconsistency, and an SSO popup with `contextIsolation`
+accidentally off still logs people in perfectly. The popup copy even carried a
+comment saying its preload had to match the content views', which is exactly the
+kind of invariant a comment cannot hold and a function can.
+
+The fourth item on the phase's list, naming drift, was looked for and is not there:
+no `panelId` or `viewId`, and `v` for a config spec against `view` for the Electron
+object holds across every module. The one real inconsistency, `config.views`
+holding things the runtime calls panels, is in the config schema, and renaming it
+would break every committed config and every deployed profile to settle a question
+of taste. Recorded as a non-finding rather than turned into churn.
+
+### Three gates that were documented rather than enforced
+
+The rest of the audit's phase 4. Each of these was a fact `docs/validation.md`
+already asserted, with nothing checking it stayed true.
+
+**`eslint:recommended` is the baseline**, with the five hand-picked rules kept on
+top of it, scoped to the same file set so the linter does not wander into `dist/`
+or the mock pages. The codebase passed on the first run with no fixes. That is a
+weaker result than it sounds, since a config that fails to apply and a config that
+finds nothing look identical, so it was checked: a file with unreachable code and
+a duplicate object key produced exactly `no-unreachable` and `no-dupe-keys`,
+neither of which the five hand-written rules cover. `@eslint/js` and `js-yaml` are
+now explicit devDependencies rather than borrowed from other packages' trees.
+
+**`npm run coverage` fails below 97% lines, 87% branches and 95% functions**,
+against measured 98.26 / 89.08 / 97.08, and runs on the hosted CI job. Set just
+under the current numbers deliberately: a ratchet against regression rather than a
+target, since a threshold set exactly at today's figure turns an unrelated refactor
+into a red build.
+
+Those thresholds cannot see the blind spot this project already knew about, so it
+is covered separately. Node's reporter lists only files the test process loaded, so
+a module with no tests does not show as 0%, it does not show at all; the reported
+98% is over 2424 of 6406 lines, and true coverage of shipped source is 38%.
+`test/packaging.test.js` now requires every top-level `src/*.js` to have a matching
+test file or be one of four listed exceptions, checks the reverse so an exception
+that grows a test has to come off the list, and has a tripwire for entries naming
+files that no longer exist.
+
+**What ships is now asserted in two layers.** `electron-builder.yml` has always
+excluded `src/dev/**` and nothing ever checked. The fast layer is
+`test/packaging.test.js`, running on every push: the exclusion exists, `asar` is
+on, the default config still ships, and the negation still comes _after_ the
+`src/**/*` include that would otherwise match it. That last one is the sharp edge,
+because the order is load-bearing and swapping two adjacent lines silently ships
+the harness while looking like a tidy-up. The true layer is `npm run check:asar`,
+wired into both build workflows, which reads the built artifact rather than the
+config that produced it, and checks both directions: nothing under `src/dev/`,
+`test/`, `docs/`, `.github/` or `node_modules/electron/`, and the entry point, the
+three renderer bridges, `config/wall.json` and `package.json` all present.
+
+Every one of these was proven against a real failure rather than just written. Each
+config assertion was checked by making the exact edit it guards and watching that
+test and no other go red. The artifact check was proven by deleting the exclusion
+and running a real build: 34 dev files shipped, including the mock server that
+binds a port and every probe, against 22 entries and a clean pass with the
+exclusion in place. That was one line away from shipping at any point in this
+project's life.
+
+### Electron 44, and every probe answer re-run against it
+
+Bumped 43.4.1 to **44.1.0**, Chromium 150.0.7871.224 to 152.0.7977.65. Taken after
+the soak and after the memory cleanups, which is the order the audit plan fixed:
+a probe answer recorded against one runtime is evidence about that runtime and
+nothing else, so a bump invalidates the lot until they are re-run.
+
+**All six probes were re-run and every answer came back identical.** That is the
+result worth having, more than a green test suite, because these are the findings
+the design rests on: child views still reorder in place rather than detaching,
+macOS still needs simple fullscreen rather than kiosk, a reload still costs a login
+nothing while a recycle still clears `sessionStorage`, an animated page still does
+not fake input, and the navigation matrix came back row for row, including the two
+rows that forced `hardenView()` to police `will-redirect` and `will-frame-navigate`
+as well as `will-navigate`.
+
+Every breaking change in Electron 44 was checked against the source rather than
+assumed away, and none of them lands: the `clipboard` module's removal from the
+renderer and its move to Promises (not used, except `navigator.clipboard` in a mock
+dev page, which is what the change points you at), the null `webContents` on
+`select-client-certificate` (not listened for), `net.request` frame destinations
+(`net` unused), 32-bit Windows and Linux armv7l (x64 and arm64 only), Unity on
+Linux, and the pre-macOS 13 login item attributes. One is worth remembering rather
+than dismissing: **macOS 12 is no longer supported**, so a self-hosted macOS runner
+on Monterey would stop working.
+
+The caveat this creates is recorded rather than glossed. `_memoryBaseline` was
+measured on 43.4.1, and a whole Chromium major plus ANGLE moving to static linking
+are both in the GPU path the soak needed a VRAM column to see at all. The limit is
+a runaway guard sitting 633MB above the measured p95, so there is no reason to
+think it stops being sane, but it now describes a runtime one major behind what
+ships. The re-measure already scheduled against the real dashboards covers this
+too; the thing to avoid is bumping Electron again between a baseline being measured
+and the wall going live.
+
+### The memory ladder keeps its state in one place, and the upkeep tick is linear
+
+Three cleanups to the memory code, held back until the soak finished because that
+run existed to characterise exactly this code, and landing changes underneath it
+would have made the baseline describe something that no longer shipped.
+
+`memorySnapshot()` was the third writing of the same sum over
+`app.getAppMetrics()`. Two earlier copies had already been collapsed into it, but
+the survivor still could not be tested, because it reached for the Electron API in
+the middle of the arithmetic. It now calls `summarizeMetrics()` in `src/upkeep.js`,
+which is that same arithmetic in a form a test can hand a captured payload to, and
+keeps only the part that genuinely needs Electron: making the call, and surviving
+it throwing. That failure path is now covered, and it had a sharper edge than it
+looked. `memorySnapshot()` assigns the result's `byPid` straight into the module's
+last-reading cache, so a summary without maps would turn one failed metrics call
+into a `TypeError` on the next tick.
+
+The ladder's six loose module globals are one `memoryLadder` object. They were
+never really six independent variables, and the comment above them claimed all of
+them reset when memory recovers, which was not true: `recyclesSinceReduction`
+counts rebuilds that reclaimed nothing and deliberately outlives an episode,
+because giving up is a judgement about the whole run rather than about one spike.
+Which fields clear together is now a `clearMemoryPressure()` function rather than
+four assignments a reader has to check against a comment.
+
+The upkeep tick was quadratic. `eligible()` called `panelStates()` and indexed one
+element out of the result, and `runUpkeep()` calls `eligible()` once per panel per
+second, so _n_ panels built _n²_ panel states a second. There is now a
+`panelStateAt(i)` for one panel, with `panelStates()` mapping over it for the
+memory ladder, which ranks candidates against each other and so genuinely needs
+all of them. Four panels made this cheap enough to ignore, but panels are created
+at runtime and the count is not fixed at four.
+
+`panelStateAt()` returns null when no panel is at that index, and `eligible()` now
+answers "no such panel" rather than dereferencing undefined. That case is real
+rather than defensive: `deletePanel()` splices a spec out while that view's own
+handlers are still attached, so the watchdog arrives with an index of -1. It used
+to throw, and because `uncaughtException` rethrows, it took the whole wall down.
+Self-test step 16 already reproduces it, and now covers the guard as well.
+
+### The 72-hour soak finished, and there is finally a memory baseline
+
+Third attempt, and the first to reach a verdict. It ran the full 72.0 hours on
+HQ-PROTO-MINI-2 from `2026-08-27T20:31:56Z` and **passed**: 0.45 MB/hour over the
+final 24 hours against a threshold of 15 fixed before T0, with the median
+cross-check at 0.89 agreeing in sign and magnitude. 4320 of 4320 samples, no failed
+polls, one `runId` for the whole run, zero crashes, zero failed loads, zero watchdog
+reloads, and no reboot inside the window.
+
+The `control` arm is the one that mattered, because it is a static page with no
+timers, no network and no DOM changes, so growth there would have been growth in
+Electron or in Wallwright rather than in anybody's dashboard. It did not climb: a 73
+to 79MB band across three days, +0.021 MB/hour over the scored window, and a step
+back down at h+66.5. `heavy` settled at exactly 121MB from h+24 onward, which
+retires the 1.1 MB/hour reading the 16-hour checkpoint flagged as the one line to
+watch; it was warm-up being extrapolated.
+
+`_memoryBaseline` in `config/wall.json` is filled in from the run: `p95_24h` 1367,
+`peak_72h` 1537, `driftMbPerHour` 0.45, which the committed rule turns into
+`memoryLimitMb` 2000 and `memoryHardLimitMb` 2750, **and both are now set**. The
+memory countermeasure is live for the first time; it has shipped inert since it was
+written.
+
+Switching it on was gated on one question about a cable. The baseline was measured
+with the video on a discrete GPU, where textures and framebuffers live in VRAM and
+never enter the number the limit is compared against; on integrated graphics they
+come out of system RAM and do. Jeff confirmed the show PC's HDMI is always in the
+discrete GPU port, so the path matches and the baseline transfers. If one ever runs
+off the motherboard port, the baseline is void.
+
+The limit is a runaway guard rather than a tuned figure, and the write-up says so:
+it was measured against the soak lineup, not the real Honeywell dashboards, which do
+not exist yet and are the thing most likely to move `p95_24h`.
+
+Two long-open questions are also closed. The `workingSetSize` versus private-bytes
+gap is **1.44 and stable** across the whole run, not the drifting figure the two
+partial runs suggested, so the app's own memory line reads about 44% high against
+Task Manager. And the `URL drift samples: 4320` line that prints above `Verdict:
+PASS` is not the contradiction it looks like: the verdict never consulted it, and
+what it records is `grafana` and `earth` normalising their own URLs once at load,
+with the two local arms never drifting at all.
+
+The run is nonetheless **reported as partial**, because any human input is a
+pre-registered invalidating condition and it took one, at `2026-08-29T00:58Z`. The
+argument for the verdict is in `docs/validation.md` rather than the disclosure being
+left out: `lastUsedSecAgo` shows exactly one input instant, never on the other three
+arms, 19.6 hours before the scored window opens.
+
+The write-up is `docs/validation.md` under "The 72-hour run, third attempt:
+COMPLETE", and the harvested series, the app log and the summary are committed under
+`docs/soak/2026-08-30-complete/`.
+
+HQ-PROTO-MINI-2 was torn down on 2026-08-31 once the archive was taken and
+hash-verified, and it is given back: no stage, no app profile, no `Soak*` task, and
+the other project's `FCATWallLauncher` and `FCATSoakSampler` re-enabled. The app had
+run 90.8 hours continuously by then, the last 18.7 of them past the scored window
+and flat to within a megabyte.
+
 ### The soak pre-flight fails on a busy machine, and the series records VRAM
 
 Two soak attempts have now died because HQ-PROTO-MINI-2 was in use by another

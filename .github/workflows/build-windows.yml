@@ -74,6 +74,14 @@ jobs:
       - name: Build installer and zip
         run: npm run build:win
 
+      # Reads the artifact, not the config that produced it. electron-builder.yml
+      # excludes src/dev, and test/packaging.test.js asserts that it still does,
+      # but only this proves what actually ended up inside the asar. The dev
+      # harness contains a mock server that binds a port and probes that disable
+      # web security, so what ships is a security question, not a tidiness one.
+      - name: Assert what shipped
+        run: npm run check:asar
+
       # Unsigned for now: there is no certificate yet. Once there is one, add
       # CSC_LINK and CSC_KEY_PASSWORD as repository secrets and pass them as env
       # here; electron-builder picks them up with no config change.

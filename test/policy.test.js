@@ -155,7 +155,8 @@ test('a permission is allowed only when the panel names it', () => {
   assert.strictEqual(isPermissionAllowed('notifications', list), false);
 });
 
-// These are Chromium's strings, seen on 43.4.1, not names this app invents. One
+// These are Chromium's strings, seen on 43.4.1 and again on 44.1.0, not names
+// this app invents. One
 // getUserMedia call for audio and one for video both arrive as 'media', so there
 // is no way to allow the microphone without also allowing the camera.
 test("the permission strings are Chromium's, and media covers both", () => {

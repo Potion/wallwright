@@ -55,6 +55,7 @@ const {
   ineligibleReason,
   memoryPlan,
   staggerSeeds,
+  summarizeMetrics,
 } = require('./upkeep');
 
 // The app was called Forge before it was Wallwright. The name decides the
@@ -215,14 +216,33 @@ const deferredSince = new Map(); // `${id}:${op}` -> ms
 // The most recent per-process reading, so ranking candidates by weight does not
 // mean asking the OS again for every panel on every tick.
 let lastMemoryByPid = new Map();
-// State the memory ladder keeps between checks. All of it resets the moment the
-// total comes back under the limit.
-let memoryPressureSince = null; // when the limit was first exceeded, unbroken
-let memoryHardChecks = 0; // consecutive checks past the hard limit
-let memorySweptAt = null; // when the whole wall was last rebuilt at once
-let recyclesSinceReduction = 0; // rebuilds that did not reclaim anything
-let pendingReduction = null; // the total before the last rebuild, to compare
-let memoryExhaustedSaid = false; // so "nothing left to try" is said once
+// State the memory ladder keeps between checks, in one object so it can be reset
+// and read as a unit rather than as six loose variables kept in step by hand.
+//
+// They do not all clear together, which is the thing six separate `let`s made easy
+// to misread. `pressureSince`, `hardChecks`, `sweptAt` and `exhaustedSaid` describe
+// the current episode of pressure and reset the moment the total comes back under
+// the limit. `recyclesSinceReduction` counts rebuilds that reclaimed nothing and
+// deliberately survives recovery, because giving up is a judgement about the whole
+// run and not about one episode. `pendingReduction` is consumed by whichever check
+// reads it next.
+const memoryLadder = {
+  pressureSince: null, // when the limit was first exceeded, unbroken
+  hardChecks: 0, // consecutive checks past the hard limit
+  sweptAt: null, // when the whole wall was last rebuilt at once
+  recyclesSinceReduction: 0, // rebuilds that did not reclaim anything
+  pendingReduction: null, // the total before the last rebuild, to compare
+  exhaustedSaid: false, // so "nothing left to try" is said once
+};
+
+// Forget the current episode of pressure. Deliberately not the two fields above
+// that outlive one episode.
+function clearMemoryPressure() {
+  memoryLadder.pressureSince = null;
+  memoryLadder.hardChecks = 0;
+  memoryLadder.sweptAt = null;
+  memoryLadder.exhaustedSaid = false;
+}
 // Survives a relaunch through argv, which is the only place to keep it: a file
 // would outlive the condition, and a counter that resets on restart is no bound
 // at all.
@@ -374,10 +394,10 @@ function pickWallDisplay() {
 //
 // Electron paints child views in insertion order, so "frontmost" means last.
 // Re-adding an existing child reorders it in place rather than detaching it,
-// which avoids a repaint on every transition. Verified on Electron 43.4.1 /
-// macOS by `npm run probe` (abc -> addChildView(a) -> bca). The remove + add
-// fallback below is therefore dead on that build, but it is kept until the probe
-// is re-run on Windows, where the show PC lives.
+// which avoids a repaint on every transition. Verified on Electron 43.4.1 and
+// again on 44.1.0, macOS, by `npm run probe` (abc -> addChildView(a) -> bca). The
+// remove + add fallback below is therefore dead on both builds, but it is kept
+// until the probe is re-run on Windows, where the show PC lives.
 function bringToTop(view) {
   const kids = win.contentView.children;
   if (kids[kids.length - 1] === view) return; // already frontmost
@@ -502,6 +522,15 @@ function createWall() {
 
 // ---- panel lifecycle -------------------------------------------------------
 
+// Spec index by panel id, and the only way to do that lookup. It used to be four
+// inline `findIndex` calls plus a local arrow inside checkMemory that shadowed
+// this one, which is how a lookup drifts: they all agreed, but nothing made them.
+// Returns -1 for a panel that is gone, which callers must check, because
+// deletePanel() splices specs out while handlers are still attached.
+function indexOfId(id) {
+  return config.views.findIndex((v) => v.id === id);
+}
+
 // A panel with no URL yet is a normal state right after it is created in the
 // editor. Show something that says so rather than a black rectangle.
 function placeholderURL(v) {
@@ -572,15 +601,28 @@ function guardPermissions(partition) {
   ses.setPermissionCheckHandler((wc, permission) => decide(wc, permission));
 }
 
+// The security posture for every web surface that shows somebody else's page:
+// the content views and the SSO popups they open. One object, because these are
+// the settings that must not drift apart. They were written out twice, and the
+// popup site carried a comment explaining that its preload had to match the
+// content views' - which is exactly the sort of invariant a comment cannot keep.
+//
+// The preload is the activity reporter. Without it on the popup, typing a
+// password into an SSO form would not count as activity, the idle timer would
+// dock the wall and the popup would close mid-login.
+function contentWebPreferences(v) {
+  return {
+    partition: v.partition,
+    preload: path.join(__dirname, 'content-preload.js'),
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+  };
+}
+
 function createContentView(v) {
   const view = new WebContentsView({
-    webPreferences: {
-      partition: v.partition,
-      preload: path.join(__dirname, 'content-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
+    webPreferences: contentWebPreferences(v),
   });
   win.contentView.addChildView(view);
   const i = config.views.indexOf(v);
@@ -590,7 +632,7 @@ function createContentView(v) {
   }
   guardPermissions(v.partition);
   hardenView(view, v);
-  view.webContents.loadURL(v.url || placeholderURL(v));
+  loadPanel(view, v);
   return view;
 }
 
@@ -722,7 +764,7 @@ function updatePanel(id, patch) {
   } else if (newUrl !== null) {
     // Loading a new URL is exactly what was asked for here, so the usual
     // "never reload a panel" rule does not apply.
-    contentViews[i].webContents.loadURL(v.url || placeholderURL(v));
+    loadPanel(contentViews[i], v);
     log(`${id}: ${v.url || '(no url)'}`);
   }
 
@@ -785,27 +827,39 @@ const lastRecycle = new Map();
 // can drift - is unchanged; there is simply more to the answer now than a
 // timestamp comparison, and the interesting parts are testable.
 
-// What src/upkeep.js needs to know about each panel, in plain values. Built here
-// because it is the only place that can see the views, the watchdog and the
+// What src/upkeep.js needs to know about one panel, in plain values. Built here
+// because this is the only place that can see the views, the watchdog and the
 // popups at once.
+//
+// Returns null if there is no panel at that index, and the null is load-bearing:
+// deletePanel() splices a spec out while that view's handlers are still attached,
+// so callers legitimately arrive with a stale index. See scheduleReload().
+function panelStateAt(i) {
+  const v = config.views[i];
+  if (!v) return null;
+  const wc = contentViews[i] && contentViews[i].webContents;
+  const alive = wc && !wc.isDestroyed();
+  const pid = osPidOf(contentViews[i]);
+  return {
+    id: v.id,
+    index: i,
+    promoted: state.mode === 'active' && state.activeIndex === i,
+    interactAt: touched.get(v.id) || 0,
+    presentAt: present.get(v.id) || 0,
+    rssMb: pid ? lastMemoryByPid.get(pid) || 0 : 0,
+    lastRecycleAt: lastRecycle.get(v.id) || 0,
+    loading: alive ? wc.isLoading() : false,
+    popupOpen: [...popupOwner.values()].includes(v.id),
+    neverRecycle: !!v.neverRecycle,
+  };
+}
+
+// Every panel's state, for the memory ladder, which ranks candidates against each
+// other and so genuinely needs all of them. Anything wanting a single panel calls
+// panelStateAt() instead: building the whole array to index one element out of it
+// is what made the upkeep tick quadratic.
 function panelStates() {
-  return config.views.map((v, i) => {
-    const wc = contentViews[i] && contentViews[i].webContents;
-    const alive = wc && !wc.isDestroyed();
-    const pid = osPidOf(contentViews[i]);
-    return {
-      id: v.id,
-      index: i,
-      promoted: state.mode === 'active' && state.activeIndex === i,
-      interactAt: touched.get(v.id) || 0,
-      presentAt: present.get(v.id) || 0,
-      rssMb: pid ? lastMemoryByPid.get(pid) || 0 : 0,
-      lastRecycleAt: lastRecycle.get(v.id) || 0,
-      loading: alive ? wc.isLoading() : false,
-      popupOpen: [...popupOwner.values()].includes(v.id),
-      neverRecycle: !!v.neverRecycle,
-    };
-  });
+  return config.views.map((_, i) => panelStateAt(i));
 }
 
 // Whether one panel may be rebuilt or refreshed right now, and if not, why.
@@ -815,7 +869,12 @@ function panelStates() {
 // that can drift apart. `op` only distinguishes which deferral clock is used.
 function eligible(v, i, op, { force = false } = {}) {
   const now = Date.now();
-  const p = panelStates(now)[i];
+  const p = panelStateAt(i);
+  // No panel at that index. Callers guard this too, but not all of them did, and
+  // the one that did not took the whole wall down: uncaughtException rethrows, so
+  // dereferencing undefined in here is fatal rather than local. Answering "no,
+  // because it is gone" is both true and survivable.
+  if (!p) return { ok: false, reason: 'no such panel', forced: false };
   const key = `${v.id}:${op}`;
   const reason = ineligibleReason(p, {
     now,
@@ -932,7 +991,7 @@ function probeRecycle(probe) {
     const snap = memorySnapshot();
     record.lateMb = Math.round(snap.totalMb);
     if (probe.oldPid) record.gone = !snap.byPid.has(probe.oldPid);
-    const i = config.views.findIndex((v) => v.id === probe.id);
+    const i = indexOfId(probe.id);
     record.newPid = i >= 0 ? osPidOf(contentViews[i]) : null;
     record.reclaimedMb = Math.round(probe.beforeMb) - record.lateMb;
     log(
@@ -990,27 +1049,28 @@ function startUpkeep() {
 // different ways, and only one of them was wrapped against getAppMetrics
 // throwing.
 //
+// The arithmetic itself is summarizeMetrics() in src/upkeep.js, which is the same
+// sum in a form that can be handed a captured payload in a test. This was the
+// third writing of it: the two collapsed above were replaced by a copy that still
+// could not be tested, because it reached for app.getAppMetrics() itself. All
+// this function owns now is the part that genuinely needs Electron, which is
+// getting the metrics and surviving the call failing.
+//
 // workingSetSize is resident memory per process, and shared pages are counted
 // once per process that maps them, so the total reads high. That is fine for
 // watching a trend, and it is why the soak also records private bytes from
 // outside the app: see docs/validation.md before comparing this number to
 // anything.
 function memorySnapshot() {
-  const byType = new Map();
-  const byPid = new Map();
-  let totalMb = 0;
+  let metrics = [];
   try {
-    for (const m of app.getAppMetrics()) {
-      const mb = (m.memory && m.memory.workingSetSize ? m.memory.workingSetSize : 0) / 1024;
-      totalMb += mb;
-      byType.set(m.type, (byType.get(m.type) || 0) + mb);
-      if (m.pid) byPid.set(m.pid, mb);
-    }
+    metrics = app.getAppMetrics();
   } catch {
-    /* metrics unavailable */
+    /* metrics unavailable; summarize an empty list rather than a partial one */
   }
-  lastMemoryByPid = byPid;
-  return { totalMb, byType, byPid };
+  const snap = summarizeMetrics(metrics);
+  lastMemoryByPid = snap.byPid;
+  return snap;
 }
 
 // Memory. Reported rather than acted on by default: an exhibit that restarts
@@ -1034,35 +1094,36 @@ function checkMemory() {
   // Did the last rebuild actually reclaim anything? Without this, "the
   // countermeasure fired" and "the countermeasure worked" look identical in a
   // log, and the wall can churn sessions for no benefit indefinitely.
-  if (pendingReduction !== null) {
-    const dropped = pendingReduction - total;
+  if (memoryLadder.pendingReduction !== null) {
+    const dropped = memoryLadder.pendingReduction - total;
     if (dropped >= config.memoryReduceMinMb) {
-      recyclesSinceReduction = 0;
+      memoryLadder.recyclesSinceReduction = 0;
     } else {
-      recyclesSinceReduction += 1;
+      memoryLadder.recyclesSinceReduction += 1;
       warn(
         `the last recycle reclaimed ${Math.round(dropped)}MB, under the ` +
-          `${config.memoryReduceMinMb}MB that counts (${recyclesSinceReduction} in a row)`
+          `${config.memoryReduceMinMb}MB that counts (${memoryLadder.recyclesSinceReduction} in a row)`
       );
     }
-    pendingReduction = null;
+    memoryLadder.pendingReduction = null;
   }
 
   const over = config.memoryLimitMb > 0 && total > config.memoryLimitMb;
   if (!over) {
     // Recovered. Forget the pressure history, so a spike next week starts its own
     // clock rather than inheriting this one.
-    memoryPressureSince = null;
-    memoryHardChecks = 0;
-    memorySweptAt = null;
-    memoryExhaustedSaid = false;
+    clearMemoryPressure();
     return;
   }
 
   counters.bump('memoryLimitHits');
-  if (!memoryPressureSince) memoryPressureSince = now;
-  if (config.memoryHardLimitMb > 0 && total > config.memoryHardLimitMb) memoryHardChecks += 1;
-  else memoryHardChecks = 0;
+  if (!memoryLadder.pressureSince) memoryLadder.pressureSince = now;
+  // Consecutive, so one check back under the hard limit resets the count rather
+  // than pausing it. Written as one assignment because the two halves are a
+  // single fact about this check, and the if/else form wrapped badly enough to
+  // read as though the reset were conditional on something else.
+  const pastHard = config.memoryHardLimitMb > 0 && total > config.memoryHardLimitMb;
+  memoryLadder.hardChecks = pastHard ? memoryLadder.hardChecks + 1 : 0;
 
   // The relaunch gates. Kept here rather than in the policy because they are
   // facts about this process, and every one of them is a way the rung can be
@@ -1084,10 +1145,10 @@ function checkMemory() {
     panels: panelStates(),
     mode: state.mode,
     now,
-    pressureSince: memoryPressureSince,
-    hardChecks: memoryHardChecks,
-    sweptAt: memorySweptAt,
-    recyclesSinceReduction,
+    pressureSince: memoryLadder.pressureSince,
+    hardChecks: memoryLadder.hardChecks,
+    sweptAt: memoryLadder.sweptAt,
+    recyclesSinceReduction: memoryLadder.recyclesSinceReduction,
     cfg: {
       recentUseMs: config.recentUseMs,
       minRecycleIntervalMs: config.minRecycleIntervalMs,
@@ -1100,24 +1161,23 @@ function checkMemory() {
   });
 
   warn(`memory is over the ${config.memoryLimitMb}MB limit (rung ${plan.rung})`);
-  const indexOf = (id) => config.views.findIndex((v) => v.id === id);
 
   if (plan.action === 'recycle') {
-    const i = indexOf(plan.targetIds[0]);
+    const i = indexOfId(plan.targetIds[0]);
     if (i < 0) return;
     if (plan.forced) warn(`forcing a recycle of ${plan.targetIds[0]}: ${plan.reason}`);
     counters.bump('memoryRecycles', plan.targetIds[0]);
-    pendingReduction = total;
+    memoryLadder.pendingReduction = total;
     return recyclePanel(i);
   }
 
   if (plan.action === 'sweep') {
     warn(`sweeping ${plan.targetIds.length} panels: ${plan.reason}`);
-    memorySweptAt = now;
-    pendingReduction = total;
+    memoryLadder.sweptAt = now;
+    memoryLadder.pendingReduction = total;
     // Highest index first, so rebuilding one cannot shift the next one's index.
     plan.targetIds
-      .map(indexOf)
+      .map(indexOfId)
       .filter((i) => i >= 0)
       .sort((a, b) => b - a)
       .forEach((i) => {
@@ -1144,8 +1204,8 @@ function checkMemory() {
 
   if (plan.rung === 2) counters.bump('memoryAllInUse');
   // Said once rather than every minute for as long as it lasts.
-  if (plan.exhausted && !memoryExhaustedSaid) {
-    memoryExhaustedSaid = true;
+  if (plan.exhausted && !memoryLadder.exhaustedSaid) {
+    memoryLadder.exhaustedSaid = true;
     warn(`no further action available: ${plan.reason}`);
   } else if (plan.reason && !plan.exhausted) {
     log(plan.reason);
@@ -1241,11 +1301,7 @@ function applyPreset(id) {
 function dockGridOrKeepEditing() {
   if (state.mode === 'edit') {
     refreshLayout();
-    config.views.forEach((v, i) => {
-      contentViews[i].setVisible(true);
-      contentViews[i].setBounds(panelRect(i));
-      contentViews[i].webContents.setZoomFactor(panelZoom(i));
-    });
+    showPanelsInGrid();
     bringToTop(overlay);
     sendOverlayState();
   } else {
@@ -1336,17 +1392,36 @@ function dockGrid({ animate = true } = {}) {
   resetIdle();
 }
 
+// Every panel visible, in its grid slot, at its configured zoom. Both mode
+// entries that are not `dockGrid` need exactly this, and they had it written out
+// twice.
+function showPanelsInGrid() {
+  config.views.forEach((v, i) => {
+    contentViews[i].setVisible(true);
+    contentViews[i].setBounds(panelRect(i));
+    contentViews[i].webContents.setZoomFactor(panelZoom(i));
+  });
+}
+
+// Bring the overlay up and hand it the keyboard. Select mode and edit mode both
+// want the whole sequence; note that dockGridOrKeepEditing() deliberately does
+// not, because the overlay is already up there and taking focus would be a
+// change, not a tidy-up.
+function raiseOverlay() {
+  overlay.setBounds(wallBounds());
+  overlay.setVisible(true);
+  bringToTop(overlay);
+  sendOverlayState();
+  overlay.webContents.focus();
+}
+
 // Today's grid-mode overlay, now behind a key. Panels are not interactive here;
 // that is the point, the hotspots need the clicks.
 function enterSelect() {
   if (state.mode === 'select') return;
   if (state.mode === 'active' || state.mode === 'edit') dockGrid({ animate: false });
   state = { mode: 'select', activeIndex: -1 };
-  overlay.setBounds(wallBounds());
-  overlay.setVisible(true);
-  bringToTop(overlay);
-  sendOverlayState();
-  overlay.webContents.focus();
+  raiseOverlay();
   resetIdle();
   log('select mode: click a panel to open it fullscreen, Esc to cancel');
 }
@@ -1410,8 +1485,9 @@ function round3(n) {
 // every other app on the machine. It is handled per view instead, the same way
 // Esc is. The tradeoff is that the panels themselves lose Cmd+F find-in-page,
 // which is the right call for a kiosk wall.
-// macOS is the awkward one. Measured on Electron 43.4.1 with a 1800x1169
-// display (`/tmp/fsprobe1.js`, see docs/validation.md):
+// macOS is the awkward one. Measured on Electron 43.4.1, and re-measured
+// unchanged on 44.1.0, with a 1800x1169 display (`npm run probe:fs`, see
+// docs/validation.md):
 //
 //   constructor fullscreen+kiosk  ->  content y:39 height:1130   isFullScreen:true
 //   constructor kiosk only        ->  content y:39 height:1130   isFullScreen:true
@@ -1499,16 +1575,8 @@ function enterEdit() {
   refreshLayout();
   clearIdle(); // never dock the wall out from under someone editing it
   editDrag = null;
-  config.views.forEach((v, i) => {
-    contentViews[i].setVisible(true);
-    contentViews[i].setBounds(panelRect(i));
-    contentViews[i].webContents.setZoomFactor(panelZoom(i));
-  });
-  overlay.setBounds(wallBounds());
-  overlay.setVisible(true);
-  bringToTop(overlay);
-  sendOverlayState();
-  overlay.webContents.focus();
+  showPanelsInGrid();
+  raiseOverlay();
   log('layout edit mode: drag to move, sides to resize, corners to scale');
 }
 
@@ -1682,16 +1750,7 @@ function hardenView(view, v) {
         height: h,
         x: Math.round((layout.width - w) / 2),
         y: Math.round((layout.height - h) / 2),
-        webPreferences: {
-          partition: v.partition,
-          // Same activity reporter the content views use. Without it, typing a
-          // password into an SSO popup would not count as activity, and the
-          // idle timer would dock the wall and close the popup mid-login.
-          preload: path.join(__dirname, 'content-preload.js'),
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: true,
-        },
+        webPreferences: contentWebPreferences(v),
       },
     };
   });
@@ -1898,6 +1957,13 @@ function unrecoverableURL(v, w) {
 // watchdog cannot disagree with every other load path about what an empty URL
 // means - it used to call loadURL('') and throw into a swallowed catch, then do it
 // again thirty seconds later, forever.
+//
+// That sentence was aspirational until 2026-08-31. Three other places built the
+// same `v.url || placeholderURL(v)` expression inline and called loadURL
+// themselves: creating a view, applying a URL change, and the control surface's
+// reload. They agreed about the empty-URL question by coincidence, and none of
+// them got the catch below, which is here because a torn-down webContents throws
+// synchronously. All six load sites route through here now.
 function loadPanel(view, v) {
   try {
     view.webContents.loadURL(v.url || placeholderURL(v));
@@ -2016,13 +2082,13 @@ function closePopups() {
 
 ipcMain.on('ww:activate', (_e, id) => {
   if (state.mode !== 'select') return; // grid panels are interactive; nothing to intercept
-  const i = config.views.findIndex((v) => v.id === id);
+  const i = indexOfId(id);
   if (i >= 0) activate(i);
 });
 
 // From the editor's inspector, which is the other way to open a panel.
 ipcMain.on('ww:promote', (_e, id) => {
-  const i = config.views.findIndex((v) => v.id === id);
+  const i = indexOfId(id);
   if (i >= 0) activate(i);
 });
 ipcMain.on('ww:back', () => {
@@ -2060,10 +2126,6 @@ ipcMain.on('ww:activity', (e, type) => {
 });
 
 // ---- IPC: layout editing ----------------------------------------------------
-
-function indexOfId(id) {
-  return config.views.findIndex((v) => v.id === id);
-}
 
 // Snapshot the panel as the drag begins. A corner scale needs the ratio against
 // where the drag started, not against the previous frame, or the rounding
@@ -2481,9 +2543,9 @@ function selfTest() {
     config.recentUseMs = 60000;
     config.minRecycleIntervalMs = 0; // not what is under test here
     config.memoryForceAfterMs = 3600000; // far away, so nothing is forced yet
-    memoryPressureSince = null;
-    recyclesSinceReduction = 0;
-    pendingReduction = null;
+    memoryLadder.pressureSince = null;
+    memoryLadder.recyclesSinceReduction = 0;
+    memoryLadder.pendingReduction = null;
     const before13 = contentViews.slice();
     config.views.forEach((v) => touched.set(v.id, Date.now()));
     for (let i = 0; i < 5; i++) checkMemory();
@@ -2541,7 +2603,7 @@ function selfTest() {
     config.memoryForceAfterMs = realForce;
     config.minRecycleIntervalMs = realCooldown;
     config.recentUseMs = realRecentUse;
-    memoryPressureSince = null;
+    memoryLadder.pressureSince = null;
 
     // ---- 15: the diagnostics log ------------------------------------------
     //
@@ -2849,6 +2911,370 @@ function selfTest() {
     exitEdit({ save: false });
     await soon(200);
 
+    // ---- 21: promoting and docking does not reload the panel ---------------
+    //
+    // The SPEC guarantee, and the reason `docs/validation.md` group A leads with
+    // it: return-to-grid must not reload, or every promote costs an operator
+    // whatever they had typed. The checklist asked somebody to promote a panel,
+    // watch a "Loaded at" timestamp and judge whether it changed. A mark set on
+    // the renderer's window answers the same question without a human, and
+    // without a page to load: if the view reloaded, the global is gone.
+    step(21, 'promote and dock do not reload the panel');
+    // Earlier steps add and delete panels - step 19 deletes `a` - so nothing here
+    // may assume the config it started with. Top the list back up to two rather
+    // than indexing into whatever survived.
+    const spares = [];
+    while (config.views.length < 2) {
+      spares.push(addPanel({ x: 0, y: 0, width: 320, height: 240 }).id);
+      await soon(150);
+    }
+    await until(() => contentViews.length === config.views.length && !!contentViews[1]);
+    step(21, `running against ${config.views.length} panels: ${ids()}`);
+    const markOf = (i, js) => contentViews[i].webContents.executeJavaScript(js, true);
+    await markOf(0, 'window.__wwMark = "before-promote"; window.__wwMark');
+    activate(0);
+    await until(() => state.mode === 'active' && state.activeIndex === 0);
+    const markWhileActive = await markOf(0, 'window.__wwMark || null');
+    check(21, 'the mark survives being promoted', markWhileActive === 'before-promote');
+
+    dockGrid({ animate: false });
+    await until(() => state.mode === 'grid');
+    const markAfterDock = await markOf(0, 'window.__wwMark || null');
+    check(
+      21,
+      'the mark survives returning to the grid',
+      markAfterDock === 'before-promote',
+      `got ${JSON.stringify(markAfterDock)}; a null here means the view reloaded`
+    );
+
+    // ---- 22: a background panel keeps running -------------------------------
+    //
+    // Chromium throttles timers in backgrounded content, and a wall whose other
+    // three dashboards freeze the moment one is promoted is a wall showing stale
+    // numbers. Checked with a real interval in the other panel's renderer rather
+    // than by watching mock 4's ticker by eye.
+    step(22, 'a backgrounded panel keeps running');
+    await markOf(
+      1,
+      'window.__wwTicks = 0; clearInterval(window.__wwT); window.__wwT = setInterval(() => window.__wwTicks++, 50); 1'
+    );
+    activate(0);
+    await until(() => state.mode === 'active' && state.activeIndex === 0);
+    const watchMs = 3000;
+    await soon(watchMs);
+    const ticks = await markOf(1, 'window.__wwTicks || 0');
+    await markOf(1, 'clearInterval(window.__wwT); 1');
+    // The assertion is "did not stop", not a rate, and that distinction was
+    // earned. A 50ms interval over 1200ms with a `>= 3` threshold passed on macOS
+    // and failed on PROTO1-P8 with 1 tick, because Windows throttles an occluded
+    // renderer to about 1Hz and macOS does not. That is a real platform
+    // difference rather than a flaky test, it is recorded in docs/validation.md,
+    // and asserting any rate here would be asserting one platform's behaviour.
+    // Frozen is 0; the window is long enough that even 1Hz clears it comfortably.
+    check(
+      22,
+      'its timers still fired while another panel was fullscreen',
+      ticks >= 1,
+      `0 ticks in ${watchMs}ms means the renderer was frozen`
+    );
+    step(22, `observed ${ticks} ticks of a 50ms interval in ${watchMs}ms while backgrounded`);
+    dockGrid({ animate: false });
+    await until(() => state.mode === 'grid');
+
+    // ---- 23: one Esc docks the wall ----------------------------------------
+    //
+    // config/selftest.json sets escToGrid "single". Esc is handled per view in
+    // hardenView() rather than as a globalShortcut, precisely so it reaches the
+    // panel first, which means the only honest test sends the key to the panel.
+    step(23, 'a single Esc returns to the grid');
+    activate(0);
+    await until(() => state.mode === 'active' && state.activeIndex === 0);
+    const esc = (type) =>
+      contentViews[0].webContents.sendInputEvent({ type, keyCode: 'Escape' });
+    esc('keyDown');
+    esc('keyUp');
+    const docked = await until(() => state.mode === 'grid', 3000);
+    check(
+      23,
+      'Esc docked the wall',
+      docked,
+      `mode=${state.mode}, escToGrid=${config.escToGrid}`
+    );
+
+    // ---- 24: per-panel zoom does not leak ----------------------------------
+    //
+    // Promoting re-applies zoom, and the checklist's worry is that it applies the
+    // promoted panel's factor to its neighbours. Asked of the real webContents
+    // rather than of the config, because the config is what we set.
+    step(24, 'per-panel zoom does not leak across panels');
+    const realZoom = config.views[0].zoom;
+    config.views[0].zoom = 0.75;
+    const zoomOf = (i) => contentViews[i].webContents.getZoomFactor();
+    activate(0);
+    await until(() => state.mode === 'active' && state.activeIndex === 0);
+    // Sampled while promoted as well as after docking. Checking only the docked
+    // state was measurably too weak: showPanelsInGrid() re-applies every panel's
+    // own factor on the way out, so a leak injected into activate() was scrubbed
+    // before the assertion ran, and the check passed against code that leaked.
+    const activeA = zoomOf(0);
+    const activeB = zoomOf(1);
+    dockGrid({ animate: false });
+    await until(() => state.mode === 'grid');
+    const zoomA = zoomOf(0);
+    const zoomB = zoomOf(1);
+    // Compared against panelZoom(), which is `zoom * layout.scale`, not against
+    // the raw config value. Asserting 0.75 passed on the dev machine and failed
+    // on PROTO1-P8 with 0.6, because that runner fits a 1280x800 wall into a
+    // 1024x768 display at scale 0.8. The app was right and the assertion had a
+    // scale of 1.0 baked into it - the same mistake three steps made with
+    // ww:addPanel, and the reason wallPx() exists at the top of this function.
+    const wantA = panelZoom(0);
+    const wantB = panelZoom(1);
+    const near = (got, want) => Math.abs(got - want) < 0.01;
+    const scaleNote = `layout.scale=${layout.scale.toFixed(3)}`;
+    check(
+      24,
+      'the promoted panel got its own factor',
+      near(activeA, wantA),
+      `a=${activeA}, expected ${wantA} (${scaleNote})`
+    );
+    check(
+      24,
+      'the other panel was not zoomed while it was promoted',
+      near(activeB, wantB),
+      `b=${activeB}, expected ${wantB}; a was fullscreen at ${wantA} (${scaleNote})`
+    );
+    check(
+      24,
+      'the zoomed panel kept its own factor',
+      near(zoomA, wantA),
+      `a=${zoomA}, expected ${wantA} (${scaleNote})`
+    );
+    check(
+      24,
+      'its neighbour still was not, after docking',
+      near(zoomB, wantB),
+      `b=${zoomB}, expected ${wantB} (${scaleNote})`
+    );
+    // The leak this step exists for is the two factors becoming equal. Asserted
+    // separately so it cannot be satisfied by both simply being wrong together.
+    check(
+      24,
+      'the two panels still have different factors',
+      Math.abs(wantA - wantB) > 0.01 && Math.abs(zoomA - zoomB) > 0.01,
+      `a=${zoomA} b=${zoomB}`
+    );
+    config.views[0].zoom = realZoom;
+    refreshLayout();
+
+    // ---- 25: idle auto-return ----------------------------------------------
+    //
+    // idleReturnMs is 0 in the self-test config, so this arms it briefly rather
+    // than waiting four minutes, then puts it back. Only administrators have
+    // input, so this timer is what actually returns the wall to the grid in
+    // normal operation: it is not an edge case here, it is the common path.
+    step(25, 'the wall returns to the grid when left alone');
+    const realIdle = config.idleReturnMs;
+    config.idleReturnMs = 600;
+    activate(0);
+    await until(() => state.mode === 'active' && state.activeIndex === 0);
+    resetIdle();
+    const autoDocked = await until(() => state.mode === 'grid', 5000);
+    check(25, 'it docked itself', autoDocked, `mode=${state.mode} after idleReturnMs=600`);
+    config.idleReturnMs = realIdle;
+    clearIdle();
+
+    // ---- 26: the watchdog recovers a crashed background panel --------------
+    //
+    // No unit test can reach this: it needs a real renderer to kill. The ladder
+    // is covered in test/watchdog.test.js; what was unproven is that a real
+    // render-process-gone is wired to it at all.
+    //
+    // Both halves of the rule, because the first attempt at this step only wrote
+    // the second and failed against correct code. Every panel in
+    // config/selftest.json has an empty url, and scheduleReload() returns early
+    // for those on purpose - a placeholder cannot fail, so retrying it is noise.
+    // A test that does not know that reads "no reload" as a broken watchdog.
+    step(26, 'the watchdog reloads a panel whose renderer died');
+    config.views.forEach((v) => {
+      touched.delete(v.id);
+      present.delete(v.id);
+    });
+    dockGrid({ animate: false });
+    await until(() => state.mode === 'grid');
+    const bgSpec = config.views[1];
+    const bgId = bgSpec.id;
+    const scratchURL = dataUrl('<body style="background:#111;color:#eee">selftest</body>');
+
+    watchdog.delete(bgId);
+    const emptyUrlCrashes = counters.snapshot().totals.crashes || 0;
+    contentViews[1].webContents.forcefullyCrashRenderer();
+    await until(() => (counters.snapshot().totals.crashes || 0) > emptyUrlCrashes, 8000);
+    await soon(1500); // a clear multiple of the 1000ms base delay
+    check(
+      26,
+      'a panel with no url is not retried, because a placeholder cannot fail',
+      !wd(bgId).pending && wd(bgId).attempts === 0,
+      `attempts=${wd(bgId).attempts}`
+    );
+
+    // Now give it something that can actually be reloaded. A data: url, so this
+    // still needs no network and cannot be flaky because a site was slow.
+    bgSpec.url = scratchURL;
+    loadPanel(contentViews[1], bgSpec);
+    await until(() => !contentViews[1].webContents.isLoading(), 10000);
+    watchdog.delete(bgId);
+    const crashesBefore = counters.snapshot().totals.crashes || 0;
+    const reloadsBefore26 = counters.snapshot().totals.watchdogReloads || 0;
+    contentViews[1].webContents.forcefullyCrashRenderer();
+    const sawCrash = await until(
+      () => (counters.snapshot().totals.crashes || 0) > crashesBefore,
+      8000
+    );
+    check(26, 'the crash was noticed', sawCrash, `crashes was ${crashesBefore}`);
+    const scheduled = await until(() => !!wd(bgId).pending || wd(bgId).attempts > 0, 8000);
+    check(
+      26,
+      'a reload was scheduled for it',
+      scheduled,
+      `attempts=${wd(bgId).attempts} deferred=${wd(bgId).deferred}`
+    );
+    const reloaded = await until(
+      () => (counters.snapshot().totals.watchdogReloads || 0) > reloadsBefore26,
+      10000
+    );
+    check(26, 'and the reload actually ran', reloaded);
+    bgSpec.url = '';
+    loadPanel(contentViews[1], bgSpec);
+
+    // ---- 27: and defers one somebody is looking at -------------------------
+    //
+    // The half that protects an operator. A promoted panel is in use by
+    // definition, so a crash must NOT be reloaded under them; it waits for the
+    // dock. docs/validation.md calls this "the one that protects an operator's
+    // login" and it had never been exercised end to end.
+    step(27, 'the watchdog defers a crashed panel that is promoted');
+    const upSpec = config.views[0];
+    const upId = upSpec.id;
+    upSpec.url = scratchURL;
+    loadPanel(contentViews[0], upSpec);
+    await until(() => !contentViews[0].webContents.isLoading(), 10000);
+    watchdog.delete(upId);
+    activate(0);
+    await until(() => state.mode === 'active' && state.activeIndex === 0);
+    const defersBefore = counters.snapshot().totals.watchdogDeferrals || 0;
+    const reloadsBefore = counters.snapshot().totals.watchdogReloads || 0;
+    contentViews[0].webContents.forcefullyCrashRenderer();
+    const deferred = await until(
+      () => (counters.snapshot().totals.watchdogDeferrals || 0) > defersBefore,
+      8000
+    );
+    check(27, 'the reload was deferred, not run', deferred, `deferred=${wd(upId).deferred}`);
+    // The negative half, which is the assertion that actually matters. Waited a
+    // clear multiple of the 1000ms base delay, so "not yet" cannot pass as
+    // "never".
+    await soon(2500);
+    check(
+      27,
+      'nothing reloaded it while it was promoted',
+      (counters.snapshot().totals.watchdogReloads || 0) === reloadsBefore,
+      `watchdogReloads went ${reloadsBefore} -> ${counters.snapshot().totals.watchdogReloads}`
+    );
+    dockGrid({ animate: false });
+    await until(() => state.mode === 'grid');
+    const reloadedAfterDock = await until(
+      () => (counters.snapshot().totals.watchdogReloads || 0) > reloadsBefore,
+      10000
+    );
+    check(27, 'and docking released it', reloadedAfterDock);
+    upSpec.url = '';
+    loadPanel(contentViews[0], upSpec);
+
+    // ---- 28: Shift+Esc does not write the config -------------------------
+    //
+    // Esc-to-save is covered by step 14's neighbours. This is the other half, and
+    // the guarantee is specifically about the file: the overlay's Shift+Esc sends
+    // editExit({ discard: true }), which is exitEdit({ save: false }).
+    step(28, 'discarding a layout edit leaves the config file alone');
+    const cfgBefore = fs.readFileSync(configPath, 'utf8');
+    const editVictim = config.views[0];
+    const gridBefore = { ...editVictim.grid };
+    enterEdit();
+    await until(() => state.mode === 'edit');
+    editVictim.grid = { ...gridBefore, x: gridBefore.x + 40 };
+    exitEdit({ save: false });
+    await until(() => state.mode !== 'edit');
+    check(
+      28,
+      'the config file on disk is byte-identical',
+      fs.readFileSync(configPath, 'utf8') === cfgBefore
+    );
+    // Reported rather than asserted. Discard skips the write; it does not put the
+    // in-memory layout back, so the wall keeps showing the dragged position until
+    // it restarts. That may be fine and it may be surprising given the overlay
+    // labels the key "discard", but it is a product question, not a regression,
+    // and a self-test is the wrong place to decide it.
+    step(
+      28,
+      `after discard, in-memory grid.x is ${editVictim.grid.x} (was ${gridBefore.x}); ` +
+        'discard skips the save, it does not revert the live layout'
+    );
+    editVictim.grid = gridBefore;
+    refreshLayout();
+
+    // ---- 29: the fatal-config page renders ---------------------------------
+    //
+    // pages.js is unit tested, but docs/validation.md notes the rendered page has
+    // never actually been looked at. This looks at it: the real string, through
+    // the real dataUrl(), in a real renderer.
+    step(29, 'the fatal-config page renders readable text');
+    const fatalMsg = `selftest-fatal-${RUN_ID}`;
+    const probeView = contentViews[1];
+    probeView.webContents.loadURL(dataUrl(fatalPage(APP_NAME, fatalMsg, configPath)));
+    await until(() => !probeView.webContents.isLoading(), 10000);
+    const fatalText = await probeView.webContents.executeJavaScript(
+      'document.body ? document.body.innerText : ""',
+      true
+    );
+    check(29, 'it shows the message it was given', String(fatalText).includes(fatalMsg));
+    check(29, 'and names the config file', String(fatalText).includes('config'));
+    loadPanel(probeView, config.views[1]);
+
+    // ---- 30: hideInactiveWhenActive, measured -------------------------------
+    //
+    // An open product decision rather than a regression guard, so this measures
+    // and reports, and only asserts the part that would be a bug: that hidden
+    // panels come back. Step 22 already measured the option OFF - full rate on
+    // macOS, about 1Hz on Windows - and the comparison is the whole point.
+    step(30, 'hideInactiveWhenActive, measured rather than assumed');
+    const realHide = config.hideInactiveWhenActive;
+    config.hideInactiveWhenActive = true;
+    await markOf(
+      1,
+      'window.__wwTicks = 0; clearInterval(window.__wwT); window.__wwT = setInterval(() => window.__wwTicks++, 50); 1'
+    );
+    activate(0);
+    await until(() => state.mode === 'active' && state.activeIndex === 0);
+    await soon(watchMs);
+    const hiddenTicks = await markOf(1, 'window.__wwTicks || 0');
+    await markOf(1, 'clearInterval(window.__wwT); 1');
+    step(
+      30,
+      `hidden panel ran ${hiddenTicks} ticks of a 50ms interval in ${watchMs}ms ` +
+        `(step 22 measured ${ticks} with the option off, same run)`
+    );
+    dockGrid({ animate: false });
+    await until(() => state.mode === 'grid');
+    config.hideInactiveWhenActive = realHide;
+    refreshLayout();
+    check(
+      30,
+      'every panel is visible again after docking',
+      contentViews.every((cv) => cv && cv.getVisible && cv.getVisible() !== false)
+    );
+
+    for (const id of spares) deletePanel(id);
+
     if (failures.length) {
       warn(`selftest FAILED (${failures.length}): ${failures.join('; ')}`);
     } else {
@@ -2906,9 +3332,9 @@ function wallStatus() {
     recycles: recycleProbes.slice(-20),
     // Over the limit and unable to act. The gap between this being true and
     // anything being recycled is the interesting failure.
-    memoryPressure: !!memoryPressureSince,
-    memoryPressureSec: memoryPressureSince
-      ? Math.round((now - memoryPressureSince) / 1000)
+    memoryPressure: !!memoryLadder.pressureSince,
+    memoryPressureSec: memoryLadder.pressureSince
+      ? Math.round((now - memoryLadder.pressureSince) / 1000)
       : null,
     wall: { width: config.wall.width, height: config.wall.height, scale: round3(layout.scale) },
     presets: config.presets.map((p) => ({ id: p.id, name: p.name || p.id })),
@@ -3011,7 +3437,7 @@ const controlActions = {
     targets.forEach((i) => {
       const v = config.views[i];
       log(`reload requested for ${v.id}`);
-      contentViews[i].webContents.loadURL(v.url || placeholderURL(v));
+      loadPanel(contentViews[i], v);
     });
     return true;
   },
