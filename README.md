@@ -139,6 +139,38 @@ difference matters: a reload keeps `sessionStorage` and a rebuild does not, so
 `/api/recycle` is also how you find out whether a given dashboard survives being
 recycled before turning `recycleMs` on for it.
 
+## Starting on its own
+
+An exhibit wall has to come back without anyone driving it, and there are two
+different failures hiding in that sentence.
+
+**The machine rebooted.** Tick **Start at login** in the control page's settings,
+or set `"autoStart": true`. The app registers a login item and reconciles it at
+every boot, so deleting the entry by hand is noticed and put back. The page
+reports what the operating system says rather than what the config says, so a
+box that will not stay ticked tells you why. It is off by default: installing
+Wallwright never quietly adds itself to somebody's login items.
+
+Two things it deliberately will not do. It does nothing on Linux, and it does
+nothing in a development run, where `process.execPath` is the Electron binary in
+`node_modules` rather than the app.
+
+**The app died.** A login item cannot help here, because it fires once at logon
+and the process that would restart the app is the one that crashed. That needs a
+supervisor outside the app, which on Windows is
+`scripts/wallwright-autostart.ps1`: a Scheduled Task with restart-on-failure, an
+interactive principal so the wall lands on the display, and no execution time
+limit. Run it with `-Unregister` to take it off again.
+
+**Use one or the other.** Both at once launches two copies at logon; the second
+exits on the single-instance lock, so it is survivable, but there is no reason
+for it.
+
+The script has **never been run** — there is no show PC yet — so treat it as a
+reviewed starting point rather than a proven one. CI parses every
+`scripts/*.ps1` on the Windows runner, which proves they are valid PowerShell
+and nothing more. `docs/validation.md` group C lists what to check on the day.
+
 ## Where the montage is stored
 
 Installed, the app keeps its config in the user data directory and reads and

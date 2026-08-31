@@ -67,6 +67,9 @@ const BOOLEANS = {
   hideInactiveWhenActive: 'whether the other panels are hidden while one is promoted',
   idleResetUrls: 'whether idling puts every panel back to its configured URL',
   memoryRelaunch: 'whether the memory ladder may restart the app as a last resort',
+  // The login item, not a crash supervisor. src/autostart.js says why those are
+  // different problems and why only one of them can live in this process.
+  autoStart: 'whether the app registers itself to start when the operator logs in',
 };
 
 const WATCHDOG_NON_NEGATIVE = {
@@ -449,6 +452,10 @@ function withDefaults(c) {
     // renderers, and even then a wall that vanishes mid-demo is a worse failure
     // than a wall using a lot of RAM. There is no supervisor to bring it back.
     memoryRelaunch: c.memoryRelaunch ?? false,
+    // Off, so installing the app never quietly adds itself to somebody's login
+    // items. An exhibit wants it on, and the settings panel is where it goes on,
+    // at the machine it is going to run on.
+    autoStart: c.autoStart ?? false,
     minUptimeMs: c.minUptimeMs ?? 600000,
     maxRelaunches: c.maxRelaunches ?? 3,
     presenceGraceMs: c.presenceGraceMs ?? 60000,

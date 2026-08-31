@@ -45,6 +45,7 @@ const {
   failureReport,
   isRealLoadFailure,
 } = require('./watchdog');
+const autostart = require('./autostart');
 const { createControlServer } = require('./control-server');
 const { statusPage } = require('./control-page');
 const { createDiagLog } = require('./diag-log');
@@ -517,6 +518,7 @@ function createWall() {
     startUpkeep();
     startMemoryWatch();
     startControlServer();
+    applyAutoStart();
   });
 }
 
@@ -3337,6 +3339,10 @@ function wallStatus() {
       ? Math.round((now - memoryLadder.pressureSince) / 1000)
       : null,
     wall: { width: config.wall.width, height: config.wall.height, scale: round3(layout.scale) },
+    // Reports what the OS says, not what the config says. The two are separate
+    // fields because somebody who deleted the Run entry by hand should see an
+    // unticked box, not a ticked one that is lying.
+    autoStart: autostart.describe(config, loginItemSettings(), autoStartEnv()),
     presets: config.presets.map((p) => ({ id: p.id, name: p.name || p.id })),
     panels: config.views.map((v, i) => {
       const wc = contentViews[i] && contentViews[i].webContents;
@@ -3442,6 +3448,53 @@ const controlActions = {
     return true;
   },
 };
+
+// ---- auto-start -------------------------------------------------------------
+//
+// The login item only. src/autostart.js has the long version of why a crash needs
+// something outside this process and this is not it.
+
+function autoStartEnv() {
+  return {
+    platform: process.platform,
+    execPath: process.execPath,
+    isPackaged: app.isPackaged,
+  };
+}
+
+// Reading the OS is the part that can throw - it is a registry read on Windows -
+// so it is wrapped, and a failure reads as "off" rather than taking the status
+// page down with it.
+function loginItemSettings() {
+  try {
+    return app.getLoginItemSettings();
+  } catch (e) {
+    warn(`could not read the login item: ${e.message}`);
+    return null;
+  }
+}
+
+// Called at startup and again whenever the setting changes. Idempotent: reconcile
+// returns null when the OS already agrees, so this is safe to call on every boot
+// and costs nothing when there is nothing to do.
+function applyAutoStart() {
+  const desired = autostart.desiredLoginItem(config, autoStartEnv());
+  if (desired.blocked) {
+    // Only worth a line when somebody asked for it and is not getting it.
+    if (desired.wanted) log(`autoStart is set but inert: ${desired.reason}`);
+    return;
+  }
+  const change = autostart.reconcile(desired, loginItemSettings());
+  if (!change) return;
+  try {
+    app.setLoginItemSettings(change);
+    log(`autoStart: login item ${change.openAtLogin ? 'registered' : 'removed'}`);
+  } catch (e) {
+    warn(
+      `could not ${change.openAtLogin ? 'register' : 'remove'} the login item: ${e.message}`
+    );
+  }
+}
 
 function startControlServer() {
   const { port, host } = config.control;

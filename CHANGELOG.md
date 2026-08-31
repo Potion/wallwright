@@ -44,6 +44,41 @@ turns it off.
 Unchanged and still blocked on the real dashboards: `allowedOrigins` is still
 empty, and the per-panel `zoom` values are still 1 rather than tuned.
 
+### Auto-start, in the two halves it actually has
+
+`AGENTS.md` carried "auto-launch on boot and crash restart" as one TODO item. It
+is two, they fail differently, and only one of them can live in this process.
+
+**The machine rebooted** is a login item, and that is new: `autoStart`, off by
+default, reconciled at every boot so an entry deleted by hand is noticed and put
+back. `src/autostart.js` holds the decisions and imports no electron, so
+`test/autostart.test.js` covers them on plain node. Two refusals in there are
+deliberate. It does nothing on Linux, and it does nothing in an unpackaged run,
+where `process.execPath` is the Electron binary under `node_modules` — the probe
+answer recording exactly that path is in `docs/validation.md`.
+
+**The app died** cannot be a login item. It fires once at logon, and the process
+that would restart the app is the one that crashed. That half is
+`scripts/wallwright-autostart.ps1`, a Scheduled Task with restart-on-failure,
+`InteractiveToken` so the wall lands on the display, `ExecutionTimeLimit` PT0S
+and `Priority` 4. Its load-bearing detail is that the action is the **exe
+itself**: `docs/soak-run.md` records the soak's own `SoakWall` task sitting in
+state _Ready_ rather than _Running_, because PowerShell does not block on a GUI
+app, and a task that has already completed cannot restart anything. The script
+refuses to register a non-`.exe` action for that reason.
+
+**The script has never been run.** There is no show PC. CI now parses every
+`scripts/*.ps1` on the Windows runner, which proves they are valid PowerShell and
+nothing further; that gate exists because these files only ever execute somewhere
+nothing else would catch a syntax error. Both halves are in `docs/validation.md`
+group C with what to check on the day.
+
+Also new, and read-only on purpose: `npm run probe` now reports the login item
+API. Registering one would write into the login items of whoever runs the probe,
+and the macOS CI job runs on a person's own machine. It turned up that
+`executableWillLaunchAtLogin` is present on macOS despite being documented as
+Windows-only, so it cannot be used as a platform test and is not.
+
 ## 0.1.2 - 2026-08-31
 
 The first release since the audit, and the first with evidence behind it rather

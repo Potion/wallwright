@@ -40,6 +40,28 @@ app.whenReady().then(async () => {
     results.animatedSetBounds = 'threw: ' + e.message;
   }
 
+  // Q5: what does the login item API actually report on this platform, and does
+  // it exist at all? Read-only on purpose. Registering one would write into the
+  // login items of whoever runs this, and the macOS CI job is somebody's own
+  // machine. src/autostart.js decides what to set; this only records what is
+  // readable, which is the half that shapes the status page.
+  try {
+    const li = app.getLoginItemSettings();
+    results.loginItem = {
+      keys: Object.keys(li).sort(),
+      openAtLogin: li.openAtLogin,
+      // Windows-only in the docs. Recording whether it is actually present is
+      // the point: the status page would otherwise assume.
+      hasExecutableWillLaunchAtLogin: 'executableWillLaunchAtLogin' in li,
+      wasOpenedAtLogin: li.wasOpenedAtLogin,
+    };
+  } catch (e) {
+    results.loginItem = 'threw: ' + e.message;
+  }
+  results.hasSetLoginItemSettings = typeof app.setLoginItemSettings === 'function';
+  results.packaged = app.isPackaged;
+  results.execPath = process.execPath;
+
   results.electron = process.versions.electron;
   results.chrome = process.versions.chrome;
   results.platform = process.platform;
