@@ -2960,18 +2960,24 @@ function selfTest() {
     );
     activate(0);
     await until(() => state.mode === 'active' && state.activeIndex === 0);
-    await soon(1200);
+    const watchMs = 3000;
+    await soon(watchMs);
     const ticks = await markOf(1, 'window.__wwTicks || 0');
     await markOf(1, 'clearInterval(window.__wwT); 1');
-    // Generously under 1200/50, because a loaded runner and Chromium's own
-    // background throttling both legitimately slow this down. The question is
-    // whether it stopped, not whether it kept perfect time.
+    // The assertion is "did not stop", not a rate, and that distinction was
+    // earned. A 50ms interval over 1200ms with a `>= 3` threshold passed on macOS
+    // and failed on PROTO1-P8 with 1 tick, because Windows throttles an occluded
+    // renderer to about 1Hz and macOS does not. That is a real platform
+    // difference rather than a flaky test, it is recorded in docs/validation.md,
+    // and asserting any rate here would be asserting one platform's behaviour.
+    // Frozen is 0; the window is long enough that even 1Hz clears it comfortably.
     check(
       22,
       'its timers still fired while another panel was fullscreen',
-      ticks >= 3,
-      `${ticks} ticks in 1200ms; 0 means the renderer was frozen`
+      ticks >= 1,
+      `0 ticks in ${watchMs}ms means the renderer was frozen`
     );
+    step(22, `observed ${ticks} ticks of a 50ms interval in ${watchMs}ms while backgrounded`);
     dockGrid({ animate: false });
     await until(() => state.mode === 'grid');
 
@@ -3016,29 +3022,47 @@ function selfTest() {
     await until(() => state.mode === 'grid');
     const zoomA = zoomOf(0);
     const zoomB = zoomOf(1);
+    // Compared against panelZoom(), which is `zoom * layout.scale`, not against
+    // the raw config value. Asserting 0.75 passed on the dev machine and failed
+    // on PROTO1-P8 with 0.6, because that runner fits a 1280x800 wall into a
+    // 1024x768 display at scale 0.8. The app was right and the assertion had a
+    // scale of 1.0 baked into it - the same mistake three steps made with
+    // ww:addPanel, and the reason wallPx() exists at the top of this function.
+    const wantA = panelZoom(0);
+    const wantB = panelZoom(1);
+    const near = (got, want) => Math.abs(got - want) < 0.01;
+    const scaleNote = `layout.scale=${layout.scale.toFixed(3)}`;
     check(
       24,
       'the promoted panel got its own factor',
-      Math.abs(activeA - 0.75) < 0.01,
-      `a=${activeA}`
+      near(activeA, wantA),
+      `a=${activeA}, expected ${wantA} (${scaleNote})`
     );
     check(
       24,
       'the other panel was not zoomed while it was promoted',
-      Math.abs(activeB - 1) < 0.01,
-      `b=${activeB} while a was fullscreen at 0.75`
+      near(activeB, wantB),
+      `b=${activeB}, expected ${wantB}; a was fullscreen at ${wantA} (${scaleNote})`
     );
     check(
       24,
       'the zoomed panel kept its own factor',
-      Math.abs(zoomA - 0.75) < 0.01,
-      `a=${zoomA}`
+      near(zoomA, wantA),
+      `a=${zoomA}, expected ${wantA} (${scaleNote})`
     );
     check(
       24,
       'its neighbour still was not, after docking',
-      Math.abs(zoomB - 1) < 0.01,
-      `b=${zoomB}`
+      near(zoomB, wantB),
+      `b=${zoomB}, expected ${wantB} (${scaleNote})`
+    );
+    // The leak this step exists for is the two factors becoming equal. Asserted
+    // separately so it cannot be satisfied by both simply being wrong together.
+    check(
+      24,
+      'the two panels still have different factors',
+      Math.abs(wantA - wantB) > 0.01 && Math.abs(zoomA - zoomB) > 0.01,
+      `a=${zoomA} b=${zoomB}`
     );
     config.views[0].zoom = realZoom;
     refreshLayout();

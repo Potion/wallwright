@@ -39,6 +39,33 @@ on both target platforms. The self-test is 73 assertions, up from 64.
   minutes. Only administrators have input, so this timer is the common path back
   to the grid, not an edge case.
 
+**The Windows runner then failed two of them, and both were the test's fault, not
+the app's.** Which is the job doing exactly what it exists for.
+
+Step 24 expected a zoom factor of 0.75 and got 0.6. The app was right:
+`panelZoom()` is `zoom * layout.scale`, and `PROTO1-P8` fits a 1280x800 wall into
+a 1024x768 display at 0.8. The assertion had a scale of 1.0 baked into it, which is
+invisible on a dev machine where the scale _is_ 1.0. **That is the second time that
+exact mistake has been made here**, after three steps once passed wall units to
+`ww:addPanel` for the same reason, and the second time this runner is the only
+thing that caught it. It compares against `panelZoom()` now.
+
+Step 22 expected at least three ticks of a 50ms interval and got one. That one is
+not a test bug but a finding: **Windows throttles an occluded renderer to about
+1Hz, and macOS runs it at the full rate** - 1 tick in 1200ms against 60 in 3000ms,
+with `hideInactiveWhenActive` `false` in both cases, so the panel was visible and
+merely covered. On the deployment target, promoting one dashboard drops the other
+three to roughly one update a second. Nothing is broken, but "the other panels keep
+running" is a weaker promise on the show platform than the dev machine suggests.
+The step now asserts the renderer did not stop and logs the observed count, because
+asserting a rate would be asserting one platform's behaviour and calling the other
+a failure.
+
+That also part-answers the open `hideInactiveWhenActive` question, whose premise
+was that leaving it off keeps panels at full rate. On Windows it does not, so the
+trade is "throttled versus hidden" rather than "full rate versus throttled", and
+the GPU-headroom argument for it is correspondingly weaker.
+
 Each was proven to fail against the behaviour it guards before being counted, and
 one of them did not. The first version of the zoom check sampled only after
 docking, and a leak injected into `activate()` did not trip it: `showPanelsInGrid()`

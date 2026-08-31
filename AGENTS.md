@@ -139,8 +139,13 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
 7. **Cursor auto-hide when idle.** Needs a native Windows approach; there is no
    cross-platform Electron API.
 8. **Decide `hideInactiveWhenActive`** (default off). Several live dashboards on
-   a 4K wall is real GPU load, but hiding a view may throttle it. Mock 4's ticker
-   exists to measure this.
+   a 4K wall is real GPU load, but hiding a view may throttle it. **The premise
+   has moved:** self-test step 22 measured a backgrounded panel at about 1Hz on
+   Windows against the full rate on macOS, with this option already `false`, so
+   occlusion alone throttles on the deployment target. The trade is "throttled
+   versus hidden", not "full rate versus throttled", which weakens the
+   GPU-headroom argument. Measuring the `true` case is still worth doing; see
+   "Windows throttles a backgrounded panel" in `docs/validation.md`.
 9. **Sustained run against the real dashboards**, once the URLs exist, for session
    expiry rather than memory. Four live public dashboards measured 1513MB.
 10. Optional polish: an idle countdown before auto-return, and a manual "reset

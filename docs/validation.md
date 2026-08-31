@@ -1432,8 +1432,13 @@ no longer active`, and that it only reloads after docking. The second path
 - [ ] **Promote/return animation.** `transitionMs` is 220. Animated `setBounds`
       is confirmed not to throw, but the animation itself has not been watched.
 - [ ] **`hideInactiveWhenActive`.** Default `false`. Flip it to `true` and check
-      whether the hidden panels keep running (mock 4's ticker) or get throttled.
-      That decides whether it is safe to use for GPU headroom on a 4K wall.
+      whether the hidden panels keep running or get throttled. **Half answered
+      already, and the premise moved:** with this option `false`, self-test step
+      22 measures a backgrounded panel at about 1Hz on Windows and at the full
+      rate on macOS, so occlusion alone throttles on the deployment target. The
+      question is now "throttled versus hidden" rather than "full rate versus
+      throttled". See "Windows throttles a backgrounded panel to about 1Hz"
+      above.
 
 ### B. Needs the real dashboards
 
@@ -1635,6 +1640,69 @@ config and every deployed `userData` copy to settle a question of taste.
 lint and prettier. The self-test is what carries this, since none of `src/main.js`
 has unit tests, and it drives preset recall, edit mode, select mode, panel CRUD and
 a real pointer drag, which between them exercise all five extractions.
+
+### Windows throttles a backgrounded panel to about 1Hz; macOS does not
+
+Found by the Windows CI job on the first run of self-test step 22, which is
+precisely what that job exists for. Not a flaky test: the same code, the same
+assertion, two platforms, two different real behaviours.
+
+A 50ms interval running in a panel's renderer, measured while a _different_ panel
+is promoted fullscreen:
+
+| platform                | ticks observed | effective rate                            |
+| ----------------------- | -------------- | ----------------------------------------- |
+| macOS, `hqmbp26-crouse` | 60 in 3000ms   | 20Hz, the full rate, no throttling at all |
+| Windows, `PROTO1-P8`    | 1 in 1200ms    | about 1Hz                                 |
+
+**`hideInactiveWhenActive` was `false` for both.** The backgrounded panel was still
+visible and still had bounds; it was simply _occluded_ by the promoted panel.
+Chromium throttles occluded renderers on Windows and, on this evidence, does not on
+macOS.
+
+**Why this matters for the wall, and it is not a small thing.** Windows is the
+deployment target. When an operator promotes one dashboard, the other three do not
+freeze, but they drop to roughly one update a second. A dashboard animating a trend
+line, or one that polls every 250ms, is effectively at 1fps behind the promoted
+panel, and will be showing something up to a second stale the moment it is docked
+again. Nothing here is broken, and there is no bug to fix, but "the other panels
+keep running" is a weaker statement on the show platform than the dev machine
+suggests.
+
+**It also partly answers the open `hideInactiveWhenActive` question**, which the
+checklist framed as "flip it to `true` and check whether the hidden panels keep
+running or get throttled". The premise was that leaving it `false` keeps them
+running at full rate, and on Windows that premise is wrong: they are already
+throttled by occlusion. So the trade is not "full rate versus throttled" but
+"throttled versus hidden", which is a much smaller difference than the option's
+description implies, and weakens the GPU-headroom argument for it correspondingly.
+Measuring the `true` case is still worth doing, and is still on the list, but it is
+now a comparison against 1Hz rather than against 20.
+
+**Step 22 therefore asserts that the renderer did not stop, and does not assert a
+rate.** Asserting any rate would be asserting one platform's behaviour and calling
+the other a failure. The observed count is logged on every run, so the difference
+stays visible rather than being flattened into a green tick.
+
+#### And a scale-1.0 assumption, for the second time
+
+The same CI run failed step 24 with `a=0.6000000000000001` where the test expected
+0.75. The app was right: `panelZoom(i)` is `config.views[i].zoom * layout.scale`,
+and `PROTO1-P8` fits a 1280x800 wall into a 1024x768 display at scale 0.8, so
+0.75 x 0.8 = 0.6 is the correct answer. The assertion had a scale of 1.0 baked into
+it, which is invisible on a dev machine where the scale _is_ 1.0.
+
+This is the second time that exact mistake has been made in this file's history -
+see "What CI covers", where three steps passed wall units to `ww:addPanel` for the
+same reason - and the second time the Windows runner is the only thing that caught
+it. The step now compares against `panelZoom()`, the app's own computation, and
+asserts separately that the two panels' factors differ, so the check cannot be
+satisfied by both being wrong in the same direction.
+
+**The general lesson, worth stating once plainly:** on the dev machine
+`layout.scale` is 1.0, which makes wall units, window pixels and configured zoom
+all numerically identical to their scaled forms. Any self-test assertion written
+against a literal is therefore untested until it runs somewhere the scale is not 1.
 
 ### Three gates that were documented rather than enforced
 
