@@ -304,7 +304,7 @@ writes this file.
     "maxAttempts": 5,
     "retryMs": 600000,
   },
-  "control": { "port": 0, "host": "127.0.0.1" }, // 0 = no control surface
+  "control": { "port": 8901, "host": "127.0.0.1" }, // 0 = no control surface
   "backButton": { "x": 24, "y": 24, "width": 176, "height": 56 },
   "views": [
     // May be empty: a montage can be built from a blank wall in the editor.
@@ -323,9 +323,15 @@ writes this file.
 }
 ```
 
-The committed `config/wall.json` uses placeholder `example.com` URLs. Local
-configs matching `config/local*.json` are gitignored, which is where real or
-demo URLs belong.
+The committed `config/wall.json` uses **placeholder URLs, not real ones**: two
+live Grafana Play boards, `earth.nullschool.net` and `windy.com`. They are
+deliberately heavy, so a fresh install looks and loads like the real thing rather
+than like four copies of `example.com`, and two of them are content the 72-hour
+soak actually measured. Replace them before a deployment. Local configs matching
+`config/local*.json` are gitignored, which is where real or demo URLs belong.
+
+That file also ships with the control surface **on**, at `127.0.0.1:8901`, because
+it is where the settings live. Set `control.port` to 0 to turn it off.
 
 ## Build
 

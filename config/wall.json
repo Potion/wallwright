@@ -24,7 +24,7 @@
     "rule": "memoryLimitMb = roundUp250(max(1.35*p95_24h, 1.15*peak_72h)); memoryHardLimitMb = roundUp250(max(2*p95_24h, memoryLimitMb+750)). See memoryLimitFromBaseline() in src/upkeep.js.",
     "why": "A limit inside the normal operating band is worse than no limit: it rebuilds a panel on every check. Measured with a limit under the baseline, memory went from 1513MB to 1885MB while recycling every five seconds. See docs/validation.md.",
     "gpu_path": "RESOLVED 2026-08-31, Jeff: the HDMI on the show PC is always plugged into the discrete GPU port, same path as the A1000 this was measured on. That is what makes the baseline transfer. It matters because on a discrete card the textures and framebuffers live in VRAM and never enter this number, while on integrated graphics they come out of system RAM and do, which would put the same workload somewhere else entirely against the limit. If a show PC ever runs off the motherboard port, this baseline is void and must be re-measured.",
-    "recheck_when": "These figures come from the soak lineup (a static page, a synthetic WebGL page, play.grafana.org and earth.nullschool.net), NOT from the real Honeywell dashboards, which did not exist when it was measured. Real dashboards are the one thing most likely to move p95. Re-measure when the real URLs land, and until then treat 2000 as a guard against runaway growth rather than a tuned figure. See AGENTS.md TODO for the sustained run against the real dashboards.",
+    "recheck_when": "These figures come from the soak lineup (a static page, a synthetic WebGL page, play.grafana.org and earth.nullschool.net), NOT from the real Honeywell dashboards, which did not exist when it was measured. Real dashboards are the one thing most likely to move p95. Re-measure when the real URLs land, and until then treat 2000 as a guard against runaway growth rather than a tuned figure. NOTE the placeholder lineup in this file is NOT the soak lineup: two of the soak arms were local pages served by the dev harness on localhost:8787, and src/dev does not ship, so they were replaced with a second Grafana Play board and windy.com. Only view-3 (earth) and the Grafana boards are measured content; the limit transfers approximately, not exactly. See AGENTS.md TODO for the sustained run against the real dashboards.",
     "units": "These are the app's own metric (summed workingSetSize), which is what upkeep.js compares at runtime. Measured at 1.44x private bytes and stable across the whole run, so 2000 here is about 1389MB of private bytes. Do not compare these figures to Task Manager without that factor.",
     "peak_note": "peak_72h 1537 is the single T0 startup sample; steady state was 1261 to 1406. The p95 term dominates the rule either way, so the limit is 2000 whether the peak is taken as 1537 or as 1406.",
     "measured_so_far": "Superseded by the soak above. The earlier figure was four live public dashboards on the dev machine, macOS: 1513MB total (Tab 1143, Browser 169, GPU 131, Utility 70). One instantaneous sample, not the show PC, not the real dashboards."
@@ -38,60 +38,64 @@
     "width": 176,
     "height": 56
   },
+  "control": {
+    "port": 8901,
+    "host": "127.0.0.1"
+  },
   "views": [
     {
       "id": "view-1",
-      "label": "Panel 1 (replace with real Honeywell URL)",
-      "url": "https://example.com/dashboard-1",
+      "label": "Grafana Play home (replace with a real Honeywell URL)",
+      "url": "https://play.grafana.org/d/000000012/grafana-play-home",
       "grid": {
         "x": 0,
         "y": 0,
         "width": 1920,
         "height": 1080
       },
-      "zoom": 1.0,
+      "zoom": 1,
       "partition": "persist:wall-1",
       "allowedOrigins": []
     },
     {
       "id": "view-2",
-      "label": "Panel 2 (replace with real Honeywell URL)",
-      "url": "https://example.com/dashboard-2",
+      "label": "Kubernetes integration (replace with a real Honeywell URL)",
+      "url": "https://play.grafana.org/d/lAoEVhD7z/home-kubernetes-integration",
       "grid": {
         "x": 1920,
         "y": 0,
         "width": 1920,
         "height": 1080
       },
-      "zoom": 1.0,
+      "zoom": 1,
       "partition": "persist:wall-2",
       "allowedOrigins": []
     },
     {
       "id": "view-3",
-      "label": "Panel 3 (replace with real Honeywell URL)",
-      "url": "https://example.com/dashboard-3",
+      "label": "Earth wind map, WebGL (replace with a real Honeywell URL)",
+      "url": "https://earth.nullschool.net/",
       "grid": {
         "x": 0,
         "y": 1080,
         "width": 1920,
         "height": 1080
       },
-      "zoom": 1.0,
+      "zoom": 1,
       "partition": "persist:wall-3",
       "allowedOrigins": []
     },
     {
       "id": "view-4",
-      "label": "Panel 4 (replace with real Honeywell URL)",
-      "url": "https://example.com/dashboard-4",
+      "label": "Windy, WebGL (replace with a real Honeywell URL)",
+      "url": "https://www.windy.com/",
       "grid": {
         "x": 1920,
         "y": 1080,
         "width": 1920,
         "height": 1080
       },
-      "zoom": 1.0,
+      "zoom": 1,
       "partition": "persist:wall-4",
       "allowedOrigins": []
     }
