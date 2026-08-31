@@ -37,11 +37,20 @@ watch; it was warm-up being extrapolated.
 
 `_memoryBaseline` in `config/wall.json` is filled in from the run: `p95_24h` 1367,
 `peak_72h` 1537, `driftMbPerHour` 0.45, which the committed rule turns into
-`memoryLimitMb` 2000 and `memoryHardLimitMb` 2750. **`memoryLimitMb` is still 0.**
-The baseline was measured with the video cable on a discrete GPU, where textures and
-framebuffers live in VRAM and never enter the number the limit is compared against,
-and nothing yet records how the show PC is cabled. A baseline from one path does not
-transfer to the other, so the number is recorded and the switch stays off.
+`memoryLimitMb` 2000 and `memoryHardLimitMb` 2750, **and both are now set**. The
+memory countermeasure is live for the first time; it has shipped inert since it was
+written.
+
+Switching it on was gated on one question about a cable. The baseline was measured
+with the video on a discrete GPU, where textures and framebuffers live in VRAM and
+never enter the number the limit is compared against; on integrated graphics they
+come out of system RAM and do. Jeff confirmed the show PC's HDMI is always in the
+discrete GPU port, so the path matches and the baseline transfers. If one ever runs
+off the motherboard port, the baseline is void.
+
+The limit is a runaway guard rather than a tuned figure, and the write-up says so:
+it was measured against the soak lineup, not the real Honeywell dashboards, which do
+not exist yet and are the thing most likely to move `p95_24h`.
 
 Two long-open questions are also closed. The `workingSetSize` versus private-bytes
 gap is **1.44 and stable** across the whole run, not the drifting figure the two

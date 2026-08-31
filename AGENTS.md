@@ -97,10 +97,17 @@ disclosed and argued rather than omitted: `lastUsedSecAgo` proves it was exactly
 event, it never touched the other three arms, and it is 19.6 hours before the scored
 window opens. The verdict stands on a clean final 24 hours.
 
-**`_memoryBaseline` is now filled in** with `p95_24h` 1367, `peak_72h` 1537 and
-`driftMbPerHour` 0.45, which the committed rule turns into `memoryLimitMb` 2000 and
-`memoryHardLimitMb` 2750. **`memoryLimitMb` is still 0**, and the single thing
-blocking it is below.
+**The memory countermeasure is switched ON**, for the first time since it was
+written. `_memoryBaseline` is filled in with `p95_24h` 1367, `peak_72h` 1537 and
+`driftMbPerHour` 0.45, and `config/wall.json` now ships `memoryLimitMb` **2000** and
+`memoryHardLimitMb` **2750** from the committed rule. What unblocked it: Jeff
+confirmed on 2026-08-31 that the show PC's HDMI is always in the discrete GPU port,
+the same path the baseline was measured on, so it transfers. If a show PC ever runs
+off the motherboard port the baseline is void and must be re-measured.
+
+**The limit is a guard, not a tuned figure.** It was measured against the soak
+lineup, not the real Honeywell dashboards, which are the thing most likely to move
+`p95_24h`. Re-measure when the real URLs land.
 
 Also settled by the run: the `workingSetSize` versus private-bytes gap, open since
 the original 699MB datum, is **1.44 and stable**, not the drifting figure the
@@ -123,16 +130,13 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
 
 ## Build / harden next (TODO)
 
-1. **Find out how the show PC is cabled, then switch the countermeasure on.** This
-   is the whole remainder of the soak work and it is one question: is the video
-   cable on a discrete GPU or the integrated chip? The baseline was measured on a
-   discrete A1000, where textures and framebuffers live in VRAM and never appear in
-   the number `memoryLimitMb` is compared against; on integrated they come out of
-   system RAM and do. A baseline from one path does not transfer to the other. Once
-   it is known, set `memoryLimitMb` to **2000** and `memoryHardLimitMb` to **2750**
-   from the already-filled `_memoryBaseline`, or re-measure if the path differs. Do
-   not guess it: a limit inside the normal operating band was measured taking memory
-   _up_, from 1513 to 1885MB.
+1. **Re-measure the memory baseline once the real dashboards are wired.** The
+   countermeasure is now on at `memoryLimitMb` 2000, but that came from the soak
+   lineup, not from the real Honeywell dashboards. They are the one thing most
+   likely to move `p95_24h`, and a limit that lands inside the normal operating band
+   is worse than no limit: measured, it took memory _up_ from 1513 to 1885MB while
+   recycling every five seconds. Treat 2000 as a runaway guard until then, and
+   re-derive it from `_memoryBaseline`'s rule against real content.
 2. **Fix the two harness defects the run exposed**, before any fourth soak. The
    grab task's console knocks the window to scale 0.999 and the geometry check
    cannot see it; the sampler should record the app's reported scale as a column.

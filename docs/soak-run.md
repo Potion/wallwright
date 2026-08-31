@@ -29,10 +29,10 @@ validation write-up in full:
    run, occluding part of two panels. Harmless to the result, and visible in every
    one of the 180 grabs.
 
-`_memoryBaseline` in `config/wall.json` is filled in from this run. `memoryLimitMb`
-stays 0 until the show PC's GPU path is known, because a baseline measured on a
-discrete card does not transfer to an integrated one. `docs/validation.md` has all
-three write-ups.
+`_memoryBaseline` in `config/wall.json` is filled in from this run, and the
+countermeasure is now switched on at `memoryLimitMb` 2000 / `memoryHardLimitMb` 2750. That was gated on the show PC using the same GPU path as the test machine,
+which Jeff confirmed on 2026-08-31: the HDMI is always in the discrete GPU port.
+`docs/validation.md` has all three write-ups.
 
 **Both earlier attempts died the same way: the machine was in use and this work did
 not know.** The first was displaced by `C:\HQ\SoDA\MS_Immersive_Tunnel.exe

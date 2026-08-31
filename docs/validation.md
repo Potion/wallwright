@@ -1262,7 +1262,7 @@ The flag is doing its job and the summary is not lying; it is reporting a per-sa
 state under a name that sounds like an event. Worth narrowing to a comparison
 against the post-load URL, or renaming, before anyone reads a future run cold.
 
-#### The measured baseline, and why `memoryLimitMb` is still 0
+#### The measured baseline, and the countermeasure switched on
 
 The run's purpose was to produce these four numbers, in the app's own metric because
 that is what `upkeep.js` compares against at runtime:
@@ -1284,21 +1284,36 @@ dominates the maximum either way, so the limit is 2000 whether the peak is taken
 1537, as 1406 excluding the first hour, or as 1406 from the final 24 hours alone. It
 did not need deciding.
 
-`_memoryBaseline` is filled in with those measurements. **`memoryLimitMb` stays 0**,
-deliberately, and this is the one place where the run does not finish the job:
+`_memoryBaseline` is filled in with those measurements, and **`config/wall.json` now
+ships `memoryLimitMb` 2000 and `memoryHardLimitMb` 2750**. The memory countermeasure
+is switched on for the first time; it has shipped inert since it was written.
 
-- **Nothing records how the show PC is cabled.** This baseline was measured with the
-  video cable on a discrete A1000, where textures and framebuffers live in VRAM and
-  are invisible to private bytes. On an integrated chip the same allocations come out
-  of system RAM and land inside the number the limit is compared against. A baseline
-  measured on one path does not transfer to the other, and 2000MB shipped to a
-  machine cabled the other way is a guess wearing a measurement's clothes.
-- A limit inside the normal operating band is worse than no limit: it rebuilds a
-  panel on every check, measured taking memory **up** from 1513 to 1885MB.
+**What unblocked it was a question about a cable.** The baseline was measured with
+the video cable on a discrete A1000, where textures and framebuffers live in VRAM
+and never enter the number the limit is compared against. On integrated graphics the
+same allocations come out of system RAM and do enter it, so a baseline from one path
+does not transfer to the other, and 2000MB shipped to a machine cabled the other way
+would be a guess wearing a measurement's clothes. Jeff confirmed on 2026-08-31 that
+the HDMI on the show PC is always in the discrete GPU port. Same path, so the
+baseline transfers. **If a show PC ever runs off the motherboard port, this baseline
+is void and has to be re-measured**, which is why the reason is written down here
+and in `_memoryBaseline.gpu_path` rather than left as folklore.
 
-So the number is measured, recorded and ready, and switching it on is one line once
-the show PC's GPU path is known. That is the last thing between here and a shipped
-countermeasure.
+**One caveat that survives, and it is the more likely of the two to bite.** These
+figures come from the soak lineup: a static page, a synthetic WebGL page,
+`play.grafana.org` and `earth.nullschool.net`. They do **not** come from the real
+Honeywell dashboards, which did not exist when this was measured. Real dashboards
+are the single thing most likely to move `p95_24h`, and the rule's headroom is 1.35x
+over a p95 measured on other content. So 2000 is honestly described as a guard
+against runaway growth, not as a tuned figure, and it should be re-measured when the
+real URLs land. That is already a separate item in `AGENTS.md`.
+
+The reason this is worth being careful about rather than just picking a round
+number: a limit inside the normal operating band is worse than no limit, because it
+rebuilds a panel on every check. Measured, that took memory **up** from 1513 to
+1885MB while recycling every five seconds. 2000 sits 633MB above the measured p95
+and 594MB above the highest single sample in the scored window, so it is outside the
+band with room to spare on this content.
 
 #### What this run does not settle
 
