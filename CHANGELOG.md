@@ -18,6 +18,46 @@ built from, so nothing is unrecoverable.
 
 ## Unreleased
 
+### The last duplications, and one comment that had stopped being true
+
+Phase 6, and the end of the audit.
+
+`loadPanel()` has always carried a comment calling itself "the one place that
+decides" what an empty URL means, so the watchdog could not disagree with every
+other load path. It was not the one place. Three other sites built the same
+`v.url || placeholderURL(v)` expression inline and called `loadURL` themselves:
+creating a view, applying a URL change, and the control surface's reload. They
+agreed with it by coincidence, and none of them got the catch that is there
+because a torn-down `webContents` throws synchronously. All six load sites route
+through it now.
+
+Checked rather than assumed while in there: `loadURL` rejects on `ERR_ABORTED`,
+which is routine, and `unhandledRejection` logs at fatal level. That looked like it
+might mean spurious fatal lines in the log. It does not, and the completed soak
+says so: zero unhandled rejections in 5787 lines over 90 hours. Left alone, but
+there is now one place to change it if that ever stops being true.
+
+`indexOfId()` existed and four other places inlined the same `findIndex` anyway,
+one of them a local arrow inside `checkMemory()` that shadowed it with an identical
+body. All four call the helper now.
+
+A scan for repeated four-line runs found three blocks, and collapsed them into
+`contentWebPreferences(v)`, `showPanelsInGrid()` and `raiseOverlay()`. **The first
+is the one that mattered**: `contextIsolation: true`, `nodeIntegration: false`,
+`sandbox: true` and the shared activity preload were written out twice, for the two
+surfaces that display somebody else's page. Divergence there is a security
+regression, not an inconsistency, and an SSO popup with `contextIsolation`
+accidentally off still logs people in perfectly. The popup copy even carried a
+comment saying its preload had to match the content views', which is exactly the
+kind of invariant a comment cannot hold and a function can.
+
+The fourth item on the phase's list, naming drift, was looked for and is not there:
+no `panelId` or `viewId`, and `v` for a config spec against `view` for the Electron
+object holds across every module. The one real inconsistency, `config.views`
+holding things the runtime calls panels, is in the config schema, and renaming it
+would break every committed config and every deployed profile to settle a question
+of taste. Recorded as a non-finding rather than turned into churn.
+
 ### Three gates that were documented rather than enforced
 
 The rest of the audit's phase 4. Each of these was a fact `docs/validation.md`

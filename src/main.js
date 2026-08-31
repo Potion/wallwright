@@ -522,6 +522,15 @@ function createWall() {
 
 // ---- panel lifecycle -------------------------------------------------------
 
+// Spec index by panel id, and the only way to do that lookup. It used to be four
+// inline `findIndex` calls plus a local arrow inside checkMemory that shadowed
+// this one, which is how a lookup drifts: they all agreed, but nothing made them.
+// Returns -1 for a panel that is gone, which callers must check, because
+// deletePanel() splices specs out while handlers are still attached.
+function indexOfId(id) {
+  return config.views.findIndex((v) => v.id === id);
+}
+
 // A panel with no URL yet is a normal state right after it is created in the
 // editor. Show something that says so rather than a black rectangle.
 function placeholderURL(v) {
@@ -592,15 +601,28 @@ function guardPermissions(partition) {
   ses.setPermissionCheckHandler((wc, permission) => decide(wc, permission));
 }
 
+// The security posture for every web surface that shows somebody else's page:
+// the content views and the SSO popups they open. One object, because these are
+// the settings that must not drift apart. They were written out twice, and the
+// popup site carried a comment explaining that its preload had to match the
+// content views' - which is exactly the sort of invariant a comment cannot keep.
+//
+// The preload is the activity reporter. Without it on the popup, typing a
+// password into an SSO form would not count as activity, the idle timer would
+// dock the wall and the popup would close mid-login.
+function contentWebPreferences(v) {
+  return {
+    partition: v.partition,
+    preload: path.join(__dirname, 'content-preload.js'),
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+  };
+}
+
 function createContentView(v) {
   const view = new WebContentsView({
-    webPreferences: {
-      partition: v.partition,
-      preload: path.join(__dirname, 'content-preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-    },
+    webPreferences: contentWebPreferences(v),
   });
   win.contentView.addChildView(view);
   const i = config.views.indexOf(v);
@@ -610,7 +632,7 @@ function createContentView(v) {
   }
   guardPermissions(v.partition);
   hardenView(view, v);
-  view.webContents.loadURL(v.url || placeholderURL(v));
+  loadPanel(view, v);
   return view;
 }
 
@@ -742,7 +764,7 @@ function updatePanel(id, patch) {
   } else if (newUrl !== null) {
     // Loading a new URL is exactly what was asked for here, so the usual
     // "never reload a panel" rule does not apply.
-    contentViews[i].webContents.loadURL(v.url || placeholderURL(v));
+    loadPanel(contentViews[i], v);
     log(`${id}: ${v.url || '(no url)'}`);
   }
 
@@ -969,7 +991,7 @@ function probeRecycle(probe) {
     const snap = memorySnapshot();
     record.lateMb = Math.round(snap.totalMb);
     if (probe.oldPid) record.gone = !snap.byPid.has(probe.oldPid);
-    const i = config.views.findIndex((v) => v.id === probe.id);
+    const i = indexOfId(probe.id);
     record.newPid = i >= 0 ? osPidOf(contentViews[i]) : null;
     record.reclaimedMb = Math.round(probe.beforeMb) - record.lateMb;
     log(
@@ -1139,10 +1161,9 @@ function checkMemory() {
   });
 
   warn(`memory is over the ${config.memoryLimitMb}MB limit (rung ${plan.rung})`);
-  const indexOf = (id) => config.views.findIndex((v) => v.id === id);
 
   if (plan.action === 'recycle') {
-    const i = indexOf(plan.targetIds[0]);
+    const i = indexOfId(plan.targetIds[0]);
     if (i < 0) return;
     if (plan.forced) warn(`forcing a recycle of ${plan.targetIds[0]}: ${plan.reason}`);
     counters.bump('memoryRecycles', plan.targetIds[0]);
@@ -1156,7 +1177,7 @@ function checkMemory() {
     memoryLadder.pendingReduction = total;
     // Highest index first, so rebuilding one cannot shift the next one's index.
     plan.targetIds
-      .map(indexOf)
+      .map(indexOfId)
       .filter((i) => i >= 0)
       .sort((a, b) => b - a)
       .forEach((i) => {
@@ -1280,11 +1301,7 @@ function applyPreset(id) {
 function dockGridOrKeepEditing() {
   if (state.mode === 'edit') {
     refreshLayout();
-    config.views.forEach((v, i) => {
-      contentViews[i].setVisible(true);
-      contentViews[i].setBounds(panelRect(i));
-      contentViews[i].webContents.setZoomFactor(panelZoom(i));
-    });
+    showPanelsInGrid();
     bringToTop(overlay);
     sendOverlayState();
   } else {
@@ -1375,17 +1392,36 @@ function dockGrid({ animate = true } = {}) {
   resetIdle();
 }
 
+// Every panel visible, in its grid slot, at its configured zoom. Both mode
+// entries that are not `dockGrid` need exactly this, and they had it written out
+// twice.
+function showPanelsInGrid() {
+  config.views.forEach((v, i) => {
+    contentViews[i].setVisible(true);
+    contentViews[i].setBounds(panelRect(i));
+    contentViews[i].webContents.setZoomFactor(panelZoom(i));
+  });
+}
+
+// Bring the overlay up and hand it the keyboard. Select mode and edit mode both
+// want the whole sequence; note that dockGridOrKeepEditing() deliberately does
+// not, because the overlay is already up there and taking focus would be a
+// change, not a tidy-up.
+function raiseOverlay() {
+  overlay.setBounds(wallBounds());
+  overlay.setVisible(true);
+  bringToTop(overlay);
+  sendOverlayState();
+  overlay.webContents.focus();
+}
+
 // Today's grid-mode overlay, now behind a key. Panels are not interactive here;
 // that is the point, the hotspots need the clicks.
 function enterSelect() {
   if (state.mode === 'select') return;
   if (state.mode === 'active' || state.mode === 'edit') dockGrid({ animate: false });
   state = { mode: 'select', activeIndex: -1 };
-  overlay.setBounds(wallBounds());
-  overlay.setVisible(true);
-  bringToTop(overlay);
-  sendOverlayState();
-  overlay.webContents.focus();
+  raiseOverlay();
   resetIdle();
   log('select mode: click a panel to open it fullscreen, Esc to cancel');
 }
@@ -1539,16 +1575,8 @@ function enterEdit() {
   refreshLayout();
   clearIdle(); // never dock the wall out from under someone editing it
   editDrag = null;
-  config.views.forEach((v, i) => {
-    contentViews[i].setVisible(true);
-    contentViews[i].setBounds(panelRect(i));
-    contentViews[i].webContents.setZoomFactor(panelZoom(i));
-  });
-  overlay.setBounds(wallBounds());
-  overlay.setVisible(true);
-  bringToTop(overlay);
-  sendOverlayState();
-  overlay.webContents.focus();
+  showPanelsInGrid();
+  raiseOverlay();
   log('layout edit mode: drag to move, sides to resize, corners to scale');
 }
 
@@ -1722,16 +1750,7 @@ function hardenView(view, v) {
         height: h,
         x: Math.round((layout.width - w) / 2),
         y: Math.round((layout.height - h) / 2),
-        webPreferences: {
-          partition: v.partition,
-          // Same activity reporter the content views use. Without it, typing a
-          // password into an SSO popup would not count as activity, and the
-          // idle timer would dock the wall and close the popup mid-login.
-          preload: path.join(__dirname, 'content-preload.js'),
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: true,
-        },
+        webPreferences: contentWebPreferences(v),
       },
     };
   });
@@ -1938,6 +1957,13 @@ function unrecoverableURL(v, w) {
 // watchdog cannot disagree with every other load path about what an empty URL
 // means - it used to call loadURL('') and throw into a swallowed catch, then do it
 // again thirty seconds later, forever.
+//
+// That sentence was aspirational until 2026-08-31. Three other places built the
+// same `v.url || placeholderURL(v)` expression inline and called loadURL
+// themselves: creating a view, applying a URL change, and the control surface's
+// reload. They agreed about the empty-URL question by coincidence, and none of
+// them got the catch below, which is here because a torn-down webContents throws
+// synchronously. All six load sites route through here now.
 function loadPanel(view, v) {
   try {
     view.webContents.loadURL(v.url || placeholderURL(v));
@@ -2056,13 +2082,13 @@ function closePopups() {
 
 ipcMain.on('ww:activate', (_e, id) => {
   if (state.mode !== 'select') return; // grid panels are interactive; nothing to intercept
-  const i = config.views.findIndex((v) => v.id === id);
+  const i = indexOfId(id);
   if (i >= 0) activate(i);
 });
 
 // From the editor's inspector, which is the other way to open a panel.
 ipcMain.on('ww:promote', (_e, id) => {
-  const i = config.views.findIndex((v) => v.id === id);
+  const i = indexOfId(id);
   if (i >= 0) activate(i);
 });
 ipcMain.on('ww:back', () => {
@@ -2100,10 +2126,6 @@ ipcMain.on('ww:activity', (e, type) => {
 });
 
 // ---- IPC: layout editing ----------------------------------------------------
-
-function indexOfId(id) {
-  return config.views.findIndex((v) => v.id === id);
-}
 
 // Snapshot the panel as the drag begins. A corner scale needs the ratio against
 // where the drag started, not against the previous frame, or the rounding
@@ -3051,7 +3073,7 @@ const controlActions = {
     targets.forEach((i) => {
       const v = config.views[i];
       log(`reload requested for ${v.id}`);
-      contentViews[i].webContents.loadURL(v.url || placeholderURL(v));
+      loadPanel(contentViews[i], v);
     });
     return true;
   },

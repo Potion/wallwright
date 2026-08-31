@@ -224,6 +224,15 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
   in `src/main.js` is the single check and upkeep, the memory ladder and the
   watchdog all route through it; do not write a second one. It replaced an earlier
   `inUse()`, which this list named until 2026-08-31.
+- **One helper per repeated decision, and these four are the ones that exist.**
+  `loadPanel(view, v)` is the only place that decides what a panel loads, including
+  what an empty URL means; `indexOfId(id)` is the only id-to-index lookup;
+  `contentWebPreferences(v)` is the security posture for both surfaces that render
+  a third party's page; `showPanelsInGrid()` and `raiseOverlay()` are the mode-entry
+  sequences. Each of the first three existed already and was being bypassed by
+  inline copies that agreed with it only by coincidence. `contentWebPreferences` is
+  the one to be careful with: a second copy that drifts on `contextIsolation` or
+  `sandbox` is a security regression that still logs people in perfectly.
 - Ask `panelStateAt(i)` for one panel and `panelStates()` for all of them. Building
   the whole array to index one element out of it is what made the upkeep tick
   quadratic: `eligible()` did it, and `runUpkeep()` calls `eligible()` once per

@@ -1532,6 +1532,88 @@ how the gitignored-dev-config test failure was caught, since `config/local*.json
 does not exist outside a dev machine. That test now skips when the file is
 absent.
 
+### The last duplications, and one comment that had stopped being true
+
+Phase 6, the final phase of the audit: "the repeated blocks, the single load path,
+one panel lookup, and the naming drift". Three of those were real. The fourth was
+not, and is recorded here as a non-finding rather than turned into churn.
+
+#### The single load path was aspirational
+
+`loadPanel()` carried this comment, and had since it was written:
+
+> Load whatever this panel should be showing. **The one place that decides**, so
+> the watchdog cannot disagree with every other load path about what an empty URL
+> means - it used to call `loadURL('')` and throw into a swallowed catch, then do
+> it again thirty seconds later, forever.
+
+It was not the one place. Three other sites built the same
+`v.url || placeholderURL(v)` expression inline and called `loadURL` themselves:
+creating a view, applying a URL change, and the control surface's reload. They
+happened to agree with `loadPanel` about what an empty URL means, but nothing made
+them agree, and the bug in that comment is precisely a disagreement of that kind.
+They also did not get the `catch`, which is there because a torn-down
+`webContents` throws synchronously.
+
+All six load sites route through `loadPanel()` now, and the comment says what the
+code does.
+
+**One thing checked rather than assumed on the way.** `loadURL` returns a promise
+that rejects on `ERR_ABORTED`, which is routine, and `process.on('unhandledRejection')`
+logs at fatal level without crashing. That looked like it might mean the log was
+full of spurious fatal lines. It is not: **zero unhandled rejections across 5787
+log lines and 90 hours** of the completed soak. So the promise is left alone. There
+is now one place to handle it if that ever changes, which there was not before.
+
+#### One panel lookup
+
+`indexOfId()` existed. Four other places inlined
+`config.views.findIndex((v) => v.id === id)` anyway, including a local arrow inside
+`checkMemory()` that shadowed it with an identical body. All four now call the
+helper, and it has moved from under an "IPC: layout editing" heading, which is not
+where its callers are, to the top of the panel lifecycle section.
+
+#### The repeated blocks, one of which was a security posture in two copies
+
+A scan for repeated four-line runs, ignoring comments and blank lines, found three:
+
+| repeated                                         | where                                            | now                        |
+| ------------------------------------------------ | ------------------------------------------------ | -------------------------- |
+| the content `webPreferences`                     | `createContentView()` and the SSO popup override | `contentWebPreferences(v)` |
+| every panel visible in its grid slot at its zoom | `dockGridOrKeepEditing()` and `enterEdit()`      | `showPanelsInGrid()`       |
+| raise the overlay and give it the keyboard       | `enterSelect()` and `enterEdit()`                | `raiseOverlay()`           |
+
+**The first is the one that mattered.** `contextIsolation: true`,
+`nodeIntegration: false`, `sandbox: true` and the shared preload were written out
+twice, for the two surfaces that display somebody else's page. Divergence there is
+a security regression rather than an inconsistency, and it would be invisible: an
+SSO popup with `contextIsolation` accidentally off still logs people in perfectly.
+The popup copy even carried a comment explaining that its preload had to match the
+content views', which is the sort of invariant a comment cannot enforce and a
+shared function can.
+
+`dockGridOrKeepEditing()` deliberately does **not** use `raiseOverlay()`, though
+two of its five lines match. The overlay is already up in that path, and taking
+focus would be a behaviour change rather than a tidy-up.
+
+After these, a repeated four-line block scan over `src/main.js` returns nothing.
+
+#### The naming drift was not there
+
+Recorded because a phase that finds nothing should say so, rather than leaving the
+next reader to wonder whether it was skipped. There is no `panelId` or `viewId` in
+the codebase; the convention is `v` for a config spec and `view` for the Electron
+`WebContentsView`, and every function across every module follows it, including
+`loadPanel(view, v)`, which takes both. The one genuine inconsistency is that the
+config calls the array `views` while the runtime calls its members panels, and
+that is baked into the config schema: renaming it would break every committed
+config and every deployed `userData` copy to settle a question of taste.
+
+**Verified:** 270 unit tests, the coverage gate, `npm run selftest` end to end,
+lint and prettier. The self-test is what carries this, since none of `src/main.js`
+has unit tests, and it drives preset recall, edit mode, select mode, panel CRUD and
+a real pointer drag, which between them exercise all five extractions.
+
 ### Three gates that were documented rather than enforced
 
 The audit's phase 4 was "self-test on every push, coverage thresholds,
