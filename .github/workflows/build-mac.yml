@@ -81,6 +81,14 @@ jobs:
       - name: Build dmgs
         run: npm run build:mac
 
+      # Reads the artifact, not the config that produced it. electron-builder.yml
+      # excludes src/dev, and test/packaging.test.js asserts that it still does,
+      # but only this proves what actually ended up inside the asar. The dev
+      # harness contains a mock server that binds a port and probes that disable
+      # web security, so what ships is a security question, not a tidiness one.
+      - name: Assert what shipped
+        run: npm run check:asar
+
       - name: Attach to the release
         if: startsWith(env.TAG, 'v')
         uses: softprops/action-gh-release@v2

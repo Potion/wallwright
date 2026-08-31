@@ -51,7 +51,7 @@ and the decisions that need Jeff before some of it can be finalized.
 ## Where this was left
 
 Released as **v0.1.1** with Windows and macOS artifacts, built on Potion's
-self-hosted runners. `npm test` is 264 tests, `npm run selftest` is 62 end to end
+self-hosted runners. `npm test` is 270 tests, `npm run selftest` is 62 end to end
 assertions, and both gate every build. CI is green.
 
 The app is **Wallwright**, the repository is `Potion/wallwright`, and the npm
@@ -185,7 +185,18 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
   `docs/validation.md`.
 - npm scripts must run on Windows too, so no `FOO=1 cmd` prefixes and no shell
   loops. Put the environment setup inside the node script instead.
-- Nothing under `src/dev/` ships: `electron-builder.yml` excludes it.
+- Nothing under `src/dev/` ships: `electron-builder.yml` excludes it, and two
+  things now enforce that rather than trusting it. `test/packaging.test.js` asserts
+  the config on every push, including that the `!src/dev/**` negation still comes
+  **after** the `src/**/*` include that would otherwise match it, because the order
+  is load-bearing and swapping two adjacent lines looks harmless in review.
+  `npm run check:asar` reads the built artifact in the build workflows. Adding
+  anything to the `files` list means re-reading both.
+- A new top-level `src/*.js` needs a `test/<name>.test.js`, or an entry in
+  `KNOWN_UNTESTED` in `test/packaging.test.js` **and** in the table in
+  `docs/validation.md`. The coverage thresholds cannot catch a module with no tests
+  at all: Node's reporter only lists files the test process loaded, so an untested
+  module is absent from the report rather than shown as 0%.
 - The README is the non-developer entry point: what the thing does, with
   screenshots, before any build instructions. Regenerate the images with
   `npm run capture` after a visible change to the wall or the editor.

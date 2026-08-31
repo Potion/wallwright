@@ -73,6 +73,14 @@ jobs:
 
       - run: npm test
 
+      # Coverage with thresholds, here rather than on all three runners because it
+      # is a property of the source, not of the platform, and this is the job that
+      # always arrives. The thresholds are a ratchet against regression in what is
+      # already tested; they cannot see a module with no tests at all, because
+      # Node's reporter only lists files the test process loaded. That hole is
+      # covered by test/packaging.test.js instead.
+      - run: npm run coverage
+
   windows:
     name: lint + test + self-test (PROTO1-P8)
     runs-on: [self-hosted, Windows]

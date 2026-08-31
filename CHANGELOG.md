@@ -18,6 +18,55 @@ built from, so nothing is unrecoverable.
 
 ## Unreleased
 
+### Three gates that were documented rather than enforced
+
+The rest of the audit's phase 4. Each of these was a fact `docs/validation.md`
+already asserted, with nothing checking it stayed true.
+
+**`eslint:recommended` is the baseline**, with the five hand-picked rules kept on
+top of it, scoped to the same file set so the linter does not wander into `dist/`
+or the mock pages. The codebase passed on the first run with no fixes. That is a
+weaker result than it sounds, since a config that fails to apply and a config that
+finds nothing look identical, so it was checked: a file with unreachable code and
+a duplicate object key produced exactly `no-unreachable` and `no-dupe-keys`,
+neither of which the five hand-written rules cover. `@eslint/js` and `js-yaml` are
+now explicit devDependencies rather than borrowed from other packages' trees.
+
+**`npm run coverage` fails below 97% lines, 87% branches and 95% functions**,
+against measured 98.26 / 89.08 / 97.08, and runs on the hosted CI job. Set just
+under the current numbers deliberately: a ratchet against regression rather than a
+target, since a threshold set exactly at today's figure turns an unrelated refactor
+into a red build.
+
+Those thresholds cannot see the blind spot this project already knew about, so it
+is covered separately. Node's reporter lists only files the test process loaded, so
+a module with no tests does not show as 0%, it does not show at all; the reported
+98% is over 2424 of 6406 lines, and true coverage of shipped source is 38%.
+`test/packaging.test.js` now requires every top-level `src/*.js` to have a matching
+test file or be one of four listed exceptions, checks the reverse so an exception
+that grows a test has to come off the list, and has a tripwire for entries naming
+files that no longer exist.
+
+**What ships is now asserted in two layers.** `electron-builder.yml` has always
+excluded `src/dev/**` and nothing ever checked. The fast layer is
+`test/packaging.test.js`, running on every push: the exclusion exists, `asar` is
+on, the default config still ships, and the negation still comes _after_ the
+`src/**/*` include that would otherwise match it. That last one is the sharp edge,
+because the order is load-bearing and swapping two adjacent lines silently ships
+the harness while looking like a tidy-up. The true layer is `npm run check:asar`,
+wired into both build workflows, which reads the built artifact rather than the
+config that produced it, and checks both directions: nothing under `src/dev/`,
+`test/`, `docs/`, `.github/` or `node_modules/electron/`, and the entry point, the
+three renderer bridges, `config/wall.json` and `package.json` all present.
+
+Every one of these was proven against a real failure rather than just written. Each
+config assertion was checked by making the exact edit it guards and watching that
+test and no other go red. The artifact check was proven by deleting the exclusion
+and running a real build: 34 dev files shipped, including the mock server that
+binds a port and every probe, against 22 entries and a clean pass with the
+exclusion in place. That was one line away from shipping at any point in this
+project's life.
+
 ### Electron 44, and every probe answer re-run against it
 
 Bumped 43.4.1 to **44.1.0**, Chromium 150.0.7871.224 to 152.0.7977.65. Taken after

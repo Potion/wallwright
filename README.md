@@ -195,7 +195,7 @@ npm run dev
 npm start
 WALLWRIGHT_CONFIG=./config/local-demo.json npm start
 
-npm test      # 264 tests: config, layout, upkeep, counters, diag log, control
+npm test      # 270 tests: config, layout, upkeep, counters, diag log, control
 npm run coverage # the same, with a coverage report
 npm run selftest # drives the real app over IPC; needs a display, exits non-zero on failure
 npm run lint

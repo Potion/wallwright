@@ -1494,11 +1494,14 @@ macOS passing does not settle the target platform. This group is the real risk.
 ### What CI covers
 
 - `ci.yml` runs on **every push to `main` and every PR**, on three runners. The
-  hosted Linux job does lint and the 264 unit tests in about fifteen seconds. The
-  self-hosted Windows job (`PROTO1-P8`) and macOS job (`hqmbp26-crouse`, the
-  development machine) each do lint, the unit tests **and `npm run selftest`**,
-  both gating. So the only coverage `src/main.js` has now runs on both platforms
-  the app ships to, on every change.
+  hosted Linux job does lint, the 270 unit tests and **`npm run coverage` with
+  thresholds** in about twenty seconds. The self-hosted Windows job (`PROTO1-P8`)
+  and macOS job (`hqmbp26-crouse`, the development machine) each do lint, the unit
+  tests **and `npm run selftest`**, both gating. So the only coverage
+  `src/main.js` has now runs on both platforms the app ships to, on every change.
+- The coverage gate is on the hosted job only, because coverage is a property of
+  the source rather than of the platform, and that is the job that always arrives
+  regardless of whether the self-hosted machines are up.
 - That closes the gap this file used to describe. Windows coverage had been moved
   into `build-windows.yml`, which only runs on a `v*` tag, so a `src/main.js`
   regression could merge to `main` completely green and surface at release time.
@@ -1519,7 +1522,8 @@ macOS passing does not settle the target platform. This group is the real risk.
   can and cannot do.
 - `build-windows.yml` builds the installer and zip on `windows-latest`, on a
   `v*` tag or manual dispatch. It runs lint and tests first, so a failing build
-  cannot ship.
+  cannot ship, and **`npm run check:asar` afterwards**, so a build that shipped the
+  wrong thing cannot ship either. `build-mac.yml` does the same.
 - `probe-windows.yml` is manual, and is the cheapest way to answer several
   group C items below without the show PC.
 
@@ -1527,6 +1531,96 @@ Verified before pushing by simulating the CI job in a clean checkout: this is
 how the gitignored-dev-config test failure was caught, since `config/local*.json`
 does not exist outside a dev machine. That test now skips when the file is
 absent.
+
+### Three gates that were documented rather than enforced
+
+The audit's phase 4 was "self-test on every push, coverage thresholds,
+`eslint:recommended`, and an asar assertion". The self-test landed first, as the
+biggest CI gap. These are the other three, and they share a shape: each one was a
+fact this file already asserted, with nothing checking it stayed true.
+
+#### `eslint:recommended`, and it was already clean
+
+The config was five hand-picked rules. It now starts from `eslint:recommended` and
+adds those five on top, scoped to the same file set so it does not wander into
+`dist/` or the mock pages. `@eslint/js` was already present as a transitive
+dependency of eslint; it is now an explicit `devDependency`, because relying on
+another package's dependency tree to keep the linter configured is the kind of
+thing that breaks silently on an unrelated upgrade.
+
+**The whole codebase passed on the first run, with no fixes needed.** That is a
+weaker result than it sounds, so it was checked rather than believed: a config
+that fails to apply and a config that finds nothing look identical from the
+outside. Dropping a file into `src/` containing unreachable code and a duplicate
+object key produced exactly the two expected errors, `no-unreachable` and
+`no-dupe-keys`, neither of which any of the five hand-written rules covers. The
+baseline is real.
+
+#### Coverage thresholds
+
+`npm run coverage` now fails below **97% lines, 87% branches, 95% functions**,
+against measured 98.26 / 89.08 / 97.08. Set just under the current figures on
+purpose: this is a ratchet against regression, not a target to chase, and a
+threshold set exactly at the current number turns any unrelated refactor into a
+red build.
+
+Gated on the hosted Linux job, which runs on every push and PR.
+
+**These thresholds cannot see the thing this file complains about two sections
+below**, and it is worth being explicit rather than letting a green check imply
+otherwise. Node's reporter lists only the files the test process actually loaded,
+so a new module with no tests at all does not appear as 0%: it does not appear.
+The 98.26% is over 2424 of 6406 lines. True coverage of shipped source is 38%.
+
+So the hole is covered separately, in `test/packaging.test.js`: every top-level
+`src/*.js` must have a matching `test/<name>.test.js`, or be one of the four
+listed exceptions. Adding a module with no tests now fails the build. The check
+runs in both directions and has a tripwire on its own exception list, so a module
+that grows a test, or one that is deleted, forces the list and the table below to
+be corrected rather than quietly rotting.
+
+#### An asar assertion, in two layers
+
+`electron-builder.yml` excludes `src/dev/**`, and it always has. Nothing ever
+checked. That matters more than tidiness: `src/dev/` holds a mock server that binds
+a port, probes that disable web security, and the self-test, and none of it belongs
+on a show floor machine inside a customer's building. The failure mode is silent,
+because an exhibit that also contains a mock server starts up perfectly.
+
+The fast layer is `test/packaging.test.js`, which runs on every push on all three
+runners and asserts the config: the exclusion exists, `asar` is on, the default
+config still ships, and **the negation still comes after the `src/**/*` include
+that would otherwise match it**. That last one is the sharp edge. Order is
+load-bearing in electron-builder's glob list, and swapping two adjacent lines
+silently ships the harness while looking like a harmless tidy-up in review.
+
+The true layer is `npm run check:asar` (`src/dev/asar-check.js`), wired into
+`build-windows.yml` and `build-mac.yml` after the build step. It reads the built
+artifact rather than the config that produced it, which is the difference between
+asserting the intent and asserting the outcome. It checks both directions: nothing
+under `src/dev/`, `test/`, `docs/`, `.github/` or `node_modules/electron/`, and
+`src/main.js`, the three renderer entry points, `config/wall.json` and
+`package.json` all present. A packaging change that drops the default config does
+not leak anything; it produces an exhibit that cannot start, which is the other way
+this goes wrong.
+
+**Both layers were proven against a real failure, not just written.** Each config
+assertion was checked by making the exact edit it guards against and watching that
+test and no other go red. The artifact check was proven by deleting the exclusion,
+running a real `npm run build:mac:dir`, and confirming the result:
+
+```
+ASARCHECK dist/mac-arm64/Wallwright.app/Contents/Resources/app.asar  (57 entries)
+  SHIPPED WHAT IT MUST NOT: 34 entries under src/dev/
+    src/dev/activity-probe-run.js
+    src/dev/capture.js
+    src/dev/dev.js
+    ...
+```
+
+Against 22 entries and a clean pass for the same build with the exclusion in
+place. Thirty-four dev files, including the mock server and every probe, one line
+away from shipping at any point in this project's life.
 
 ### The rename from Forge to Wallwright
 
@@ -1594,8 +1688,9 @@ on any Windows machine with a display.
 
 ### Test coverage, measured
 
-`npm test` runs 264 tests; `npm run coverage` reports on what they reach.
-Measured 2026-08-25.
+`npm test` runs 270 tests; `npm run coverage` reports on what they reach, and
+since 2026-08-31 fails below 97% lines / 87% branches / 95% functions.
+Measured 2026-08-25, thresholds added 2026-08-31.
 
 | module                  | lines | line % | branch % | funcs % |
 | ----------------------- | ----- | ------ | -------- | ------- |
