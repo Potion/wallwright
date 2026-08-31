@@ -44,6 +44,59 @@ turns it off.
 Unchanged and still blocked on the real dashboards: `allowedOrigins` is still
 empty, and the per-panel `zoom` values are still 1 rather than tuned.
 
+### A settings panel, so tuning a limit is not an RDP session
+
+`memoryLimitMb` was measured from a 72-hour soak and then written into a JSON
+file by hand. The one thing certain about it is that it will be re-derived once
+real dashboards exist, and until now that meant a remote desktop session and a
+text editor on a show floor.
+
+The control page now has a Settings box: the soft limit, the hard limit, and
+Start at login. `POST /api/settings` carries the patch.
+
+Three things about it are deliberate.
+
+**It is an allow-list, not "any top-level key".** `EDITABLE_SETTINGS` in
+`src/config.js` names three, and `views`, `presets`, `wall` and `control` are
+not among them. This route is reachable over an unauthenticated surface, and
+those four each have a path that does considerably more than write a number.
+
+**It persists first, then applies.** A patch that cannot be written to disk
+changes nothing, rather than leaving the wall running on a setting that silently
+disappears at the next restart.
+
+**The rules are `validateConfig`'s**, applied to a merged candidate, rather than
+a second copy that drifts. One rule is new and applies to config files as much as
+to patches: **a hard limit at or below the soft limit is now refused.** Below it
+the ladder inverts — every check that is over the limit at all is also over the
+hard limit, so rung 3 sweeps the whole wall where rung 1 would have rebuilt one
+idle panel. Nothing caught that before, because neither key is wrong on its own.
+All eight committed configs still validate.
+
+Changing either limit clears the pressure clock, for the same reason
+`checkMemory()` clears it on recovery: a timer already most of the way to forcing
+a recycle should not be inherited by a limit that was just raised.
+
+Self-test step 31 covers the round trip, and the wall is 96 assertions, up from 85. Three of its checks were proven to redden: removing the cross-field rule,
+making `saveSettings` a no-op, and putting a non-editable key on the allow-list.
+The fourth is called out in the code as deliberately unproven — see below.
+
+**And one bug found by looking at the page rather than testing it.** `draw()`
+runs every three seconds and wrote the memory-pressure banner into `#err`, the
+same element a failed request writes to. So an error message erased itself before
+it could be read. That was always true and had never mattered, because the only
+thing that produced one was a bad panel URL; the settings box refuses patches by
+design, so it started mattering immediately. The banner now has its own
+`#pressure` slot and `#err` belongs to the last request alone. Confirmed by
+refusing a patch in a browser and watching the message survive three polls.
+
+**The one check that is not proven, on purpose.** Step 31 asserts that toggling
+`autoStart` in an unpackaged run leaves the real login item alone. Proving that by
+breaking the guard would register a login item on whichever machine ran the proof,
+which is the exact thing the guard exists to prevent, and the macOS runner is a
+person's own machine. The unit tests in `test/autostart.test.js` cover the guard
+itself.
+
 ### Auto-start, in the two halves it actually has
 
 `AGENTS.md` carried "auto-launch on boot and crash restart" as one TODO item. It

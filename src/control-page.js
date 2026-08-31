@@ -51,6 +51,16 @@ const PAGE = `<!doctype html>
     background:var(--ground); color:var(--text); }
   .err { background:rgba(var(--alarm-rgb),0.12); border:1px solid var(--alarm);
     padding:9px 12px; border-radius:7px; margin-bottom:14px; }
+  .settings { border:1px solid var(--line); border-radius:9px; padding:14px;
+    margin-bottom:11px; background:var(--surface); }
+  .settings h2 { font-size:15px; margin:0 0 11px; }
+  .srow { display:flex; align-items:center; gap:10px; margin-bottom:9px; flex-wrap:wrap; }
+  .srow > label { flex:0 0 auto; min-width:150px; }
+  .srow input[type=number] { width:110px; margin:0; }
+  .srow input[type=checkbox] { width:16px; height:16px; margin:0;
+    accent-color:var(--accent); }
+  .note { color:var(--muted); font-size:12.5px; }
+  .dirty { color:var(--accent); font-size:12.5px; }
 </style>
 
 <div class="brand">
@@ -65,11 +75,13 @@ const PAGE = `<!doctype html>
 </div>
 <div class="sub" id="sub"></div>
 <div id="err"></div>
+<div id="pressure"></div>
 <div class="row" id="presets"></div>
 <div class="row">
   <button data-action="grid">Back to grid</button>
   <button data-action="reload-all">Reload every panel</button>
 </div>
+<div id="settings"></div>
 <div id="panels"></div>
 
 <script>
@@ -82,7 +94,7 @@ const PAGE = `<!doctype html>
     });
   }
 
-  function post(path, body) {
+  function post(path, body, onOk) {
     if (busy) return;
     busy = true;
     fetch(path, {
@@ -98,6 +110,7 @@ const PAGE = `<!doctype html>
       })
       .then(function (j) {
         $('err').innerHTML = '';
+        if (onOk) onOk();
         draw(j);
       })
       .catch(function (e) {
@@ -121,6 +134,7 @@ const PAGE = `<!doctype html>
     else if (action === 'recycle') post('/api/recycle', { id: id });
     else if (action === 'grid') post('/api/promote', {});
     else if (action === 'reload-all') post('/api/reload', {});
+    else if (action === 'save-settings') saveSettings();
   });
 
   document.addEventListener('keydown', function (e) {
@@ -132,6 +146,90 @@ const PAGE = `<!doctype html>
       patch: { url: input.value },
     });
   });
+
+  // Anything typed into the settings box stops the three-second poll from
+  // redrawing that box underneath the person typing. The focus guard in refresh()
+  // is not enough on its own: a checkbox loses focus the instant it is clicked,
+  // so a tick would be reverted by the very next poll.
+  var settingsDirty = false;
+
+  function markDirty() {
+    settingsDirty = true;
+    var el = $('sdirty');
+    if (el) el.textContent = 'unsaved';
+  }
+  document.addEventListener('input', function (e) {
+    if (e.target.getAttribute && e.target.getAttribute('data-setting')) markDirty();
+  });
+  document.addEventListener('change', function (e) {
+    if (e.target.getAttribute && e.target.getAttribute('data-setting')) markDirty();
+  });
+
+  function saveSettings() {
+    var nodes = document.querySelectorAll('[data-setting]');
+    var patch = {};
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      var key = n.getAttribute('data-setting');
+      if (n.type === 'checkbox') {
+        patch[key] = n.checked;
+        continue;
+      }
+      // The server validates as well, and its answer is the one that counts.
+      // This only stops an empty field being posted as 0, which is a real
+      // setting meaning "no limit" rather than "unset".
+      if (n.value === '' || isNaN(Number(n.value))) {
+        $('err').innerHTML = '<div class="err">' + esc(key) + ' must be a number</div>';
+        return;
+      }
+      patch[key] = Number(n.value);
+    }
+    post('/api/settings', { patch: patch }, function () {
+      settingsDirty = false;
+    });
+  }
+
+  // Reports the operating system's answer beside the configured one. A box that
+  // will not stay ticked has to be able to say why, or the setting reads as
+  // broken.
+  function autoStartNote(as) {
+    if (!as) return '';
+    if (as.blocked) return '<span class="warn">inert: ' + esc(as.reason) + '</span>';
+    if (as.effective !== as.configured) {
+      return '<span class="warn">the system says ' + (as.effective ? 'on' : 'off') + '</span>';
+    }
+    return '<span class="note">' + (as.effective ? 'registered' : 'not registered') + '</span>';
+  }
+
+  function drawSettings(s) {
+    var st = s.settings || {};
+    $('settings').innerHTML =
+      '<div class="settings">' +
+      '<h2>Settings</h2>' +
+      '<div class="srow">' +
+        '<label for="mlim">Memory limit</label>' +
+        '<input type="number" min="0" step="50" id="mlim" data-setting="memoryLimitMb" value="' +
+          esc(st.memoryLimitMb) + '">' +
+        '<span class="note">MB &middot; 0 turns the countermeasure off</span>' +
+      '</div>' +
+      '<div class="srow">' +
+        '<label for="mhard">Hard limit</label>' +
+        '<input type="number" min="0" step="50" id="mhard" data-setting="memoryHardLimitMb" value="' +
+          esc(st.memoryHardLimitMb) + '">' +
+        '<span class="note">MB &middot; must be above the limit &middot; 0 = none</span>' +
+      '</div>' +
+      '<div class="srow">' +
+        '<label for="autostart">Start at login</label>' +
+        '<input type="checkbox" id="autostart" data-setting="autoStart"' +
+          (st.autoStart ? ' checked' : '') + '>' +
+        autoStartNote(s.autoStart) +
+      '</div>' +
+      '<div class="srow">' +
+        '<button data-action="save-settings">Save</button>' +
+        '<span class="dirty" id="sdirty"></span>' +
+      '</div>' +
+      '</div>';
+  }
 
   function draw(s) {
     $('mode').textContent = s.mode;
@@ -149,10 +247,17 @@ const PAGE = `<!doctype html>
       (s.counters ? ' \\u00b7 ' + s.counters.crashes + ' crashes, ' +
         s.counters.watchdogReloads + ' watchdog reloads, ' +
         s.counters.recycles + ' recycles' : '');
-    $('err').innerHTML = s.memoryPressure
+    // Deliberately NOT #err. That one belongs to the last POST and nothing else
+    // may clear it: this function runs every three seconds, so writing here used
+    // to erase a refusal before anyone had read it. The settings box refuses
+    // patches by design - a hard limit under the soft limit, a key that is not a
+    // setting - so a message with a three-second life is not good enough.
+    $('pressure').innerHTML = s.memoryPressure
       ? '<div class="err">Over the memory limit for ' + s.memoryPressureSec +
         's. The wall is recycling idle panels.</div>'
       : '';
+
+    if (!settingsDirty) drawSettings(s);
 
     $('presets').innerHTML = s.presets.length
       ? s.presets

@@ -32,6 +32,7 @@
   "memoryCheckMs": 60000,
   "memoryLimitMb": 2000,
   "memoryHardLimitMb": 2750,
+  "autoStart": false,
   "backButton": {
     "x": 24,
     "y": 24,

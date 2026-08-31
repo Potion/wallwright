@@ -281,6 +281,23 @@ function validateConfig(c) {
   ) {
     p.push('memoryCheckMs must be a number >= 0 (0 disables the check)');
   }
+  // A hard limit at or below the soft limit inverts the ladder: every check that
+  // is over the limit at all is also over the hard limit, so rung 3 sweeps the
+  // whole wall where rung 1 would have rebuilt one idle panel. Cross-field, so
+  // neither NON_NEGATIVE entry can catch it on its own.
+  if (
+    Number.isFinite(c.memoryHardLimitMb) &&
+    c.memoryHardLimitMb > 0 &&
+    Number.isFinite(c.memoryLimitMb) &&
+    c.memoryLimitMb > 0 &&
+    c.memoryHardLimitMb <= c.memoryLimitMb
+  ) {
+    p.push(
+      `memoryHardLimitMb (${c.memoryHardLimitMb}) must be above memoryLimitMb ` +
+        `(${c.memoryLimitMb}), or 0 for no hard limit: below it, every check over ` +
+        'the limit sweeps the whole wall instead of recycling one panel'
+    );
+  }
   // The upkeep and memory-ladder settings. A table rather than a dozen
   // near-identical blocks: every one of them is a duration or a count, and the
   // check is the same. 0 means "off" for all of them, which is why the shipped
@@ -498,6 +515,65 @@ function withDefaults(c) {
   };
 }
 
+// The settings the control surface may change, and nothing else.
+//
+// An allow-list rather than "any top-level key". This arrives over an
+// unauthenticated HTTP surface, and most of the config is not a setting: views,
+// presets and wall each have their own path that does considerably more than
+// write a number, and none of them should be reachable by patching a scalar.
+const EDITABLE_SETTINGS = new Set(['memoryLimitMb', 'memoryHardLimitMb', 'autoStart']);
+
+// Validates the WHOLE patch before any of it is applied, and answers { ok, reason }
+// rather than a boolean, the same contract panel patches follow. A half-applied
+// settings patch would leave a hard limit below a soft one, which is exactly the
+// state the rule above exists to refuse.
+//
+// The rules are validateConfig's, applied to a merged candidate, rather than a
+// second copy that can drift from it.
+function settingsVerdict(config, patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    return { ok: false, reason: 'patch must be an object' };
+  }
+  const keys = Object.keys(patch);
+  if (!keys.length) return { ok: false, reason: 'patch is empty' };
+
+  const unknown = keys.filter((k) => !EDITABLE_SETTINGS.has(k));
+  if (unknown.length) {
+    return {
+      ok: false,
+      reason:
+        `not an editable setting: ${unknown.join(', ')} ` +
+        `(editable: ${[...EDITABLE_SETTINGS].join(', ')})`,
+    };
+  }
+
+  const problems = validateConfig({ ...config, ...patch });
+  if (problems.length) return { ok: false, reason: problems.join('; ') };
+
+  const clean = {};
+  for (const k of keys) clean[k] = patch[k];
+  return { ok: true, patch: clean };
+}
+
+// Write settings back to the config file.
+//
+// Only the keys given. A value the running config filled in from a default must
+// not be written back as though somebody had authored it, which is the same rule
+// saveViews follows for everything outside `views`, and the reason both take a
+// narrow patch rather than the whole live object.
+//
+// Sibling then rename, because this is the file the wall boots from: a crash or a
+// full disk part-way through a plain writeFileSync would truncate it and send the
+// next launch down the fatal-config path.
+function saveSettings(file, patch) {
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  for (const [key, value] of Object.entries(patch)) raw[key] = value;
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(raw, null, 2) + '\n');
+  fs.renameSync(tmp, file);
+  return raw;
+}
+
 // Write the panel list back to the config file. The editor can add, delete and
 // retitle panels, not just move them, so the whole array is replaced rather than
 // patched in place. Everything else in the file is preserved, so keys the
@@ -556,5 +632,8 @@ module.exports = {
   withDefaults,
   unknownKeys,
   saveViews,
+  saveSettings,
+  settingsVerdict,
   serializeView,
+  EDITABLE_SETTINGS,
 };
