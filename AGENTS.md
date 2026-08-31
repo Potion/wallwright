@@ -199,14 +199,26 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
   check the code, not just the log.
 - New logic that could live without electron should. Extraction is what got
   `src/layout.js` and `src/control-server.js` to full coverage; anything left in
-  `main.js` is testable only by the self-test.
+  `main.js` is testable only by the self-test. This cuts finer than whole
+  functions: `memorySnapshot()` is one call to `app.getAppMetrics()` wrapped in a
+  try, and the arithmetic over the result is `summarizeMetrics()` in
+  `src/upkeep.js`, where a captured payload can be handed to it. A function that
+  reaches for an Electron API in the middle of a calculation is two functions.
 - Add a `check()` to the self-test for behaviour you would otherwise verify by
   eye, and make sure it can actually fail. It once only logged, so nothing ever
   went red.
 - The control surface is unauthenticated by design and binds to loopback. If
   that ever changes, it needs auth first, not a comment.
-- Anything that reloads a panel on a timer must skip panels in use. `inUse()` is
-  the single check; do not write a second one.
+- Anything that reloads a panel on a timer must skip panels in use. `eligible()`
+  in `src/main.js` is the single check and upkeep, the memory ladder and the
+  watchdog all route through it; do not write a second one. It replaced an earlier
+  `inUse()`, which this list named until 2026-08-31.
+- Ask `panelStateAt(i)` for one panel and `panelStates()` for all of them. Building
+  the whole array to index one element out of it is what made the upkeep tick
+  quadratic: `eligible()` did it, and `runUpkeep()` calls `eligible()` once per
+  panel per second. `panelStateAt()` returns null for an index whose panel is gone,
+  which is a real case rather than a defensive one, because `deletePanel()` splices
+  a spec out while that view's handlers are still attached.
 - Do not build markup with inline event handlers in `src/control-page.js`. The
   first version did and the escaping collapsed into an unparseable page. Use
   `data-` attributes and the delegated listener.

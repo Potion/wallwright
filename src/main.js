@@ -55,6 +55,7 @@ const {
   ineligibleReason,
   memoryPlan,
   staggerSeeds,
+  summarizeMetrics,
 } = require('./upkeep');
 
 // The app was called Forge before it was Wallwright. The name decides the
@@ -215,14 +216,33 @@ const deferredSince = new Map(); // `${id}:${op}` -> ms
 // The most recent per-process reading, so ranking candidates by weight does not
 // mean asking the OS again for every panel on every tick.
 let lastMemoryByPid = new Map();
-// State the memory ladder keeps between checks. All of it resets the moment the
-// total comes back under the limit.
-let memoryPressureSince = null; // when the limit was first exceeded, unbroken
-let memoryHardChecks = 0; // consecutive checks past the hard limit
-let memorySweptAt = null; // when the whole wall was last rebuilt at once
-let recyclesSinceReduction = 0; // rebuilds that did not reclaim anything
-let pendingReduction = null; // the total before the last rebuild, to compare
-let memoryExhaustedSaid = false; // so "nothing left to try" is said once
+// State the memory ladder keeps between checks, in one object so it can be reset
+// and read as a unit rather than as six loose variables kept in step by hand.
+//
+// They do not all clear together, which is the thing six separate `let`s made easy
+// to misread. `pressureSince`, `hardChecks`, `sweptAt` and `exhaustedSaid` describe
+// the current episode of pressure and reset the moment the total comes back under
+// the limit. `recyclesSinceReduction` counts rebuilds that reclaimed nothing and
+// deliberately survives recovery, because giving up is a judgement about the whole
+// run and not about one episode. `pendingReduction` is consumed by whichever check
+// reads it next.
+const memoryLadder = {
+  pressureSince: null, // when the limit was first exceeded, unbroken
+  hardChecks: 0, // consecutive checks past the hard limit
+  sweptAt: null, // when the whole wall was last rebuilt at once
+  recyclesSinceReduction: 0, // rebuilds that did not reclaim anything
+  pendingReduction: null, // the total before the last rebuild, to compare
+  exhaustedSaid: false, // so "nothing left to try" is said once
+};
+
+// Forget the current episode of pressure. Deliberately not the two fields above
+// that outlive one episode.
+function clearMemoryPressure() {
+  memoryLadder.pressureSince = null;
+  memoryLadder.hardChecks = 0;
+  memoryLadder.sweptAt = null;
+  memoryLadder.exhaustedSaid = false;
+}
 // Survives a relaunch through argv, which is the only place to keep it: a file
 // would outlive the condition, and a counter that resets on restart is no bound
 // at all.
@@ -785,27 +805,39 @@ const lastRecycle = new Map();
 // can drift - is unchanged; there is simply more to the answer now than a
 // timestamp comparison, and the interesting parts are testable.
 
-// What src/upkeep.js needs to know about each panel, in plain values. Built here
-// because it is the only place that can see the views, the watchdog and the
+// What src/upkeep.js needs to know about one panel, in plain values. Built here
+// because this is the only place that can see the views, the watchdog and the
 // popups at once.
+//
+// Returns null if there is no panel at that index, and the null is load-bearing:
+// deletePanel() splices a spec out while that view's handlers are still attached,
+// so callers legitimately arrive with a stale index. See scheduleReload().
+function panelStateAt(i) {
+  const v = config.views[i];
+  if (!v) return null;
+  const wc = contentViews[i] && contentViews[i].webContents;
+  const alive = wc && !wc.isDestroyed();
+  const pid = osPidOf(contentViews[i]);
+  return {
+    id: v.id,
+    index: i,
+    promoted: state.mode === 'active' && state.activeIndex === i,
+    interactAt: touched.get(v.id) || 0,
+    presentAt: present.get(v.id) || 0,
+    rssMb: pid ? lastMemoryByPid.get(pid) || 0 : 0,
+    lastRecycleAt: lastRecycle.get(v.id) || 0,
+    loading: alive ? wc.isLoading() : false,
+    popupOpen: [...popupOwner.values()].includes(v.id),
+    neverRecycle: !!v.neverRecycle,
+  };
+}
+
+// Every panel's state, for the memory ladder, which ranks candidates against each
+// other and so genuinely needs all of them. Anything wanting a single panel calls
+// panelStateAt() instead: building the whole array to index one element out of it
+// is what made the upkeep tick quadratic.
 function panelStates() {
-  return config.views.map((v, i) => {
-    const wc = contentViews[i] && contentViews[i].webContents;
-    const alive = wc && !wc.isDestroyed();
-    const pid = osPidOf(contentViews[i]);
-    return {
-      id: v.id,
-      index: i,
-      promoted: state.mode === 'active' && state.activeIndex === i,
-      interactAt: touched.get(v.id) || 0,
-      presentAt: present.get(v.id) || 0,
-      rssMb: pid ? lastMemoryByPid.get(pid) || 0 : 0,
-      lastRecycleAt: lastRecycle.get(v.id) || 0,
-      loading: alive ? wc.isLoading() : false,
-      popupOpen: [...popupOwner.values()].includes(v.id),
-      neverRecycle: !!v.neverRecycle,
-    };
-  });
+  return config.views.map((_, i) => panelStateAt(i));
 }
 
 // Whether one panel may be rebuilt or refreshed right now, and if not, why.
@@ -815,7 +847,12 @@ function panelStates() {
 // that can drift apart. `op` only distinguishes which deferral clock is used.
 function eligible(v, i, op, { force = false } = {}) {
   const now = Date.now();
-  const p = panelStates(now)[i];
+  const p = panelStateAt(i);
+  // No panel at that index. Callers guard this too, but not all of them did, and
+  // the one that did not took the whole wall down: uncaughtException rethrows, so
+  // dereferencing undefined in here is fatal rather than local. Answering "no,
+  // because it is gone" is both true and survivable.
+  if (!p) return { ok: false, reason: 'no such panel', forced: false };
   const key = `${v.id}:${op}`;
   const reason = ineligibleReason(p, {
     now,
@@ -990,27 +1027,28 @@ function startUpkeep() {
 // different ways, and only one of them was wrapped against getAppMetrics
 // throwing.
 //
+// The arithmetic itself is summarizeMetrics() in src/upkeep.js, which is the same
+// sum in a form that can be handed a captured payload in a test. This was the
+// third writing of it: the two collapsed above were replaced by a copy that still
+// could not be tested, because it reached for app.getAppMetrics() itself. All
+// this function owns now is the part that genuinely needs Electron, which is
+// getting the metrics and surviving the call failing.
+//
 // workingSetSize is resident memory per process, and shared pages are counted
 // once per process that maps them, so the total reads high. That is fine for
 // watching a trend, and it is why the soak also records private bytes from
 // outside the app: see docs/validation.md before comparing this number to
 // anything.
 function memorySnapshot() {
-  const byType = new Map();
-  const byPid = new Map();
-  let totalMb = 0;
+  let metrics = [];
   try {
-    for (const m of app.getAppMetrics()) {
-      const mb = (m.memory && m.memory.workingSetSize ? m.memory.workingSetSize : 0) / 1024;
-      totalMb += mb;
-      byType.set(m.type, (byType.get(m.type) || 0) + mb);
-      if (m.pid) byPid.set(m.pid, mb);
-    }
+    metrics = app.getAppMetrics();
   } catch {
-    /* metrics unavailable */
+    /* metrics unavailable; summarize an empty list rather than a partial one */
   }
-  lastMemoryByPid = byPid;
-  return { totalMb, byType, byPid };
+  const snap = summarizeMetrics(metrics);
+  lastMemoryByPid = snap.byPid;
+  return snap;
 }
 
 // Memory. Reported rather than acted on by default: an exhibit that restarts
@@ -1034,35 +1072,36 @@ function checkMemory() {
   // Did the last rebuild actually reclaim anything? Without this, "the
   // countermeasure fired" and "the countermeasure worked" look identical in a
   // log, and the wall can churn sessions for no benefit indefinitely.
-  if (pendingReduction !== null) {
-    const dropped = pendingReduction - total;
+  if (memoryLadder.pendingReduction !== null) {
+    const dropped = memoryLadder.pendingReduction - total;
     if (dropped >= config.memoryReduceMinMb) {
-      recyclesSinceReduction = 0;
+      memoryLadder.recyclesSinceReduction = 0;
     } else {
-      recyclesSinceReduction += 1;
+      memoryLadder.recyclesSinceReduction += 1;
       warn(
         `the last recycle reclaimed ${Math.round(dropped)}MB, under the ` +
-          `${config.memoryReduceMinMb}MB that counts (${recyclesSinceReduction} in a row)`
+          `${config.memoryReduceMinMb}MB that counts (${memoryLadder.recyclesSinceReduction} in a row)`
       );
     }
-    pendingReduction = null;
+    memoryLadder.pendingReduction = null;
   }
 
   const over = config.memoryLimitMb > 0 && total > config.memoryLimitMb;
   if (!over) {
     // Recovered. Forget the pressure history, so a spike next week starts its own
     // clock rather than inheriting this one.
-    memoryPressureSince = null;
-    memoryHardChecks = 0;
-    memorySweptAt = null;
-    memoryExhaustedSaid = false;
+    clearMemoryPressure();
     return;
   }
 
   counters.bump('memoryLimitHits');
-  if (!memoryPressureSince) memoryPressureSince = now;
-  if (config.memoryHardLimitMb > 0 && total > config.memoryHardLimitMb) memoryHardChecks += 1;
-  else memoryHardChecks = 0;
+  if (!memoryLadder.pressureSince) memoryLadder.pressureSince = now;
+  // Consecutive, so one check back under the hard limit resets the count rather
+  // than pausing it. Written as one assignment because the two halves are a
+  // single fact about this check, and the if/else form wrapped badly enough to
+  // read as though the reset were conditional on something else.
+  const pastHard = config.memoryHardLimitMb > 0 && total > config.memoryHardLimitMb;
+  memoryLadder.hardChecks = pastHard ? memoryLadder.hardChecks + 1 : 0;
 
   // The relaunch gates. Kept here rather than in the policy because they are
   // facts about this process, and every one of them is a way the rung can be
@@ -1084,10 +1123,10 @@ function checkMemory() {
     panels: panelStates(),
     mode: state.mode,
     now,
-    pressureSince: memoryPressureSince,
-    hardChecks: memoryHardChecks,
-    sweptAt: memorySweptAt,
-    recyclesSinceReduction,
+    pressureSince: memoryLadder.pressureSince,
+    hardChecks: memoryLadder.hardChecks,
+    sweptAt: memoryLadder.sweptAt,
+    recyclesSinceReduction: memoryLadder.recyclesSinceReduction,
     cfg: {
       recentUseMs: config.recentUseMs,
       minRecycleIntervalMs: config.minRecycleIntervalMs,
@@ -1107,14 +1146,14 @@ function checkMemory() {
     if (i < 0) return;
     if (plan.forced) warn(`forcing a recycle of ${plan.targetIds[0]}: ${plan.reason}`);
     counters.bump('memoryRecycles', plan.targetIds[0]);
-    pendingReduction = total;
+    memoryLadder.pendingReduction = total;
     return recyclePanel(i);
   }
 
   if (plan.action === 'sweep') {
     warn(`sweeping ${plan.targetIds.length} panels: ${plan.reason}`);
-    memorySweptAt = now;
-    pendingReduction = total;
+    memoryLadder.sweptAt = now;
+    memoryLadder.pendingReduction = total;
     // Highest index first, so rebuilding one cannot shift the next one's index.
     plan.targetIds
       .map(indexOf)
@@ -1144,8 +1183,8 @@ function checkMemory() {
 
   if (plan.rung === 2) counters.bump('memoryAllInUse');
   // Said once rather than every minute for as long as it lasts.
-  if (plan.exhausted && !memoryExhaustedSaid) {
-    memoryExhaustedSaid = true;
+  if (plan.exhausted && !memoryLadder.exhaustedSaid) {
+    memoryLadder.exhaustedSaid = true;
     warn(`no further action available: ${plan.reason}`);
   } else if (plan.reason && !plan.exhausted) {
     log(plan.reason);
@@ -2481,9 +2520,9 @@ function selfTest() {
     config.recentUseMs = 60000;
     config.minRecycleIntervalMs = 0; // not what is under test here
     config.memoryForceAfterMs = 3600000; // far away, so nothing is forced yet
-    memoryPressureSince = null;
-    recyclesSinceReduction = 0;
-    pendingReduction = null;
+    memoryLadder.pressureSince = null;
+    memoryLadder.recyclesSinceReduction = 0;
+    memoryLadder.pendingReduction = null;
     const before13 = contentViews.slice();
     config.views.forEach((v) => touched.set(v.id, Date.now()));
     for (let i = 0; i < 5; i++) checkMemory();
@@ -2541,7 +2580,7 @@ function selfTest() {
     config.memoryForceAfterMs = realForce;
     config.minRecycleIntervalMs = realCooldown;
     config.recentUseMs = realRecentUse;
-    memoryPressureSince = null;
+    memoryLadder.pressureSince = null;
 
     // ---- 15: the diagnostics log ------------------------------------------
     //
@@ -2906,9 +2945,9 @@ function wallStatus() {
     recycles: recycleProbes.slice(-20),
     // Over the limit and unable to act. The gap between this being true and
     // anything being recycled is the interesting failure.
-    memoryPressure: !!memoryPressureSince,
-    memoryPressureSec: memoryPressureSince
-      ? Math.round((now - memoryPressureSince) / 1000)
+    memoryPressure: !!memoryLadder.pressureSince,
+    memoryPressureSec: memoryLadder.pressureSince
+      ? Math.round((now - memoryLadder.pressureSince) / 1000)
       : null,
     wall: { width: config.wall.width, height: config.wall.height, scale: round3(layout.scale) },
     presets: config.presets.map((p) => ({ id: p.id, name: p.name || p.id })),

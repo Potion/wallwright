@@ -18,6 +18,46 @@ built from, so nothing is unrecoverable.
 
 ## Unreleased
 
+### The memory ladder keeps its state in one place, and the upkeep tick is linear
+
+Three cleanups to the memory code, held back until the soak finished because that
+run existed to characterise exactly this code, and landing changes underneath it
+would have made the baseline describe something that no longer shipped.
+
+`memorySnapshot()` was the third writing of the same sum over
+`app.getAppMetrics()`. Two earlier copies had already been collapsed into it, but
+the survivor still could not be tested, because it reached for the Electron API in
+the middle of the arithmetic. It now calls `summarizeMetrics()` in `src/upkeep.js`,
+which is that same arithmetic in a form a test can hand a captured payload to, and
+keeps only the part that genuinely needs Electron: making the call, and surviving
+it throwing. That failure path is now covered, and it had a sharper edge than it
+looked. `memorySnapshot()` assigns the result's `byPid` straight into the module's
+last-reading cache, so a summary without maps would turn one failed metrics call
+into a `TypeError` on the next tick.
+
+The ladder's six loose module globals are one `memoryLadder` object. They were
+never really six independent variables, and the comment above them claimed all of
+them reset when memory recovers, which was not true: `recyclesSinceReduction`
+counts rebuilds that reclaimed nothing and deliberately outlives an episode,
+because giving up is a judgement about the whole run rather than about one spike.
+Which fields clear together is now a `clearMemoryPressure()` function rather than
+four assignments a reader has to check against a comment.
+
+The upkeep tick was quadratic. `eligible()` called `panelStates()` and indexed one
+element out of the result, and `runUpkeep()` calls `eligible()` once per panel per
+second, so _n_ panels built _n²_ panel states a second. There is now a
+`panelStateAt(i)` for one panel, with `panelStates()` mapping over it for the
+memory ladder, which ranks candidates against each other and so genuinely needs
+all of them. Four panels made this cheap enough to ignore, but panels are created
+at runtime and the count is not fixed at four.
+
+`panelStateAt()` returns null when no panel is at that index, and `eligible()` now
+answers "no such panel" rather than dereferencing undefined. That case is real
+rather than defensive: `deletePanel()` splices a spec out while that view's own
+handlers are still attached, so the watchdog arrives with an index of -1. It used
+to throw, and because `uncaughtException` rethrows, it took the whole wall down.
+Self-test step 16 already reproduces it, and now covers the guard as well.
+
 ### The soak pre-flight fails on a busy machine, and the series records VRAM
 
 Two soak attempts have now died because HQ-PROTO-MINI-2 was in use by another

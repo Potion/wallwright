@@ -94,6 +94,20 @@ test('metrics survive missing fields rather than throwing', () => {
   assert.strictEqual(Math.round(s.byType.get('Unknown')), 0);
 });
 
+test('an empty or absent metrics list is a zeroed snapshot, not a throw', () => {
+  // This is memorySnapshot()'s failure path in src/main.js: when
+  // app.getAppMetrics() throws it summarizes an empty list instead, and assigns
+  // the result's byPid straight into the module's last-reading cache. So the maps
+  // have to exist and be empty rather than be undefined, or a failed metrics call
+  // becomes a TypeError on the next tick instead of a zero reading.
+  for (const input of [[], undefined, null]) {
+    const s = summarizeMetrics(input);
+    assert.strictEqual(s.totalMb, 0, `totalMb for ${JSON.stringify(input)}`);
+    assert.ok(s.byType instanceof Map && s.byType.size === 0, 'byType is an empty Map');
+    assert.ok(s.byPid instanceof Map && s.byPid.size === 0, 'byPid is an empty Map');
+  }
+});
+
 // ---- eligibility ------------------------------------------------------------
 
 test('a promoted panel is never a candidate, even when forcing', () => {
