@@ -2476,6 +2476,59 @@ the watchdog's backoff, layout scaling, and the whole of `src/overlay.js`
 including the drag, snap and inspector interactions. Those are only ever
 exercised by hand.
 
+### A layout save was deleting every panel's permission grants
+
+Found 2026-08-31 by checking an answer rather than giving it. The question was
+whether `allowedOrigins` can be edited from the new settings panel. It cannot,
+and should not: it is per-view while the settings panel edits three top-level
+scalars, and scoping it is a deliberate config edit. Checking that turned up two
+silent failures either side of it.
+
+**`serializeView()` wrote `allowedOrigins` and forgot `allowedPermissions`.**
+Measured before the fix:
+
+```
+serializeView keys: id, url, grid, zoom, partition, allowedOrigins
+after a layout save:
+  allowedOrigins    : ["https://idp.example.com"]   survives
+  allowedPermissions: undefined                     gone
+```
+
+`saveViews()` rewrites **every** view, so dragging one panel and pressing Esc
+deleted the permission grants of all of them. It fails **closed** — absent means
+none, the opposite polarity to `allowedOrigins` — so nothing broke loudly and
+nothing reached the log. A dashboard simply stopped being allowed its camera.
+That matters more than it would have before 0.1.2, where permissions became
+deny-by-default precisely because a session with no handler grants microphone and
+camera in silence (`npm run probe:perm`).
+
+**`updatePanel()` accepted fields it cannot apply, in silence.** Measured against
+a running wall, before the fix:
+
+```
+POST /api/panel {"id":"a","patch":{"allowedOrigins":["https://idp.example.com"]}}
+  -> HTTP 200
+panel a allowedOrigins in status: undefined
+on disk: undefined
+```
+
+A 200 for a request that did nothing is worse than a refusal, because the caller
+is left believing a navigation guard is in place when none is. `refreshMs`,
+`recycleMs`, `neverRecycle`, `grid` and `id` behaved the same way. Four fields are
+patchable now — `url`, `label`, `zoom`, `partition` — and anything else is a 400
+naming it, which also says where the two security lists are edited instead.
+
+A malformed `zoom` was the same defect in different clothes: dropped while the
+caller was told ok. Refused now.
+
+Self-test step 18 covers both, and the wall is 101 assertions, up from 96. Both
+refusals were proven to redden by disabling them in turn. **One proof attempt was
+itself wrong and is worth recording:** `settingsVerdict` and `panelPatchVerdict`
+contain an identical `if (unknown.length) {` line, and sabotaging "the first one"
+reddened step 31 rather than step 18 — a proof that looked convincing and tested
+nothing relevant. Target the sabotage on something unique to the function under
+test.
+
 ### The single-instance lock, exercised by accident
 
 The checklist above carried "launch twice, never exercised" from the beginning.

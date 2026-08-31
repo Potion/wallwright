@@ -574,6 +574,51 @@ function saveSettings(file, patch) {
   return raw;
 }
 
+// The per-panel fields a patch may carry, and nothing else.
+//
+// Same reasoning as EDITABLE_SETTINGS, with one difference that matters more:
+// unknown keys here used to be accepted **in silence**. A patch naming
+// allowedOrigins answered ok and did nothing at all, which is worse than
+// refusing, because the caller is left believing a security-relevant field was
+// set.
+//
+// Deliberately not the whole of KNOWN_VIEW. `grid` arrives through the layout
+// editor's own path, `id` is identity, and `allowedOrigins` and
+// `allowedPermissions` are deliberate config edits rather than something to
+// change over an unauthenticated HTTP surface. Adding a field here means writing
+// the code in updatePanel() that applies it.
+const PATCHABLE_PANEL_FIELDS = new Set(['url', 'label', 'zoom', 'partition']);
+
+// Shape and fields only. The value rules that are security decisions - which URL
+// schemes a panel may load, and the persist: partition rule - stay in
+// src/policy.js, and updatePanel() asks both.
+function panelPatchVerdict(patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+    return { ok: false, reason: 'patch must be an object' };
+  }
+  const keys = Object.keys(patch);
+  if (!keys.length) return { ok: false, reason: 'patch is empty' };
+
+  const unknown = keys.filter((k) => !PATCHABLE_PANEL_FIELDS.has(k));
+  if (unknown.length) {
+    return {
+      ok: false,
+      reason:
+        `not a patchable field: ${unknown.join(', ')} ` +
+        `(patchable: ${[...PATCHABLE_PANEL_FIELDS].join(', ')}). ` +
+        'allowedOrigins and allowedPermissions are edited in the config file.',
+    };
+  }
+
+  // Was silently dropped rather than refused, which is the same defect as an
+  // unknown key wearing different clothes: the caller is told ok and the zoom
+  // does not change.
+  if (patch.zoom !== undefined && !(Number.isFinite(patch.zoom) && patch.zoom > 0)) {
+    return { ok: false, reason: 'zoom must be a positive number' };
+  }
+  return { ok: true };
+}
+
 // Write the panel list back to the config file. The editor can add, delete and
 // retitle panels, not just move them, so the whole array is replaced rather than
 // patched in place. Everything else in the file is preserved, so keys the
@@ -623,6 +668,14 @@ function serializeView(v) {
   if (Array.isArray(v.allowedOrigins) && v.allowedOrigins.length) {
     out.allowedOrigins = v.allowedOrigins;
   }
+  // This was missing, and its absence was silent and destructive. saveViews
+  // rewrites every view, so dragging one panel and pressing Esc deleted the
+  // permission grants of ALL of them. It fails closed - absent means none, the
+  // opposite polarity to allowedOrigins - so nothing broke loudly: a dashboard
+  // simply stopped being allowed its camera, with nothing in the log to say why.
+  if (Array.isArray(v.allowedPermissions) && v.allowedPermissions.length) {
+    out.allowedPermissions = v.allowedPermissions;
+  }
   return out;
 }
 
@@ -634,6 +687,8 @@ module.exports = {
   saveViews,
   saveSettings,
   settingsVerdict,
+  panelPatchVerdict,
   serializeView,
   EDITABLE_SETTINGS,
+  PATCHABLE_PANEL_FIELDS,
 };

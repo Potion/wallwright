@@ -267,6 +267,19 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
   went red.
 - The control surface is unauthenticated by design and binds to loopback. If
   that ever changes, it needs auth first, not a comment.
+- **`serializeView()` is the list of what survives a layout save, and forgetting
+  a field there deletes it from every panel.** `saveViews()` rewrites the whole
+  array, so a key it does not write is gone from all of them the first time
+  somebody drags one panel and presses Esc. `allowedPermissions` was missing and
+  was being erased that way, silently and fail-closed. Adding a per-view config
+  key means adding it to `KNOWN_VIEW`, to the validator, **and to
+  `serializeView()`** unless it genuinely must not persist.
+- **A panel patch names only what `updatePanel()` can apply.**
+  `PATCHABLE_PANEL_FIELDS` is `url`, `label`, `zoom`, `partition`. Unknown fields
+  used to be accepted in silence and answered ok, which for `allowedOrigins` meant
+  a caller believing a navigation guard had been set when nothing had happened.
+  Adding a field to that set means writing the code in `updatePanel()` that
+  applies it.
 - **What the control surface may change is an allow-list, and it is short.**
   `EDITABLE_SETTINGS` in `src/config.js` names the scalars `/api/settings` will
   accept. Adding a key to it puts that key within reach of an unauthenticated
