@@ -106,12 +106,13 @@ Also settled by the run: the `workingSetSize` versus private-bytes gap, open sin
 the original 699MB datum, is **1.44 and stable**, not the drifting figure the
 partial runs suggested. The app's own number reads about 44% high.
 
-The machine has **not** been torn down, and it belongs to another project. The
-sampler stopped itself at 72 hours but the app is still up holding the display, and
-`FCATWallLauncher` and `FCATSoakSampler` stay disabled until `soak-teardown.ps1`
-re-enables them. And **do not RDP to it**: a remote session hijacks console session
-1 and blanks the physical display, which is a pre-registered invalidating
-condition.
+**The machine is torn down and given back**, on 2026-08-31, after the archive was
+taken and hash-verified. Checked independently of the teardown script's own output:
+stage and `%APPDATA%\Wallwright` gone, no Wallwright or node processes, no `Soak*`
+task, and all three `FCAT*` tasks back to `Ready`. The app had reached 90.8 hours of
+continuous uptime. It belongs to another project, so if you stage a run there again:
+**do not RDP to it**, because a remote session hijacks console session 1 and blanks
+the physical display, which is a pre-registered invalidating condition.
 
 Parked, and now largely moot: making the self-hosted runner photograph the wall.
 The question it existed to answer has been answered another way, on a machine that
@@ -132,38 +133,35 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
    from the already-filled `_memoryBaseline`, or re-measure if the path differs. Do
    not guess it: a limit inside the normal operating band was measured taking memory
    _up_, from 1513 to 1885MB.
-2. **Tear down the soak machine** when Jeff says so: `soak-teardown.ps1`, which also
-   re-enables the other project's `FCATWallLauncher` and `FCATSoakSampler`. Verify
-   afterwards that both read `Ready` and no `Soak*` task remains.
-3. **Fix the two harness defects the run exposed**, before any fourth soak. The
+2. **Fix the two harness defects the run exposed**, before any fourth soak. The
    grab task's console knocks the window to scale 0.999 and the geometry check
    cannot see it; the sampler should record the app's reported scale as a column.
    And `urlDrifted` is a per-sample state reported under an event's name, which
    makes a passing summary read as a failure. Both are written up in
    `docs/validation.md`.
-4. **Walk the checklist in `docs/validation.md` "Still to verify".** Grouped by
+3. **Walk the checklist in `docs/validation.md` "Still to verify".** Grouped by
    where each check can be done: (A) on the dev machine now, (B) blocked on the
    real dashboard URLs, (C) needs the show PC.
-5. **Real URLs and wall geometry.** Set the dashboard URLs, the wall resolution,
+4. **Real URLs and wall geometry.** Set the dashboard URLs, the wall resolution,
    the panel rectangles and the per-panel `zoom` against the real dashboards.
    Everything else is guesswork until this lands.
-6. **Scope `allowedOrigins`** to the real Honeywell IdP and app domains once
+5. **Scope `allowedOrigins`** to the real Honeywell IdP and app domains once
    known. Enforcement already exists for `will-navigate` and
    `setWindowOpenHandler`, so this is a config edit. It is a misconfiguration
    guard, not hardening: only administrators have input.
-7. **Code signing**, both platforms. No certificates yet. README "Signing" lists
+6. **Code signing**, both platforms. No certificates yet. README "Signing" lists
    exactly which secrets each needs. Unsigned builds are warned about by
    SmartScreen and quarantined by Gatekeeper, and a signed build is easier for
    Honeywell IT to approve.
-8. **Auto-launch on boot and crash restart**, for unattended operation.
-9. **Cursor auto-hide when idle.** Needs a native Windows approach; there is no
+7. **Auto-launch on boot and crash restart**, for unattended operation.
+8. **Cursor auto-hide when idle.** Needs a native Windows approach; there is no
    cross-platform Electron API.
-10. **Decide `hideInactiveWhenActive`** (default off). Several live dashboards on
-    a 4K wall is real GPU load, but hiding a view may throttle it. Mock 4's ticker
-    exists to measure this.
-11. **Sustained run against the real dashboards**, once the URLs exist, for session
+9. **Decide `hideInactiveWhenActive`** (default off). Several live dashboards on
+   a 4K wall is real GPU load, but hiding a view may throttle it. Mock 4's ticker
+   exists to measure this.
+10. **Sustained run against the real dashboards**, once the URLs exist, for session
     expiry rather than memory. Four live public dashboards measured 1513MB.
-12. Optional polish: an idle countdown before auto-return, and a manual "reset
+11. Optional polish: an idle countdown before auto-return, and a manual "reset
     panel" action.
 
 ## Open decisions (need Jeff)

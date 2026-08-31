@@ -11,10 +11,10 @@ and the data is in `docs/soak/2026-08-30-complete/`.
 | second  | `2026-08-27T19:47:42Z` | same hour, abandoned   | ~30min, discarded |
 | third   | `2026-08-27T20:31:57Z` | `2026-08-30T20:32:07Z` | **72.0h, PASS**   |
 
-**Teardown had not been run when this was written.** The sampler stops itself at 72
-hours but the app keeps running and holding the display, and
-`FCATWallLauncher` / `FCATSoakSampler` stay disabled until `soak-teardown.ps1`
-re-enables them, so the machine is not given back until it runs.
+**Torn down on 2026-08-31 and the machine is given back.** Verified independently of
+the script's own output: stage and `%APPDATA%\Wallwright` gone, no Wallwright or
+node processes, no `Soak*` task, all three `FCAT*` tasks `Ready`, GPU back to 420 of
+8188 MiB at 0%. The app had reached 90.8 hours of continuous uptime.
 
 **Two things this run taught, for whoever stages the next one.** Both are in the
 validation write-up in full:

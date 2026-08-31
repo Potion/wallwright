@@ -1314,14 +1314,54 @@ countermeasure.
 - The `heavy` DOM HUD still overlaps the canvas counters. Cosmetic, and it made the
   frame counter harder to read at harvest than it needed to be.
 
-#### Afterwards
+#### Afterwards, and the teardown
 
 The sampler stopped itself at 72 hours as designed, and the app was deliberately
 left running so the machine could be given back on Jeff's say-so rather than
 automatically. `soak-proc.ps1` loops forever and kept recording, which turned into a
-free extension of the result: **17.3 further hours at +0.151 MB/hour** in private
-bytes, on an app then 89 hours into continuous uptime, with the process count still
-9 and VRAM at 557 MiB.
+free extension of the result:
+
+```
+18.7 further hours past the scored window
+private bytes 949.0MB -> 948.2MB      OLS +0.315 MB/hour at R2 0.034
+process count 9 throughout, VRAM 543 MiB at the end
+90.8 hours of continuous uptime when it was finally killed
+```
+
+Read the endpoints rather than that fit: 0.8MB of movement across eighteen hours is
+the series not going anywhere, and an R2 of 0.034 says the slope is fitting noise.
+Which is the useful part. The last thing this app did before being killed was hold
+1369MB steady for most of a day, on a build that had by then been rendering four
+panels continuously for nearly four days.
+
+**Torn down on 2026-08-31**, on Jeff's go-ahead, after the archive was taken and
+verified. `soak-teardown.ps1` reported clean on every step, and the state was then
+checked independently rather than taken from the script's own output:
+
+```
+stage removed, %APPDATA%\Wallwright removed
+0 Wallwright processes, 0 node processes, 0 Soak* tasks
+FCATWallLauncher Ready, FCATSoakSampler Ready, FCATTableLauncher Ready
+GPU back to 420 of 8188 MiB at 0% utilisation
+```
+
+The other project's two tasks are re-enabled and the machine is given back.
+
+**The app log has no `stopping after Ns` line, and that is not a mystery to solve
+later.** Teardown kills with `taskkill /F`, so no `will-quit` handler runs. A plain
+`taskkill` was tried first, specifically to get that line into the record, and the
+kiosk window did not take the `WM_CLOSE`: all nine processes were still up ten
+seconds later. So this run ends with an ordinary memory line at
+`2026-08-31T11:17:35-04:00` and was ended by teardown's hard kill. Worth knowing,
+because the first run's write-up leans on that line to prove it quit gracefully, and
+its absence here means something different from what it would have meant there.
+
+**Evidence.** The scored series, the per-panel CSV, the raw JSONL and the summary in
+`docs/soak/2026-08-30-complete/` were hash-verified against the machine immediately
+before teardown and are byte-identical to what was harvested. The `proc` CSV and the
+app log in that directory are the final versions, running past the scored window to
+the moment of the kill. The 183 screen grabs are in
+`docs/soak/soak-2026-08-30-complete.zip`, which is gitignored like the partial's.
 
 ### Panel CRUD works end to end
 

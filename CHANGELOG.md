@@ -61,6 +61,12 @@ The write-up is `docs/validation.md` under "The 72-hour run, third attempt:
 COMPLETE", and the harvested series, the app log and the summary are committed under
 `docs/soak/2026-08-30-complete/`.
 
+HQ-PROTO-MINI-2 was torn down on 2026-08-31 once the archive was taken and
+hash-verified, and it is given back: no stage, no app profile, no `Soak*` task, and
+the other project's `FCATWallLauncher` and `FCATSoakSampler` re-enabled. The app had
+run 90.8 hours continuously by then, the last 18.7 of them past the scored window
+and flat to within a megabyte.
+
 ### The soak pre-flight fails on a busy machine, and the series records VRAM
 
 Two soak attempts have now died because HQ-PROTO-MINI-2 was in use by another
