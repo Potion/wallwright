@@ -102,9 +102,9 @@ function partitionVerdict(partition) {
 //
 // The permission strings are Chromium's, not ours - 43.4.1 produced `media`,
 // `geolocation`, `notifications`, `web-app-installation` and
-// `speaker-selection` - and they change between versions. That is why this is a
-// config array rather than an enum: a dashboard that turns out to need one is a
-// config edit, not a release.
+// `speaker-selection`, and 44.1.0 produces the same set - and they change between
+// versions. That is why this is a config array rather than an enum: a dashboard
+// that turns out to need one is a config edit, not a release.
 function isPermissionAllowed(permission, allowedPermissions) {
   if (!Array.isArray(allowedPermissions) || allowedPermissions.length === 0) return false;
   return allowedPermissions.includes(permission);

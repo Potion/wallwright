@@ -18,6 +18,41 @@ built from, so nothing is unrecoverable.
 
 ## Unreleased
 
+### Electron 44, and every probe answer re-run against it
+
+Bumped 43.4.1 to **44.1.0**, Chromium 150.0.7871.224 to 152.0.7977.65. Taken after
+the soak and after the memory cleanups, which is the order the audit plan fixed:
+a probe answer recorded against one runtime is evidence about that runtime and
+nothing else, so a bump invalidates the lot until they are re-run.
+
+**All six probes were re-run and every answer came back identical.** That is the
+result worth having, more than a green test suite, because these are the findings
+the design rests on: child views still reorder in place rather than detaching,
+macOS still needs simple fullscreen rather than kiosk, a reload still costs a login
+nothing while a recycle still clears `sessionStorage`, an animated page still does
+not fake input, and the navigation matrix came back row for row, including the two
+rows that forced `hardenView()` to police `will-redirect` and `will-frame-navigate`
+as well as `will-navigate`.
+
+Every breaking change in Electron 44 was checked against the source rather than
+assumed away, and none of them lands: the `clipboard` module's removal from the
+renderer and its move to Promises (not used, except `navigator.clipboard` in a mock
+dev page, which is what the change points you at), the null `webContents` on
+`select-client-certificate` (not listened for), `net.request` frame destinations
+(`net` unused), 32-bit Windows and Linux armv7l (x64 and arm64 only), Unity on
+Linux, and the pre-macOS 13 login item attributes. One is worth remembering rather
+than dismissing: **macOS 12 is no longer supported**, so a self-hosted macOS runner
+on Monterey would stop working.
+
+The caveat this creates is recorded rather than glossed. `_memoryBaseline` was
+measured on 43.4.1, and a whole Chromium major plus ANGLE moving to static linking
+are both in the GPU path the soak needed a VRAM column to see at all. The limit is
+a runaway guard sitting 633MB above the measured p95, so there is no reason to
+think it stops being sane, but it now describes a runtime one major behind what
+ships. The re-measure already scheduled against the real dashboards covers this
+too; the thing to avoid is bumping Electron again between a baseline being measured
+and the wall going live.
+
 ### The memory ladder keeps its state in one place, and the upkeep tick is linear
 
 Three cleanups to the memory code, held back until the soak finished because that

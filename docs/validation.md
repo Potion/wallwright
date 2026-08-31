@@ -15,8 +15,8 @@ validated" for what that harness cannot tell us.
 
 |                 |                                                             |
 | --------------- | ----------------------------------------------------------- |
-| Date            | 2026-08-21                                                  |
-| Electron        | 43.4.1 (Chromium 150.0.7871.224)                            |
+| Date            | 2026-08-21, Electron row updated 2026-08-31                 |
+| Electron        | 44.1.0 (Chromium 152.0.7977.65), was 43.4.1 (Chromium 150)  |
 | Platform        | macOS 25.5.0 (darwin), dev machine                          |
 | Config          | `config/local-dev.json`, 1600x900 wall, four 800x450 panels |
 | Target platform | Windows, **not yet tested**                                 |
@@ -1244,6 +1244,83 @@ but only because the code changed here first.
 
 **Windows is unverified.** Run `npm run probe:nav` there, or dispatch
 `probe-windows.yml`.
+
+### Electron 44: every probe answer re-run, and every one unchanged
+
+Bumped from 43.4.1 to **44.1.0** (Chromium 150.0.7871.224 to 152.0.7977.65) on
+2026-08-31, after the soak, which is the order the plan fixed: probe answers
+recorded against one runtime are evidence about that runtime and nothing else.
+
+**All six probes were re-run and every answer is identical.** That is the useful
+result, and it is worth more than a passing test suite, because these are the
+findings the app's design rests on.
+
+| probe            | what it settles                                   | 43.4.1                                                                    | 44.1.0    |
+| ---------------- | ------------------------------------------------- | ------------------------------------------------------------------------- | --------- |
+| `probe`          | child view z-order, `setVisible`, animated bounds | `abc`/`bca`/`cab`, all true, ok                                           | identical |
+| `probe:fs`       | which fullscreen path covers the display on macOS | only `set_simple`, not `set_kiosk`                                        | identical |
+| `probe:session`  | what a reload and a recycle cost a login          | login survives both; `sessionStorage` survives reload, cleared by recycle | identical |
+| `probe:activity` | whether an animated page fakes input              | no sustained stream, 0.08 moves/sec on all three arms                     | identical |
+| `probe:perm`     | which handler each install variant attaches       | request/check independently observable                                    | identical |
+| `probe:nav`      | which navigation shapes slip past the policy      | four of six past `will-navigate` alone; all six blocked by all three      | identical |
+
+The navigation matrix in particular came back row for row, including the two rows
+that drove a code change:
+
+```
+                                        will-navigate  +will-redirect  +will-frame-navigate
+server 302                              reached        blocked         blocked
+three-hop 302 chain                     reached        blocked         blocked
+meta refresh                            blocked        blocked         blocked
+script location.assign                  blocked        blocked         blocked
+subframe navigating itself              reached        reached         blocked
+302 whose target is not in the request  reached        blocked         blocked
+```
+
+So the `hardenView()` policing of all three events is still exactly as necessary as
+it was, and no more. `will-navigate` still never fires for a subframe, and still
+sees the URL asked for rather than the one arrived at. The permission strings are
+still Chromium's `media`, `geolocation` and `notifications`.
+
+**What the breaking-change list actually costs this app: nothing.** Each of
+Electron 44's breaking changes was checked against the source rather than assumed
+away:
+
+| change                                                  | applies here?                                                                                                                                       |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `clipboard` removed from the renderer                   | no. The only clipboard use is `navigator.clipboard` in a mock dev page, which is the W3C API the change points you at, and `src/dev/` does not ship |
+| `clipboard` module now returns Promises                 | no. The main process never touches it                                                                                                               |
+| `select-client-certificate` may have null `webContents` | no. Not listened for                                                                                                                                |
+| `net.request` rejects frame destinations                | no. The `net` module is not used                                                                                                                    |
+| Windows 32-bit and Linux armv7l dropped                 | no. `electron-builder.yml` builds x64 for Windows, arm64 + x64 for macOS                                                                            |
+| Unity on Linux, `app.isUnityRunning()` removed          | no. Windows and macOS only                                                                                                                          |
+| pre-macOS 13 login item attributes removed              | no. `setLoginItemSettings` is unused, though AGENTS.md TODO does want auto-launch eventually, and that is the API it will reach for                 |
+| **macOS 12 no longer supported**                        | **check the runners.** The self-hosted macOS runners must be on 13 or later. `hqmbp26-crouse` is fine; the others gate CI when they are up          |
+| **ANGLE is now statically linked on all platforms**     | **no API change, but see below**                                                                                                                    |
+
+#### The one thing this bump puts a question mark over
+
+`_memoryBaseline` was measured on **43.4.1**, and the app now ships 44.1.0. Two
+things in this bump plausibly move a memory number: a whole Chromium major, and
+ANGLE moving from a swappable library to a statically linked one, which is
+squarely in the GPU path the soak had to add a VRAM column to see.
+
+Nothing here says the baseline is wrong, and there is no reason to think 2000MB
+stops being a sane runaway guard: the measured `p95_24h` was 1367 and the limit
+sits 633MB above it. But the honest statement is that the number now describes a
+runtime one major behind what ships, and that is a caveat the record should carry
+rather than a thing to discover later from a limit that fires unexpectedly.
+
+It does not need separate work. A re-measure against the real dashboards is
+already the standing item, for the stronger reason that the soak lineup was not
+real content; that re-measure now also covers the runtime change. What is worth
+avoiding is bumping Electron again between a baseline being measured and the wall
+going live, without re-reading this paragraph.
+
+**Verified on this bump:** 265 unit tests, `npm run selftest` end to end on macOS,
+lint and prettier, plus the six probes above. The self-test matters most, since it
+is the only coverage `src/main.js` has, and it exercises the real window, the real
+overlay compositing and the real permission handlers against the new runtime.
 
 ### `npm run capture` does not work on this machine
 

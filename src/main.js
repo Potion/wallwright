@@ -394,10 +394,10 @@ function pickWallDisplay() {
 //
 // Electron paints child views in insertion order, so "frontmost" means last.
 // Re-adding an existing child reorders it in place rather than detaching it,
-// which avoids a repaint on every transition. Verified on Electron 43.4.1 /
-// macOS by `npm run probe` (abc -> addChildView(a) -> bca). The remove + add
-// fallback below is therefore dead on that build, but it is kept until the probe
-// is re-run on Windows, where the show PC lives.
+// which avoids a repaint on every transition. Verified on Electron 43.4.1 and
+// again on 44.1.0, macOS, by `npm run probe` (abc -> addChildView(a) -> bca). The
+// remove + add fallback below is therefore dead on both builds, but it is kept
+// until the probe is re-run on Windows, where the show PC lives.
 function bringToTop(view) {
   const kids = win.contentView.children;
   if (kids[kids.length - 1] === view) return; // already frontmost
@@ -1449,8 +1449,9 @@ function round3(n) {
 // every other app on the machine. It is handled per view instead, the same way
 // Esc is. The tradeoff is that the panels themselves lose Cmd+F find-in-page,
 // which is the right call for a kiosk wall.
-// macOS is the awkward one. Measured on Electron 43.4.1 with a 1800x1169
-// display (`/tmp/fsprobe1.js`, see docs/validation.md):
+// macOS is the awkward one. Measured on Electron 43.4.1, and re-measured
+// unchanged on 44.1.0, with a 1800x1169 display (`npm run probe:fs`, see
+// docs/validation.md):
 //
 //   constructor fullscreen+kiosk  ->  content y:39 height:1130   isFullScreen:true
 //   constructor kiosk only        ->  content y:39 height:1130   isFullScreen:true

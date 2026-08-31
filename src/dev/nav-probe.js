@@ -28,7 +28,7 @@ const soon = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const short = (u) => String(u || '').replace(BASE, '');
 
-// Every navigation-ish event Electron 43 exposes on webContents. Recorded with
+// Every navigation-ish event Electron 44 exposes on webContents. Recorded with
 // isMainFrame where the event carries it, because "main frame only" is the
 // documented limit of will-navigate and the thing most likely to bite.
 function listen(

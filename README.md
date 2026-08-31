@@ -168,9 +168,10 @@ and the decisions still open.
 
 # Development
 
-Target is Windows; development is on macOS. Requires Node 18+ and Electron 43+
+Target is Windows; development is on macOS. Requires Node 18+ and Electron 44+
 (for `BaseWindow`, `WebContentsView`, `View.setVisible` and animated
-`View.setBounds`).
+`View.setBounds`, all of which have been there since 43; 44 is simply what this
+ships and tests against).
 
 ## Stack
 
