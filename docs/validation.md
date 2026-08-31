@@ -2470,6 +2470,70 @@ the watchdog's backoff, layout scaling, and the whole of `src/overlay.js`
 including the drag, snap and inspector interactions. Those are only ever
 exercised by hand.
 
+### Settings are editable at runtime, and one ladder inversion was found doing it
+
+`memoryLimitMb` came out of the 72-hour soak and was then written into a JSON file
+by hand. The one certain thing about it is that it will be re-derived when real
+dashboards exist, and until now that meant an RDP session and a text editor on a
+show floor. The control page now edits it, along with `memoryHardLimitMb` and
+`autoStart`, through `POST /api/settings`.
+
+**Writing this turned up a real hole.** Nothing validated `memoryHardLimitMb`
+against `memoryLimitMb`. Each is checked on its own by the `NON_NEGATIVE` table
+and neither is wrong alone, but a hard limit at or below the soft limit inverts
+the ladder: every check that is over the limit at all is also over the hard limit,
+so `memoryPlan()` returns rung 3 and sweeps the whole wall where rung 1 would have
+rebuilt one idle panel. That is the same class of miss the 2026-08-25 audit found
+with `memoryCheckMs` — a rule nobody wrote down because it lives between two keys
+rather than in one. It is now fatal in `validateConfig`, so it covers hand-edited
+config files as well as patches. All eight committed configs still validate.
+
+Three properties are asserted rather than intended:
+
+| property                                    | why                                                                                                                                                | where                                      |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| an allow-list of three keys                 | the route is unauthenticated on loopback, and `views`, `presets`, `wall` and `control` each do far more than hold a number                         | `EDITABLE_SETTINGS`, `test/config.test.js` |
+| persist before apply                        | a patch that cannot be written must change nothing, rather than leaving the wall on a setting that vanishes at the next restart                    | `updateSettings()`, self-test 31           |
+| the pressure clock resets on a limit change | a timer most of the way to forcing a recycle should not be inherited by a limit that was just raised; the same reasoning as the "Recovered" branch | `updateSettings()`                         |
+
+The self-test is **96 assertions, up from 85**. Step 31 drives `updateSettings()`
+directly, since `src/main.js` has no unit tests, and asserts both halves of the
+verdict contract: an accepted patch reaches the live config _and_ the file, and a
+refused one reaches neither.
+
+Three of its checks were proven to redden, per the convention:
+
+- removing the cross-field rule → four checks fail
+- making `saveSettings` a no-op → the two persistence checks fail
+- putting a non-editable key on the allow-list → that check fails
+
+That last one is worth recording, because the obvious way to prove it was wrong.
+Putting **`views`** on the allow-list did not redden the run, it **hung** it: the
+patch emptied the wall and every later step needs panels. So step 31 asserts two
+keys. `views` is the one that matters and `escToGrid` is the one the proof uses,
+and `test/config.test.js` covers the allow-list exhaustively regardless.
+
+**Looking at the page found something the tests could not.** `draw()` runs every
+three seconds and wrote the memory-pressure banner into `#err`, which is also
+where a failed request reports. An error therefore erased itself within three
+seconds. That had been true since the control page was written and had never
+mattered, because the only thing producing one was a bad panel URL. The settings
+box refuses patches by design — a hard limit under the soft limit, a key that is
+not editable — so it mattered at once. The banner has its own `#pressure` element
+now, and `#err` belongs to the last request. Verified in a browser: a refused
+patch's message is still on screen after three polls, with the rejected value
+still in the field and the box still marked unsaved.
+
+This is the same lesson as step 29 and the `fatalPage()` write-up above. The page
+had been unit-tested and never once looked at.
+
+**One check in step 31 is deliberately unproven, and should stay that way.** It
+asserts that toggling `autoStart` in an unpackaged run leaves the real login item
+alone. Proving it by breaking the guard would register a login item on whichever
+machine ran the proof — which is precisely what the guard exists to prevent, and
+the macOS runner is somebody's own machine. The guard itself is covered by
+`test/autostart.test.js` on plain node, where there is no OS to affect.
+
 ## Decided: Esc returns to the grid on a single press
 
 `escToGrid: "single"` (Jeff, 2026-08-21). Pressing Esc while a panel is

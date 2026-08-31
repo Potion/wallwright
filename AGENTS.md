@@ -142,7 +142,9 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
    likely to move `p95_24h`, and a limit that lands inside the normal operating band
    is worse than no limit: measured, it took memory _up_ from 1513 to 1885MB while
    recycling every five seconds. Treat 2000 as a runaway guard until then, and
-   re-derive it from `_memoryBaseline`'s rule against real content.
+   re-derive it from `_memoryBaseline`'s rule against real content. The number
+   itself is now editable from the control page's Settings box, so re-deriving it
+   no longer means an RDP session and a text editor at the wall.
 2. **Fix the two harness defects the run exposed**, before any fourth soak. The
    grab task's console knocks the window to scale 0.999 and the geometry check
    cannot see it; the sampler should record the app's reported scale as a column.
@@ -265,6 +267,14 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
   went red.
 - The control surface is unauthenticated by design and binds to loopback. If
   that ever changes, it needs auth first, not a comment.
+- **What the control surface may change is an allow-list, and it is short.**
+  `EDITABLE_SETTINGS` in `src/config.js` names the scalars `/api/settings` will
+  accept. Adding a key to it puts that key within reach of an unauthenticated
+  loopback surface, so it is a decision, not a formality: `views`, `presets`,
+  `wall` and `control` are excluded because each has a path that does far more
+  than write a number. Settings persist before they apply, so a patch that cannot
+  be written changes nothing, and the type rules are `validateConfig`'s applied to
+  a merged candidate rather than a second copy.
 - **Auto-start is two mechanisms for two failures, and they do not substitute for
   each other.** `src/autostart.js` is the login item: it answers "the machine
   rebooted". Only something outside this process can answer "the app died", which

@@ -9,6 +9,8 @@ const {
   loadConfig,
   unknownKeys,
   saveViews,
+  saveSettings,
+  settingsVerdict,
 } = require('../src/config');
 
 const good = () => ({
@@ -605,4 +607,125 @@ test('neverRecycle is per panel, boolean, and round-trips only when set', () => 
     !('neverRecycle' in written.views[1]),
     'the default is not written back as if it had been authored'
   );
+});
+
+// ---- settings ---------------------------------------------------------------
+//
+// The scalars the control surface may change while the wall is running. Everything
+// here is reachable over an unauthenticated HTTP surface, so the allow-list and
+// the whole-patch rule are the load-bearing parts.
+
+const live = () => withDefaults(good());
+
+test('a good patch is accepted and handed back cleaned', () => {
+  const v = settingsVerdict(live(), { memoryLimitMb: 2500 });
+  assert.strictEqual(v.ok, true);
+  assert.deepStrictEqual(v.patch, { memoryLimitMb: 2500 });
+});
+
+test('every editable setting is actually editable', () => {
+  const c = live();
+  for (const patch of [
+    { memoryLimitMb: 1500 },
+    { memoryHardLimitMb: 9000 },
+    { autoStart: true },
+  ]) {
+    assert.strictEqual(settingsVerdict(c, patch).ok, true, JSON.stringify(patch));
+  }
+});
+
+// The allow-list. views, presets and wall each have a path that does far more
+// than write a number, and none should be reachable by patching a scalar.
+test('anything outside the allow-list is refused by name', () => {
+  const c = live();
+  for (const key of ['views', 'presets', 'wall', 'control', 'idleResetUrls']) {
+    const v = settingsVerdict(c, { [key]: 1 });
+    assert.strictEqual(v.ok, false, key + ' should not be editable');
+    assert.match(v.reason, new RegExp(key));
+  }
+});
+
+test('a patch mixing one good key with one bad one is refused entirely', () => {
+  const v = settingsVerdict(live(), { memoryLimitMb: 2500, views: [] });
+  assert.strictEqual(v.ok, false);
+  assert.match(v.reason, /views/);
+});
+
+test("the type rules are validateConfig's, not a second copy", () => {
+  const c = live();
+  assert.match(settingsVerdict(c, { memoryLimitMb: 'lots' }).reason, /memoryLimitMb/);
+  assert.match(settingsVerdict(c, { memoryLimitMb: -1 }).reason, /memoryLimitMb/);
+  assert.match(settingsVerdict(c, { autoStart: 'yes' }).reason, /autoStart/);
+});
+
+// Below the soft limit, every check that is over the limit at all is also over
+// the hard limit, so rung 3 sweeps the whole wall where rung 1 would have
+// rebuilt one idle panel.
+test('a hard limit at or below the soft limit is refused', () => {
+  const c = withDefaults({ ...good(), memoryLimitMb: 2000 });
+  assert.strictEqual(settingsVerdict(c, { memoryHardLimitMb: 1500 }).ok, false);
+  assert.strictEqual(settingsVerdict(c, { memoryHardLimitMb: 2000 }).ok, false);
+  assert.strictEqual(settingsVerdict(c, { memoryHardLimitMb: 2001 }).ok, true);
+  // 0 is "no hard limit", not "a very low one".
+  assert.strictEqual(settingsVerdict(c, { memoryHardLimitMb: 0 }).ok, true);
+});
+
+test('the cross-field rule also catches a bad file, not just a bad patch', () => {
+  const c = good();
+  c.memoryLimitMb = 2000;
+  c.memoryHardLimitMb = 1000;
+  assert.match(validateConfig(c).join('\n'), /memoryHardLimitMb/);
+});
+
+test('an empty or malformed patch is refused rather than treated as a no-op', () => {
+  const c = live();
+  for (const bad of [{}, null, undefined, [], 'memoryLimitMb=1', 7]) {
+    assert.strictEqual(settingsVerdict(c, bad).ok, false, JSON.stringify(bad));
+  }
+});
+
+test('saveSettings writes only the keys it was given', () => {
+  const f = tmpConfig({ ...good(), memoryLimitMb: 2000, escToGrid: 'single' });
+  saveSettings(f, { memoryLimitMb: 2500 });
+  const written = JSON.parse(fs.readFileSync(f, 'utf8'));
+  assert.strictEqual(written.memoryLimitMb, 2500);
+  assert.strictEqual(written.escToGrid, 'single', 'untouched keys survive');
+  assert.ok(!('idleReturnMs' in written), 'a default is not written back as if authored');
+});
+
+test('saveSettings keeps documentation and panel layout intact', () => {
+  const body = { ...good(), _memoryBaseline: { why: 'measured' }, memoryLimitMb: 0 };
+  const f = tmpConfig(body);
+  saveSettings(f, { memoryLimitMb: 2000, autoStart: true });
+  const written = JSON.parse(fs.readFileSync(f, 'utf8'));
+  assert.deepStrictEqual(written._memoryBaseline, { why: 'measured' });
+  assert.strictEqual(written.views.length, body.views.length);
+  assert.strictEqual(written.autoStart, true);
+});
+
+test('saveSettings keeps an existing key where it was', () => {
+  const f = tmpConfig({ ...good(), memoryLimitMb: 2000 });
+  const before = Object.keys(JSON.parse(fs.readFileSync(f, 'utf8')));
+  saveSettings(f, { memoryLimitMb: 2500 });
+  assert.deepStrictEqual(Object.keys(JSON.parse(fs.readFileSync(f, 'utf8'))), before);
+});
+
+// Same reasoning as saveViews: this is the file the wall boots from, so a crash
+// part-way through must not be able to truncate it.
+test('saveSettings leaves no temp file beside the config', () => {
+  const f = tmpConfig(good());
+  saveSettings(f, { memoryLimitMb: 100 });
+  assert.deepStrictEqual(
+    fs.readdirSync(path.dirname(f)),
+    ['wall.json'],
+    'the sibling write should have been renamed away'
+  );
+});
+
+test('what saveSettings writes still loads', () => {
+  const f = tmpConfig(good());
+  saveSettings(f, { memoryLimitMb: 2000, memoryHardLimitMb: 2750, autoStart: true });
+  const loaded = loadConfig(f);
+  assert.strictEqual(loaded.memoryLimitMb, 2000);
+  assert.strictEqual(loaded.autoStart, true);
 });

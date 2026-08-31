@@ -11,12 +11,22 @@ const { createControlServer } = require('../src/control-server');
 // the server passes the right things through rather than only that it replies.
 function fakeWall() {
   const calls = [];
-  const state = { mode: 'grid', panels: ['a', 'b'], presets: ['solo'] };
+  const state = {
+    mode: 'grid',
+    panels: ['a', 'b'],
+    presets: ['solo'],
+    settings: { memoryLimitMb: 2000, memoryHardLimitMb: 2750, autoStart: false },
+  };
   return {
     calls,
     state,
     actions: {
-      status: () => ({ mode: state.mode, panels: state.panels, presets: state.presets }),
+      status: () => ({
+        mode: state.mode,
+        panels: state.panels,
+        presets: state.presets,
+        settings: state.settings,
+      }),
       page: () => '<!doctype html><title>stub</title>',
       applyPreset: (id) => {
         calls.push(['applyPreset', id]);
@@ -29,6 +39,17 @@ function fakeWall() {
         if (patch && patch.url === 'file:///etc/passwd') {
           return { ok: false, reason: 'file: is not allowed for a panel' };
         }
+        return { ok: true };
+      },
+      // Mirrors the real action: a verdict, and no notFound, because there is
+      // only one settings object to address.
+      updateSettings: (patch) => {
+        calls.push(['updateSettings', patch]);
+        const keys = Object.keys(patch || {});
+        if (!keys.length) return { ok: false, reason: 'patch is empty' };
+        if (keys.some((k) => k === 'views'))
+          return { ok: false, reason: 'not an editable setting: views' };
+        Object.assign(state.settings, patch);
         return { ok: true };
       },
       promote: (id) => {
@@ -301,5 +322,49 @@ test('the status payload passes through untouched, counters and all', async () =
     assert.deepStrictEqual(body.counters, { crashes: 2 });
     assert.deepStrictEqual(body.memoryByType, { Tab: 400 });
     assert.strictEqual(body.memoryPeakMb, 1234);
+  });
+});
+
+// ---- settings ---------------------------------------------------------------
+
+test('a settings patch is applied and answered with the new status', async () => {
+  const wall = fakeWall();
+  await withServer(wall.actions, async (base) => {
+    const r = await request(base, 'POST', '/api/settings', {
+      patch: { memoryLimitMb: 2500 },
+    });
+    assert.equal(r.status, 200);
+    assert.equal(json(r).settings.memoryLimitMb, 2500);
+    assert.deepEqual(wall.calls, [['updateSettings', { memoryLimitMb: 2500 }]]);
+  });
+});
+
+// The distinction the panel route already makes, and the reason both return a
+// verdict rather than a boolean: a refusal has to say why.
+test('a refused settings patch is a 400 carrying the reason', async () => {
+  const wall = fakeWall();
+  await withServer(wall.actions, async (base) => {
+    const r = await request(base, 'POST', '/api/settings', { patch: { views: [] } });
+    assert.equal(r.status, 400);
+    assert.match(json(r).error, /not an editable setting: views/);
+  });
+});
+
+// There is only one settings object, so nothing here can 404. An absent patch is
+// a client mistake and must not read as success.
+test('a settings post with no patch is refused, not treated as a no-op', async () => {
+  const wall = fakeWall();
+  await withServer(wall.actions, async (base) => {
+    const r = await request(base, 'POST', '/api/settings', {});
+    assert.equal(r.status, 400);
+    assert.match(json(r).error, /empty/);
+  });
+});
+
+test('settings is a POST route only', async () => {
+  const wall = fakeWall();
+  await withServer(wall.actions, async (base) => {
+    const r = await request(base, 'GET', '/api/settings');
+    assert.equal(r.status, 404);
   });
 });

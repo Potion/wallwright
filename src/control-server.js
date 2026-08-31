@@ -130,6 +130,17 @@ function createControlServer(actions, options = {}) {
           return json(res, 400, { error: verdict.reason || 'patch refused' });
         }
 
+        // The settings the wall will accept while running. Same shape as
+        // /api/panel: a verdict, so a refused patch is a 400 that says why rather
+        // than a 200 that quietly did nothing. There is no 404 here - there is
+        // only one settings object - so an unknown key is a 400 like any other
+        // refusal.
+        if (path === '/api/settings') {
+          const verdict = actions.updateSettings(body.patch || {});
+          if (verdict.ok) return json(res, 200, actions.status());
+          return json(res, 400, { error: verdict.reason || 'patch refused' });
+        }
+
         if (path === '/api/promote') {
           const ok = actions.promote(body.id === undefined ? null : String(body.id));
           return json(res, ok ? 200 : 404, ok ? actions.status() : { error: 'no such panel' });

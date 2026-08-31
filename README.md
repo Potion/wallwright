@@ -123,6 +123,18 @@ walking to the wall or opening a remote desktop session:
   up on and is showing an error
 - recall a saved montage, change a panel's URL, open one fullscreen, reload one
   or all of them, or rebuild one
+- **change the memory limits and the auto-start setting**, in a Settings box,
+  without editing JSON on a show floor. Saving writes them back to the config
+  file, so they survive a restart
+
+Only three settings are editable there, deliberately: `memoryLimitMb`,
+`memoryHardLimitMb` and `autoStart`. The route is an allow-list, not "any config
+key", because it is reachable without authentication and `views`, `presets`,
+`wall` and `control` each do considerably more than hold a number. A patch that
+cannot be written to disk changes nothing, rather than leaving the wall running
+on a setting that vanishes at the next restart. And a hard limit at or below the
+soft limit is refused: below it, every check over the limit sweeps the whole wall
+instead of recycling one idle panel.
 
 It is **unauthenticated**, and it can drive the wall. It binds to `127.0.0.1` by
 default for that reason. Setting `control.host` to anything else puts an

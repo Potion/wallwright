@@ -27,7 +27,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
-const { loadConfig, saveViews } = require('./config');
+const { loadConfig, saveViews, saveSettings, settingsVerdict } = require('./config');
 const { clampGrid, snapGrid, snapNewGrid } = require('./layout');
 const {
   isOriginAllowed,
@@ -3275,6 +3275,84 @@ function selfTest() {
       contentViews.every((cv) => cv && cv.getVisible && cv.getVisible() !== false)
     );
 
+    // ---- 31: settings round-trip, and the guard that protects this machine --
+    //
+    // updateSettings() is the only path the control page has into the live config,
+    // and its contract is persist-first: a patch that cannot be written changes
+    // nothing. src/main.js has no unit tests, so nothing else covers it, and it
+    // writes the file the wall boots from.
+    step(31, 'a settings patch reaches both the live config and the file');
+    const settingsFileBefore = fs.readFileSync(configPath, 'utf8');
+    const limitBefore = config.memoryLimitMb;
+    const hardBefore = config.memoryHardLimitMb;
+    const autoStartBefore = config.autoStart;
+
+    // Values nothing else in this run depends on, both far above anything the
+    // ladder would act on.
+    const accepted = updateSettings({ memoryLimitMb: 31000, memoryHardLimitMb: 32000 });
+    check(31, 'the patch was accepted', accepted.ok === true);
+    check(31, 'the live config changed', config.memoryLimitMb === 31000);
+    check(
+      31,
+      'and it reached the file',
+      JSON.parse(fs.readFileSync(configPath, 'utf8')).memoryLimitMb === 31000
+    );
+
+    // A refusal has to change neither, which is the half a boolean return could
+    // not express and the reason this path answers with a verdict.
+    const refused = updateSettings({ memoryHardLimitMb: 10 });
+    check(31, 'a hard limit under the soft limit is refused', refused.ok === false);
+    check(31, 'and the refusal says which key', /memoryHardLimitMb/.test(refused.reason || ''));
+    check(31, 'the refused patch changed nothing live', config.memoryHardLimitMb === 32000);
+    check(
+      31,
+      'and nothing on disk',
+      JSON.parse(fs.readFileSync(configPath, 'utf8')).memoryHardLimitMb === 32000
+    );
+    check(
+      31,
+      'views is not reachable as a setting',
+      updateSettings({ views: [] }).ok === false
+    );
+    // Two keys, for two reasons. `views` is the one that matters: letting a
+    // scalar patch reach it would empty the wall. That is also why it is not the
+    // one used to prove this check goes red - putting it on the allow-list did
+    // not redden the run, it hung it, because every later step needs panels.
+    // `escToGrid` is an ordinary non-editable key that can be sabotaged safely,
+    // so it is the one the proof uses. test/config.test.js covers the allow-list
+    // exhaustively either way.
+    check(
+      31,
+      'nor is an ordinary config key like escToGrid',
+      updateSettings({ escToGrid: 'off' }).ok === false
+    );
+
+    // autoStart is safe to exercise here *because* this is not a packaged build:
+    // desiredLoginItem() refuses, so nothing reaches the operating system. That
+    // guard is what keeps this test off a developer's own login items, and the
+    // macOS runner is somebody's actual machine, so it is worth an assertion.
+    //
+    // Deliberately not proven by breaking the guard, unlike every other check
+    // here: doing that would register a login item on whichever machine ran the
+    // proof, which is the exact thing the guard exists to prevent.
+    const loginItemBefore = loginItemSettings();
+    updateSettings({ autoStart: true });
+    check(31, 'autoStart is stored', config.autoStart === true);
+    const loginItemAfter = loginItemSettings();
+    check(
+      31,
+      'and an unpackaged run left the real login item alone',
+      !!(loginItemBefore && loginItemBefore.openAtLogin) ===
+        !!(loginItemAfter && loginItemAfter.openAtLogin)
+    );
+
+    // Put the file back byte for byte. This runs against a committed config, and
+    // step 28 depends on that file being what it was.
+    config.memoryLimitMb = limitBefore;
+    config.memoryHardLimitMb = hardBefore;
+    config.autoStart = autoStartBefore;
+    fs.writeFileSync(configPath, settingsFileBefore);
+
     for (const id of spares) deletePanel(id);
 
     if (failures.length) {
@@ -3339,6 +3417,11 @@ function wallStatus() {
       ? Math.round((now - memoryLadder.pressureSince) / 1000)
       : null,
     wall: { width: config.wall.width, height: config.wall.height, scale: round3(layout.scale) },
+    settings: {
+      memoryLimitMb: config.memoryLimitMb,
+      memoryHardLimitMb: config.memoryHardLimitMb,
+      autoStart: config.autoStart,
+    },
     // Reports what the OS says, not what the config says. The two are separate
     // fields because somebody who deleted the Run entry by hand should see an
     // unticked box, not a ticked one that is lying.
@@ -3409,6 +3492,9 @@ const controlActions = {
   // panel that does not exist (404) from a patch that was refused (400). It used
   // to answer 200 to a rejected patch, which read as "done".
   updatePanel: (id, patch) => updatePanel(id, patch),
+  // Same verdict contract as updatePanel, so the HTTP surface can answer 400 with
+  // the reason rather than 200 to something it refused.
+  updateSettings: (patch) => updateSettings(patch),
   promote: (id) => {
     if (id === null) {
       dockGrid();
@@ -3448,6 +3534,51 @@ const controlActions = {
     return true;
   },
 };
+
+// ---- settings ---------------------------------------------------------------
+//
+// The handful of scalars the control page may change while the wall is running,
+// so tuning a memory limit does not mean an RDP session and a text editor on a
+// show floor.
+//
+// Persist first, then apply. A patch that cannot be written to disk must change
+// nothing, or the wall runs on a setting that silently disappears at the next
+// restart and nobody can work out why.
+function updateSettings(patch) {
+  const verdict = settingsVerdict(config, patch);
+  if (!verdict.ok) return verdict;
+  const clean = verdict.patch;
+
+  try {
+    saveSettings(configPath, clean);
+  } catch (e) {
+    warn(`could not save settings to ${configPath}: ${e.message}`);
+    return { ok: false, reason: `could not write the config file: ${e.message}` };
+  }
+
+  const before = { ...config };
+  Object.assign(config, clean);
+
+  // A pressure clock started under the old limit must not carry into the new one.
+  // Same reasoning as the "Recovered" branch in checkMemory(): raising the limit
+  // out of a pressure episode should start the next one's clock from scratch,
+  // not inherit a timer that is already most of the way to forcing a recycle.
+  if (
+    config.memoryLimitMb !== before.memoryLimitMb ||
+    config.memoryHardLimitMb !== before.memoryHardLimitMb
+  ) {
+    clearMemoryPressure();
+  }
+  if (config.autoStart !== before.autoStart) applyAutoStart();
+
+  log(
+    'settings updated: ' +
+      Object.entries(clean)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(', ')
+  );
+  return { ok: true };
+}
 
 // ---- auto-start -------------------------------------------------------------
 //
