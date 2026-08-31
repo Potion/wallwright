@@ -80,26 +80,38 @@ See "Overlay compositing on Windows: WORKS" in `docs/validation.md`. None of the
 countermeasure ships switched off because the number that would engage it has to
 come from a measured baseline.
 
-**The 72-hour soak ENDED EARLY and must be re-run.** It ran 6.9 of 72 hours on
-HQ-PROTO-MINI-2 and was shut down at the machine on 2026-08-25T20:17:36Z; the
-machine was then needed for other work, so it was harvested and torn down on
-2026-08-26. **No verdict**: the threshold is judged on the final 24 hours of 72, so
-`_memoryBaseline` stays `NOT MEASURED YET` and `memoryLimitMb` stays 0. The 6.9
-hours are still worth reading - the `control` arm was flat, nothing crashed, and
-the drift estimators agreed at ~3.4 MB/hour - and are written up in
-`docs/validation.md` under "The 72-hour run: ENDED EARLY". Data in
-`docs/soak/2026-08-25-partial/`.
+**The 72-hour soak is DONE and it PASSED.** The third attempt ran the full 72.0
+hours on HQ-PROTO-MINI-2, `2026-08-27T20:31:56Z` to `2026-08-30T20:32:07Z`, and was
+harvested on 2026-08-31. **0.45 MB/hour over the final 24 hours against a
+pre-registered 15**, median cross-check 0.89 agreeing, 4320/4320 samples, zero
+crashes, zero restarts, zero watchdog reloads, no reboot. The `control` arm, the
+only one whose growth would have indicted the product, did not climb. `heavy`
+plateaued at exactly 121MB from h+24 onward, which closes the one question the
+16-hour checkpoint left open. Written up in `docs/validation.md` under "The 72-hour
+run, third attempt: COMPLETE"; data in `docs/soak/2026-08-30-complete/`.
 
-Planned re-run: **Thursday 2026-08-27**. It starts from zero; a memory curve cannot
-be resumed across a gap. `docs/soak-run.md` is the runbook and needs no changes -
-the harness worked, including telling us how it ended. The machine is currently
-released: no `Soak*` task remains and both `FCAT*` tasks are back to `Ready`.
+**It is reported as partial, and deliberately so.** One human input instant reached
+the `control` panel at `2026-08-29T00:58Z` when somebody closed an unrelated app on
+that machine. Any human input is a pre-registered invalidating condition, so it is
+disclosed and argued rather than omitted: `lastUsedSecAgo` proves it was exactly one
+event, it never touched the other three arms, and it is 19.6 hours before the scored
+window opens. The verdict stands on a clean final 24 hours.
 
-Two things to know before touching that machine. It belongs to another project, and
-`FCATWallLauncher` and `FCATSoakSampler` are disabled for the duration and are
-re-enabled by the teardown script. And **do not RDP to it**: a remote session
-hijacks console session 1 and blanks the physical display, which is a
-pre-registered invalidating condition.
+**`_memoryBaseline` is now filled in** with `p95_24h` 1367, `peak_72h` 1537 and
+`driftMbPerHour` 0.45, which the committed rule turns into `memoryLimitMb` 2000 and
+`memoryHardLimitMb` 2750. **`memoryLimitMb` is still 0**, and the single thing
+blocking it is below.
+
+Also settled by the run: the `workingSetSize` versus private-bytes gap, open since
+the original 699MB datum, is **1.44 and stable**, not the drifting figure the
+partial runs suggested. The app's own number reads about 44% high.
+
+The machine has **not** been torn down, and it belongs to another project. The
+sampler stopped itself at 72 hours but the app is still up holding the display, and
+`FCATWallLauncher` and `FCATSoakSampler` stay disabled until `soak-teardown.ps1`
+re-enables them. And **do not RDP to it**: a remote session hijacks console session
+1 and blanks the physical display, which is a pre-registered invalidating
+condition.
 
 Parked, and now largely moot: making the self-hosted runner photograph the wall.
 The question it existed to answer has been answered another way, on a machine that
@@ -110,40 +122,48 @@ diagnosis and the security trade-off if per-build screenshots are ever wanted, a
 
 ## Build / harden next (TODO)
 
-1. **Re-run the soak, Thursday 2026-08-27.** The first attempt got 6.9 of 72
-   hours; see `docs/soak-run.md` for the runbook and `docs/validation.md` for what
-   the partial run did and did not settle. Re-stage the build, start it, and this
-   time **tell whoever else uses that machine that it is running**: the run was
-   ended by hand at the machine, which nothing in the harness can prevent. When it
-   finishes: harvest before tearing down, judge the final 24 hours against the
-   pre-registered 15 MB/hour, quantify the workingSetSize versus private-bytes gap
-   at the plateau (partially answered: about 60% high and shrinking), and set
-   `memoryLimitMb` from the rule in `config/wall.json` `_memoryBaseline` rather
-   than by guessing. A limit inside the normal operating band was measured taking
-   memory _up_, from 1513 to 1885MB.
-2. **Walk the checklist in `docs/validation.md` "Still to verify".** Grouped by
+1. **Find out how the show PC is cabled, then switch the countermeasure on.** This
+   is the whole remainder of the soak work and it is one question: is the video
+   cable on a discrete GPU or the integrated chip? The baseline was measured on a
+   discrete A1000, where textures and framebuffers live in VRAM and never appear in
+   the number `memoryLimitMb` is compared against; on integrated they come out of
+   system RAM and do. A baseline from one path does not transfer to the other. Once
+   it is known, set `memoryLimitMb` to **2000** and `memoryHardLimitMb` to **2750**
+   from the already-filled `_memoryBaseline`, or re-measure if the path differs. Do
+   not guess it: a limit inside the normal operating band was measured taking memory
+   _up_, from 1513 to 1885MB.
+2. **Tear down the soak machine** when Jeff says so: `soak-teardown.ps1`, which also
+   re-enables the other project's `FCATWallLauncher` and `FCATSoakSampler`. Verify
+   afterwards that both read `Ready` and no `Soak*` task remains.
+3. **Fix the two harness defects the run exposed**, before any fourth soak. The
+   grab task's console knocks the window to scale 0.999 and the geometry check
+   cannot see it; the sampler should record the app's reported scale as a column.
+   And `urlDrifted` is a per-sample state reported under an event's name, which
+   makes a passing summary read as a failure. Both are written up in
+   `docs/validation.md`.
+4. **Walk the checklist in `docs/validation.md` "Still to verify".** Grouped by
    where each check can be done: (A) on the dev machine now, (B) blocked on the
    real dashboard URLs, (C) needs the show PC.
-3. **Real URLs and wall geometry.** Set the dashboard URLs, the wall resolution,
+5. **Real URLs and wall geometry.** Set the dashboard URLs, the wall resolution,
    the panel rectangles and the per-panel `zoom` against the real dashboards.
    Everything else is guesswork until this lands.
-4. **Scope `allowedOrigins`** to the real Honeywell IdP and app domains once
+6. **Scope `allowedOrigins`** to the real Honeywell IdP and app domains once
    known. Enforcement already exists for `will-navigate` and
    `setWindowOpenHandler`, so this is a config edit. It is a misconfiguration
    guard, not hardening: only administrators have input.
-5. **Code signing**, both platforms. No certificates yet. README "Signing" lists
+7. **Code signing**, both platforms. No certificates yet. README "Signing" lists
    exactly which secrets each needs. Unsigned builds are warned about by
    SmartScreen and quarantined by Gatekeeper, and a signed build is easier for
    Honeywell IT to approve.
-6. **Auto-launch on boot and crash restart**, for unattended operation.
-7. **Cursor auto-hide when idle.** Needs a native Windows approach; there is no
+8. **Auto-launch on boot and crash restart**, for unattended operation.
+9. **Cursor auto-hide when idle.** Needs a native Windows approach; there is no
    cross-platform Electron API.
-8. **Decide `hideInactiveWhenActive`** (default off). Several live dashboards on
-   a 4K wall is real GPU load, but hiding a view may throttle it. Mock 4's ticker
-   exists to measure this.
-9. **Sustained run against the real dashboards**, once the URLs exist, for session
-   expiry rather than memory. Four live public dashboards measured 1513MB.
-10. Optional polish: an idle countdown before auto-return, and a manual "reset
+10. **Decide `hideInactiveWhenActive`** (default off). Several live dashboards on
+    a 4K wall is real GPU load, but hiding a view may throttle it. Mock 4's ticker
+    exists to measure this.
+11. **Sustained run against the real dashboards**, once the URLs exist, for session
+    expiry rather than memory. Four live public dashboards measured 1513MB.
+12. Optional polish: an idle countdown before auto-return, and a manual "reset
     panel" action.
 
 ## Open decisions (need Jeff)
