@@ -1527,6 +1527,35 @@ function isFullscreenNow() {
   return win.isFullScreen() || win.isKiosk();
 }
 
+// An exhibit has no menu bar, and on Windows and Linux passing null removes it.
+// macOS is different: it always shows one, so null leaves Electron's own default
+// in place. That default is named after the running bundle, which reads
+// "Electron" in a checkout, and it carries two fullscreen items - its own View >
+// Toggle Full Screen and the Enter Full Screen macOS adds for any fullscreenable
+// window. Both drive the NATIVE fullscreen path, which this app deliberately does
+// not use on darwin (see applyFullscreen), so both appeared to do nothing.
+//
+// One menu, correctly named, with no fullscreen item at all. Cmd+F still works:
+// it is handled in hardenView's before-input-event, not by an accelerator, so it
+// never needed the menu.
+function applicationMenu() {
+  if (process.platform !== 'darwin') return null;
+  return Menu.buildFromTemplate([
+    {
+      label: app.getName(),
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+  ]);
+}
+
 function applyFullscreen(on) {
   if (!win) return;
   if (process.platform === 'darwin') {
@@ -4059,7 +4088,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
-    Menu.setApplicationMenu(null);
+    Menu.setApplicationMenu(applicationMenu());
     // Same reason as the window icon above: in development the Dock shows
     // Electron's icon, because the app is running inside Electron's own bundle.
     if (!app.isPackaged && app.dock && fs.existsSync(DEV_ICON)) {
