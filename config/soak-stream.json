@@ -1,0 +1,96 @@
+{
+  "_soak": {
+    "purpose": "72-hour STREAMING soak. Identical arms to soak-72h.json so the memory series is directly comparable: the only new variable is a tablet stream held for the duration. Countermeasures stay OFF for the same reason as the baseline - you cannot measure a leak while something periodically resets it.",
+    "machine": "flowers, Windows, 63.7GB, RTX 3080 Ti, 3840x2160",
+    "geometry": "flowers hands the app a 2560x1440 logical window (3840x2160 at 150% scaling). Authored at 2560x1440 so wall.scale is 1.0 and no layout scaling distorts the panels, which is the same discipline soak-72h.json follows. The RASTER is identical to the baseline either way: 2560x1440 at device pixel ratio 1.5 is 3840x2160 = 8.29 megapixels, exactly what the baseline 1920x1080-at-200% produced. That is what makes the two memory series comparable.",
+    "why_this_is_still_representative": "At 200% scaling Chromium rasterises that window at device pixel ratio 2, so the real raster is 3840x2160 = 8.29 megapixels, which is what drives raster memory and GPU load. That is identical to the portrait mounting the first run used (2160x3840 is the same 8.29 megapixels) and identical to a 3840x2160 wall, so the memory series is comparable across both runs. Landscape is in fact a closer match to a real LED wall than the portrait mounting was: the aspect caveat that applied to the first run does not apply here.",
+    "arms": "soak-static is the control and must stay flat. soak-heavy is bounded-by-construction load. The two public panels are realistic but not actionable: if they grow and the local arms do not, the leak is in a third-party page, not in Wallwright.",
+    "pass_threshold_mb_per_hour": 15,
+    "threshold_basis": "31.6GB machine. 15 MB/hour is roughly 5GB over three weeks. Judged on the FINAL 24 HOURS, not the whole run: Chromium legitimately climbs for hours before it settles, so an early fit measures warm-up. Pre-registered before T0.",
+    "new_variable": "A stream is held on the heavy panel for the whole run. Streaming attaches a CDP debugger and runs capturePage on an idle keepalive, which is the shape that leaks. The baseline never exercised it: src/dev/soak.js polls /api/status and nothing else.",
+    "remote_access": "control stays on 127.0.0.1. It is reached from another machine over an SSH tunnel rather than by binding to the LAN, because the surface is unauthenticated and now carries keystrokes. The tunnel is the mitigation this run should be modelling anyway."
+  },
+  "wall": {
+    "width": 2560,
+    "height": 1440,
+    "backgroundColor": "#000000",
+    "displayLabel": null,
+    "displayId": null,
+    "kiosk": true,
+    "fullscreen": true,
+    "fitToDisplay": true
+  },
+  "idleReturnMs": 240000,
+  "showHotspotHint": true,
+  "hideInactiveWhenActive": false,
+  "transitionMs": 220,
+  "escToGrid": "single",
+  "recentUseMs": 60000,
+  "memoryCheckMs": 60000,
+  "memoryLimitMb": 0,
+  "memoryHardLimitMb": 0,
+  "control": {
+    "port": 8901,
+    "host": "127.0.0.1"
+  },
+  "backButton": {
+    "x": 24,
+    "y": 24,
+    "width": 176,
+    "height": 56
+  },
+  "views": [
+    {
+      "id": "control",
+      "label": "Static control (must stay flat)",
+      "url": "http://localhost:8787/soak-static.html",
+      "grid": {
+        "x": 0,
+        "y": 0,
+        "width": 1280,
+        "height": 720
+      },
+      "zoom": 1,
+      "partition": "persist:soak-1"
+    },
+    {
+      "id": "heavy",
+      "label": "Bounded heavy (local)",
+      "url": "http://localhost:8787/soak-heavy.html",
+      "grid": {
+        "x": 1280,
+        "y": 0,
+        "width": 1280,
+        "height": 720
+      },
+      "zoom": 1,
+      "partition": "persist:soak-2"
+    },
+    {
+      "id": "grafana",
+      "label": "Grafana Play (realistic dashboard)",
+      "url": "https://play.grafana.org",
+      "grid": {
+        "x": 0,
+        "y": 720,
+        "width": 1280,
+        "height": 720
+      },
+      "zoom": 0.6,
+      "partition": "persist:soak-3"
+    },
+    {
+      "id": "earth",
+      "label": "Earth wind map (WebGL, live data)",
+      "url": "https://earth.nullschool.net/",
+      "grid": {
+        "x": 1280,
+        "y": 720,
+        "width": 1280,
+        "height": 720
+      },
+      "zoom": 0.75,
+      "partition": "persist:soak-4"
+    }
+  ]
+}
