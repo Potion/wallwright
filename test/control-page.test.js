@@ -302,7 +302,7 @@ test('a tap is never held back waiting for a frame', () => {
 // from that moment on, so the status poll refreshes it.
 test('the panel rect is re-read rather than captured once', () => {
   const script = touchScript();
-  assert.match(script, /setInterval\(readStatus, 3000\)/);
+  assert.match(script, /schedulePoll\(STATUS_MS\)/);
 });
 
 test('a touch outside the frame is never sent', () => {
@@ -613,4 +613,55 @@ test('clipboard chords are sent as edit commands', () => {
 test('Cmd+V is not also sent as an edit command', () => {
   const script = touchScript();
   assert.ok(!/v: 'paste'/.test(script), 'the paste handler already covers it');
+});
+
+// ---- reconnection -----------------------------------------------------------
+//
+// The app restarts and the stream socket dies with it. The <img> cannot notice:
+// a multipart stream that ended looks exactly like one that has gone quiet,
+// which is the ordinary state of a still dashboard. Polling recovered by itself
+// because every still is a fresh request; the stream had no path at all.
+
+test('the status poll is the heartbeat, and reconnects when it comes back', () => {
+  const script = touchScript();
+  const rs = script.slice(script.indexOf('function readStatus'));
+  assert.match(rs, /if \(!serverUp\)/, 'it must notice the server returning');
+  assert.match(rs, /serverUp = true;[\s\S]{0,500}attach\(id\)/, 'and re-attach');
+});
+
+// A half-started app answering 500 is as much "not ready" as a closed port.
+test('a non-ok status counts as down, not as up', () => {
+  const rs = touchScript().slice(touchScript().indexOf('function readStatus'));
+  assert.match(rs, /if \(!r\.ok\) throw/);
+});
+
+test('it polls faster while the server is down', () => {
+  const script = touchScript();
+  assert.match(script, /var STATUS_MS = 3000/);
+  assert.match(script, /var RETRY_MS = 1500/);
+  const rs = script.slice(script.indexOf('function readStatus'));
+  const c = rs.slice(rs.indexOf('.catch('));
+  assert.match(c, /schedulePoll\(RETRY_MS\)/, 'the failure path retries sooner');
+});
+
+test('the surface says it is reconnecting rather than showing a frozen picture', () => {
+  const rs = touchScript().slice(touchScript().indexOf('function readStatus'));
+  assert.match(rs, /setMode\('reconnecting', 'dead'\)/);
+});
+
+// Before the probe settles an error means the browser cannot stream, and the
+// fallback owns it. After it settles the stream worked and then stopped, which
+// is a different thing entirely.
+test('an error after settling reconnects instead of falling back', () => {
+  const script = touchScript();
+  const attach = script.slice(script.indexOf('function attach('));
+  assert.match(attach, /if \(settled\) return reconnectSoon\(mine\);/);
+});
+
+// If the app is genuinely gone this would spin, and the heartbeat is the thing
+// that recovers properly.
+test('only one reconnect is ever in flight', () => {
+  const r = touchScript().slice(touchScript().indexOf('function reconnectSoon'));
+  assert.match(r, /if \(mine !== session \|\| reconnectTimer\) return;/);
+  assert.match(r, /reconnectTimer = null;/, 'and it clears itself');
 });

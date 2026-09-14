@@ -454,6 +454,10 @@ ${touchToPanel.toString()}
   // which the transport probe would read as "this browser cannot stream" and
   // drop to polling for the rest of the session.
   var RELEASE_MS = 150;
+  var STATUS_MS = 3000;
+  // Used both for retrying a dead server and for re-attaching a stream that
+  // dropped. Short enough that a restart is barely noticed.
+  var RETRY_MS = 1500;
 
   var id = new URLSearchParams(location.search).get('id') || '';
   var rect = null;
@@ -493,18 +497,72 @@ ${touchToPanel.toString()}
     if (b) attach(b.getAttribute('data-id'));
   });
 
+  // The status poll doubles as the heartbeat that drives reconnection.
+  //
+  // The app restarts - a deploy, a crash, somebody pressing Rebuild - and the
+  // stream socket dies with it. The <img> cannot notice on its own: a multipart
+  // stream that ended is indistinguishable from one that has merely gone quiet,
+  // which is the ordinary state of a still dashboard, so nothing fires and the
+  // tablet sits on a frozen picture believing it is live. Polling mode recovered
+  // by itself because each still is a fresh request that fails and retries; the
+  // stream had no such path at all.
+  //
+  // So this is the signal. While the poll fails the surface says so, and the
+  // first poll that succeeds re-attaches from scratch.
+  //
   // Not session-guarded on purpose: it looks the panel up by whatever id is
   // current when the answer arrives, so a reply that crosses a switch still
   // carries the right rect.
+  var serverUp = true;
+  var pollTimer = null;
+
+  function schedulePoll(ms) {
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = setTimeout(readStatus, ms);
+  }
+
   function readStatus() {
     fetch('/api/status')
-      .then(function (r) { return r.json(); })
+      .then(function (r) {
+        // A 5xx from a half-started app is as much "not ready" as a dead socket.
+        if (!r.ok) throw new Error('status ' + r.status);
+        return r.json();
+      })
       .then(function (s) {
         drawPicker(s.panels);
         var p = s.panels.filter(function (x) { return x.id === id; })[0];
         if (p) rect = p.rect;
+        if (!serverUp) {
+          serverUp = true;
+          // Whatever the old socket was doing, it belonged to a process that is
+          // gone. attach() tears it down and starts again, which also re-runs
+          // the transport probe: the new process need not behave like the old.
+          if (id) attach(id);
+        }
+        schedulePoll(STATUS_MS);
       })
-      .catch(function () {});
+      .catch(function () {
+        if (serverUp) {
+          serverUp = false;
+          setMode('reconnecting', 'dead');
+        }
+        // Faster while it is down. Coming back promptly is the whole point, and
+        // a request to a closed port is cheap.
+        schedulePoll(RETRY_MS);
+      });
+  }
+
+  // A stream that errors AFTER it had settled has died on us. Re-attach, but on
+  // a timer and never more than one in flight: if the app is genuinely gone this
+  // would otherwise spin, and the heartbeat above is what recovers properly.
+  var reconnectTimer = null;
+  function reconnectSoon(mine) {
+    if (mine !== session || reconnectTimer) return;
+    setMode('reconnecting', 'dead');
+    reconnectTimer = setTimeout(function () {
+      reconnectTimer = null;
+      if (mine === session && id) attach(id);
+    }, RETRY_MS);
   }
 
   function decide(mine) {
@@ -575,7 +633,15 @@ ${touchToPanel.toString()}
     setTimeout(function () {
       if (mine !== session) return;
       img.onload = function () { if (mine === session) { loaded = true; decide(mine); } };
-      img.onerror = function () { if (mine === session) { errored = true; decide(mine); } };
+      img.onerror = function () {
+        if (mine !== session) return;
+        // Before the probe settles, an error means "this browser cannot stream"
+        // and the fallback handles it. After it settles the stream was working
+        // and has now stopped, which is a different thing and wants a reconnect.
+        if (settled) return reconnectSoon(mine);
+        errored = true;
+        decide(mine);
+      };
       img.src =
         '/api/stream?id=' +
         encodeURIComponent(id) +
@@ -884,7 +950,7 @@ ${touchToPanel.toString()}
   // ---- start ----------------------------------------------------------------
 
   readStatus();
-  setInterval(readStatus, 3000);
+  schedulePoll(STATUS_MS);
   if (id) {
     attach(id);
   } else {
