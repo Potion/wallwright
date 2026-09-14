@@ -532,8 +532,8 @@ and each uploads its own artifacts.
   it costs the wall, the seven assumptions that turned out to be wrong, and what
   is deliberately not built.
 - `docs/report/` - short PDFs for people without the repo, rendered from HTML by
-  `src/dev/make-pdf.js`. `tablet-control.pdf` is the two-page, non-technical
-  summary of the tablet surface.
+  `src/dev/make-pdf.js`. `wallwright-overview.pdf` is the two-page,
+  non-technical summary of what the whole thing does.
 - `docs/identity.md` - the name, the mark, the palette, and where branding is
   allowed to appear. `npm run icon` regenerates `build/icon.png` from
   `src/dev/make-icon.js`.
