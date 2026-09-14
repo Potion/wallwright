@@ -50,6 +50,9 @@ function readCookie(req, name) {
   return hit ? decodeURIComponent(hit.slice(name.length + 1)) : null;
 }
 
+// id -> { frames, at }. Last report wins; the reader takes two and divides.
+const fpsReports = new Map();
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
@@ -64,6 +67,31 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/sso-bounce') {
     res.writeHead(302, { Location: '/dash-4.html' });
     return res.end();
+  }
+
+  // Frame-rate reports from soak-heavy.html, and only when it is asked for with
+  // ?fps=1. Off by default so the 72h soak measures exactly what it always did.
+  //
+  // This is what makes the wall's own smoothness observable from outside the
+  // app. The tablet control surface can be measured against it: attach a stream
+  // and see whether the number moves. See src/dev/stream-cost.js.
+  if (url.pathname === '/fps') {
+    const id = url.searchParams.get('id') || 'panel';
+    // Every numeric field the page chose to send, not just frames. globe.html
+    // rides along with its drag figures, which are the thing that page exists to
+    // measure.
+    const report = { at: Date.now() };
+    for (const [k, v] of url.searchParams) {
+      if (k !== 'id') report[k] = Number.isFinite(Number(v)) ? Number(v) : v;
+    }
+    fpsReports.set(id, report);
+    res.writeHead(204);
+    return res.end();
+  }
+
+  if (url.pathname === '/fps-state') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    return res.end(JSON.stringify(Object.fromEntries(fpsReports)));
   }
 
   if (url.pathname === '/whoami') {
@@ -89,6 +117,11 @@ const server = http.createServer((req, res) => {
     }
     res.writeHead(200, {
       'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream',
+      // Never cached. These files are edited while the wall is running and a
+      // panel is holding them, and a stale copy is a genuinely confusing bug:
+      // the page looks right, behaves like an older version, and a reload does
+      // not help because the reload is served from cache too.
+      'Cache-Control': 'no-store, must-revalidate',
     });
     res.end(body);
   });

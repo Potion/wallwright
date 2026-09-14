@@ -28,6 +28,7 @@
     "selftest": "node src/dev/selftest-run.js",
     "check:asar": "node src/dev/asar-check.js",
     "soak": "node src/dev/soak.js",
+    "stream-cost": "node src/dev/stream-cost.js",
     "report": "node src/dev/reports.js"
   },
   "engines": {
