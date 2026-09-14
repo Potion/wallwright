@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock: building floor plan</title>
+    <style>
+      :root {
+        --ground: #0d1117;
+        --surface: #161b22;
+        --raised: #21262d;
+        --line: #30363d;
+        --text: #e6edf3;
+        --muted: #8b949e;
+        --accent: #f04e23;
+        --ok: #3fb950;
+        --warn: #d29922;
+        --alarm: #f85149;
+        --info: #4a86c8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--ground);
+        color: var(--text);
+        font:
+          13px/1.45 -apple-system,
+          BlinkMacSystemFont,
+          Segoe UI,
+          Helvetica,
+          Arial,
+          sans-serif;
+        overflow: hidden;
+      }
+      #app {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 18px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+        flex: none;
+      }
+      h1 {
+        font:
+          600 13px/1 ui-monospace,
+          Menlo,
+          Consolas,
+          monospace;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        margin: 0;
+      }
+      button {
+        font: inherit;
+        font-size: 11px;
+        padding: 6px 11px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--raised);
+        color: var(--text);
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      button.on {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      #clock {
+        margin-left: auto;
+        font:
+          12px/1 ui-monospace,
+          monospace;
+        color: var(--muted);
+      }
+      main {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+      }
+      #planwrap {
+        flex: 1;
+        position: relative;
+        min-width: 0;
+      }
+      #plan {
+        width: 100%;
+        height: 100%;
+        display: block;
+        touch-action: none;
+        cursor: grab;
+      }
+      #plan.drag {
+        cursor: grabbing;
+      }
+      aside {
+        width: 300px;
+        flex: none;
+        border-left: 1px solid var(--line);
+        background: var(--surface);
+        padding: 12px 14px;
+        overflow-y: auto;
+      }
+      aside h2 {
+        font:
+          600 10px/1 ui-monospace,
+          monospace;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0 0 10px;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        padding: 5px 0;
+        border-bottom: 1px solid rgba(48, 54, 61, 0.6);
+        font:
+          12px/1.5 ui-monospace,
+          monospace;
+      }
+      .row b {
+        font-weight: 600;
+      }
+      .big {
+        font:
+          600 30px/1.1 ui-monospace,
+          monospace;
+        margin: 6px 0 2px;
+      }
+      .legend {
+        display: flex;
+        gap: 12px;
+        padding: 8px 18px;
+        border-top: 1px solid var(--line);
+        background: var(--surface);
+        font:
+          11px/1 ui-monospace,
+          monospace;
+        color: var(--muted);
+        flex: none;
+        align-items: center;
+      }
+      .sw {
+        display: inline-block;
+        width: 11px;
+        height: 11px;
+        border-radius: 3px;
+        vertical-align: -1px;
+        margin-right: 5px;
+      }
+      #hud {
+        position: absolute;
+        right: 12px;
+        top: 12px;
+        background: rgba(13, 17, 23, 0.9);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 7px 10px;
+        font:
+          11px/1.6 ui-monospace,
+          monospace;
+        pointer-events: none;
+      }
+      #hud b {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>Building C &middot; Level 3</h1>
+        <button data-mode="temp" class="on">Temperature</button>
+        <button data-mode="occupancy">Occupancy</button>
+        <button data-mode="co2">CO&#8322;</button>
+        <button id="fit">Reset view</button>
+        <span id="clock">--:--:--</span>
+      </header>
+
+      <main>
+        <div id="planwrap">
+          <canvas id="plan"></canvas>
+          <div id="hud">
+            taps <b id="htaps">0</b> &middot; drags <b id="hdrags">0</b> &middot; zoom
+            <b id="hzoom">1.0</b>&times;
+          </div>
+        </div>
+        <aside>
+          <h2>Zone detail</h2>
+          <div id="detail"><p style="color: var(--muted)">Tap a zone on the plan.</p></div>
+        </aside>
+      </main>
+
+      <div class="legend">
+        <span><i class="sw" style="background: #4a86c8"></i>cool</span>
+        <span><i class="sw" style="background: #3fb950"></i>nominal</span>
+        <span><i class="sw" style="background: #d29922"></i>high</span>
+        <span><i class="sw" style="background: #f85149"></i>alarm</span>
+        <span style="margin-left: auto"
+          >drag to pan &middot; wheel to zoom &middot; tap a zone</span
+        >
+      </div>
+    </div>
+
+    <script>
+      // An interactive floor plan. Tap a zone, drag to pan, wheel to zoom.
+      //
+      // This is the third of the four demos and it exercises a different part of
+      // the control surface from the others: a tap that must land on a specific
+      // small target, and a pan that must track a finger. Self-contained - the
+      // plan is drawn, not loaded.
+      const $ = (id) => document.getElementById(id);
+      const rnd = (a, b) => a + Math.random() * (b - a);
+
+      const ZONES = [
+        { id: 'Z-301', name: 'North Open Plan', x: 40, y: 40, w: 260, h: 150, cap: 48 },
+        { id: 'Z-302', name: 'Meeting 3A', x: 320, y: 40, w: 120, h: 70, cap: 8 },
+        { id: 'Z-303', name: 'Meeting 3B', x: 320, y: 120, w: 120, h: 70, cap: 8 },
+        { id: 'Z-304', name: 'Lab Wing', x: 460, y: 40, w: 200, h: 150, cap: 22 },
+        { id: 'Z-305', name: 'South Open Plan', x: 40, y: 210, w: 300, h: 160, cap: 60 },
+        { id: 'Z-306', name: 'Plant Room', x: 360, y: 210, w: 140, h: 160, cap: 4 },
+        { id: 'Z-307', name: 'Server Room', x: 520, y: 210, w: 140, h: 90, cap: 2 },
+        { id: 'Z-308', name: 'Store', x: 520, y: 315, w: 140, h: 55, cap: 6 },
+      ];
+      ZONES.forEach((z) => {
+        z.temp = rnd(19, 25);
+        z.occ = Math.round(rnd(0, z.cap));
+        z.co2 = rnd(400, 900);
+      });
+
+      let mode = 'temp';
+      let selected = null;
+      let taps = 0,
+        drags = 0;
+      let scale = 1,
+        panX = 0,
+        panY = 0;
+      let dragging = false,
+        last = null,
+        moved = 0;
+
+      const canvas = $('plan');
+      const ctx = canvas.getContext('2d');
+
+      function band(z) {
+        const v = mode === 'temp' ? z.temp : mode === 'occupancy' ? z.occ / z.cap : z.co2;
+        if (mode === 'temp')
+          return v < 20.5 ? '#4a86c8' : v < 23 ? '#3fb950' : v < 24.2 ? '#d29922' : '#f85149';
+        if (mode === 'occupancy')
+          return v < 0.25 ? '#4a86c8' : v < 0.7 ? '#3fb950' : v < 0.9 ? '#d29922' : '#f85149';
+        return v < 550 ? '#4a86c8' : v < 750 ? '#3fb950' : v < 860 ? '#d29922' : '#f85149';
+      }
+      function label(z) {
+        return mode === 'temp'
+          ? z.temp.toFixed(1) + '°'
+          : mode === 'occupancy'
+            ? z.occ + '/' + z.cap
+            : Math.round(z.co2) + 'ppm';
+      }
+
+      // Plan coordinates -> canvas, honouring pan and zoom. Used for drawing and
+      // for turning a tap back into a zone, so the two cannot disagree.
+      function transform() {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const w = Math.round(canvas.clientWidth * dpr);
+        const h = Math.round(canvas.clientHeight * dpr);
+        if (canvas.width !== w || canvas.height !== h) {
+          canvas.width = w;
+          canvas.height = h;
+        }
+        const base = Math.min(w / 700, h / 410) * 0.94;
+        return {
+          dpr,
+          w,
+          h,
+          k: base * scale,
+          ox: w / 2 - 350 * base * scale + panX * dpr,
+          oy: h / 2 - 205 * base * scale + panY * dpr,
+        };
+      }
+
+      function draw() {
+        const t = transform();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.fillStyle = '#0d1117';
+        ctx.fillRect(0, 0, t.w, t.h);
+        ctx.setTransform(t.k, 0, 0, t.k, t.ox, t.oy);
+
+        ctx.lineWidth = 2 / t.k;
+        ZONES.forEach((z) => {
+          ctx.fillStyle = band(z) + '33';
+          ctx.fillRect(z.x, z.y, z.w, z.h);
+          ctx.strokeStyle = z === selected ? '#f04e23' : band(z);
+          ctx.lineWidth = (z === selected ? 3.5 : 1.6) / t.k;
+          ctx.strokeRect(z.x, z.y, z.w, z.h);
+
+          ctx.fillStyle = '#e6edf3';
+          ctx.font = 600 + ' ' + 13 + 'px ui-monospace, monospace';
+          ctx.fillText(z.id, z.x + 8, z.y + 20);
+          ctx.fillStyle = '#8b949e';
+          ctx.font = '11px ui-monospace, monospace';
+          ctx.fillText(z.name, z.x + 8, z.y + 35);
+          ctx.fillStyle = band(z);
+          ctx.font = '600 16px ui-monospace, monospace';
+          ctx.fillText(label(z), z.x + 8, z.y + z.h - 10);
+        });
+
+        // Outer wall last, so it sits over the fills.
+        ctx.strokeStyle = '#8b949e';
+        ctx.lineWidth = 3 / t.k;
+        ctx.strokeRect(28, 28, 644, 354);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+      }
+
+      function zoneAt(clientX, clientY) {
+        const r = canvas.getBoundingClientRect();
+        const t = transform();
+        const px = ((clientX - r.left) * t.dpr - t.ox) / t.k;
+        const py = ((clientY - r.top) * t.dpr - t.oy) / t.k;
+        return (
+          ZONES.find((z) => px >= z.x && px <= z.x + z.w && py >= z.y && py <= z.y + z.h) ||
+          null
+        );
+      }
+
+      function showDetail() {
+        if (!selected) {
+          $('detail').innerHTML = '<p style="color:var(--muted)">Tap a zone on the plan.</p>';
+          return;
+        }
+        const z = selected;
+        $('detail').innerHTML =
+          '<div class="big" style="color:' +
+          band(z) +
+          '">' +
+          label(z) +
+          '</div>' +
+          '<div style="color:var(--muted);margin-bottom:10px">' +
+          z.id +
+          ' &middot; ' +
+          z.name +
+          '</div>' +
+          '<div class="row"><span>Temperature</span><b>' +
+          z.temp.toFixed(1) +
+          '&deg;C</b></div>' +
+          '<div class="row"><span>Occupancy</span><b>' +
+          z.occ +
+          ' / ' +
+          z.cap +
+          '</b></div>' +
+          '<div class="row"><span>CO&#8322;</span><b>' +
+          Math.round(z.co2) +
+          ' ppm</b></div>' +
+          '<div class="row"><span>Setpoint</span><b>21.5&deg;C</b></div>' +
+          '<div class="row"><span>Damper</span><b>' +
+          Math.round(rnd(20, 90)) +
+          '%</b></div>' +
+          '<div class="row"><span>Last service</span><b>' +
+          Math.round(rnd(3, 140)) +
+          'd ago</b></div>';
+      }
+
+      // ---- interaction ------------------------------------------------------
+      canvas.addEventListener('pointerdown', (e) => {
+        dragging = true;
+        moved = 0;
+        last = { x: e.clientX, y: e.clientY };
+        canvas.classList.add('drag');
+        try {
+          canvas.setPointerCapture(e.pointerId);
+        } catch (err) {
+          /* fine */
+        }
+      });
+      canvas.addEventListener('pointermove', (e) => {
+        if (!dragging || !last) return;
+        const dx = e.clientX - last.x,
+          dy = e.clientY - last.y;
+        moved += Math.abs(dx) + Math.abs(dy);
+        panX += dx;
+        panY += dy;
+        last = { x: e.clientX, y: e.clientY };
+        drags++;
+        draw();
+      });
+      canvas.addEventListener('pointerup', (e) => {
+        canvas.classList.remove('drag');
+        dragging = false;
+        last = null;
+        // A short press is a tap; a long one was a pan. Without this every pan
+        // would also select whatever it started on.
+        if (moved < 6) {
+          selected = zoneAt(e.clientX, e.clientY);
+          taps++;
+          showDetail();
+          draw();
+        }
+        hud();
+      });
+      canvas.addEventListener('pointercancel', () => {
+        canvas.classList.remove('drag');
+        dragging = false;
+        last = null;
+      });
+      canvas.addEventListener(
+        'wheel',
+        (e) => {
+          scale = Math.max(0.5, Math.min(4, scale * (e.deltaY > 0 ? 0.92 : 1.08)));
+          e.preventDefault();
+          hud();
+          draw();
+        },
+        { passive: false }
+      );
+
+      document.querySelectorAll('header button[data-mode]').forEach((b) => {
+        b.addEventListener('click', () => {
+          mode = b.getAttribute('data-mode');
+          document
+            .querySelectorAll('header button[data-mode]')
+            .forEach((o) => o.classList.toggle('on', o === b));
+          taps++;
+          hud();
+          showDetail();
+          draw();
+        });
+      });
+      $('fit').addEventListener('click', () => {
+        scale = 1;
+        panX = 0;
+        panY = 0;
+        taps++;
+        hud();
+        draw();
+      });
+
+      function hud() {
+        $('htaps').textContent = taps;
+        $('hdrags').textContent = drags;
+        $('hzoom').textContent = scale.toFixed(1);
+      }
+
+      // ---- live data --------------------------------------------------------
+      let frames = 0,
+        fpsAt = performance.now(),
+        fpsFrames = 0,
+        lastTick = 0;
+      function loop(now) {
+        // Values drift continuously, so the panel is never a still image.
+        ZONES.forEach((z) => {
+          z.temp = Math.max(17, Math.min(27, z.temp + rnd(-0.05, 0.05)));
+          z.co2 = Math.max(380, Math.min(1000, z.co2 + rnd(-4, 4)));
+          if (Math.random() < 0.004)
+            z.occ = Math.max(0, Math.min(z.cap, z.occ + (Math.random() < 0.5 ? -1 : 1)));
+        });
+        draw();
+        if (now - lastTick > 1000) {
+          lastTick = now;
+          $('clock').textContent = new Date().toLocaleTimeString('en-GB');
+          if (selected) showDetail();
+        }
+        frames++;
+        fpsFrames++;
+        if (now - fpsAt >= 1000) {
+          const fps = Math.round((fpsFrames * 1000) / (now - fpsAt));
+          fpsAt = now;
+          fpsFrames = 0;
+          const p = new URLSearchParams(location.search);
+          if (p.get('fps')) {
+            fetch(
+              '/fps?id=' +
+                encodeURIComponent(p.get('id') || 'panel') +
+                '&frames=' +
+                frames +
+                '&fps=' +
+                fps +
+                '&taps=' +
+                taps +
+                '&drags=' +
+                drags
+            ).catch(() => {});
+          }
+        }
+        requestAnimationFrame(loop);
+      }
+      hud();
+      showDetail();
+      requestAnimationFrame(loop);
+    </script>
+  </body>
+</html>

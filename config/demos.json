@@ -1,0 +1,83 @@
+{
+  "_comment": "Four interactive demos served by the dev mock server, for exercising the tablet control surface against content that resembles the exhibit. Run with WALLWRIGHT_CONFIG=./config/demos.json npm run dev. control is loopback only, the same posture config/wall.json ships with.",
+  "wall": {
+    "width": 3840,
+    "height": 2160,
+    "backgroundColor": "#000000",
+    "displayLabel": null,
+    "kiosk": false,
+    "fullscreen": false,
+    "fitToDisplay": true
+  },
+  "idleReturnMs": 0,
+  "showHotspotHint": true,
+  "hideInactiveWhenActive": false,
+  "transitionMs": 220,
+  "backButton": {
+    "x": 48,
+    "y": 48,
+    "width": 352,
+    "height": 112
+  },
+  "views": [
+    {
+      "id": "view-1",
+      "label": "Globe: global operations (globe.gl)",
+      "url": "http://localhost:8787/globe.html?fps=1&id=view-1",
+      "grid": {
+        "x": 0,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      },
+      "zoom": 1.0,
+      "partition": "persist:forge-1"
+    },
+    {
+      "id": "view-2",
+      "label": "Plant operations dashboard",
+      "url": "http://localhost:8787/dash-ops.html?fps=1&id=view-2",
+      "grid": {
+        "x": 1920,
+        "y": 0,
+        "width": 1920,
+        "height": 1080
+      },
+      "zoom": 1.0,
+      "partition": "persist:forge-2"
+    },
+    {
+      "id": "view-3",
+      "label": "Building floor plan",
+      "url": "http://localhost:8787/dash-building.html?fps=1&id=view-3",
+      "grid": {
+        "x": 0,
+        "y": 1080,
+        "width": 1920,
+        "height": 1080
+      },
+      "zoom": 1.0,
+      "partition": "persist:forge-3"
+    },
+    {
+      "id": "view-4",
+      "label": "Energy explorer",
+      "url": "http://localhost:8787/dash-energy.html?fps=1&id=view-4",
+      "grid": {
+        "x": 1920,
+        "y": 1080,
+        "width": 1920,
+        "height": 1080
+      },
+      "zoom": 0.75,
+      "partition": "persist:forge-4"
+    }
+  ],
+  "escToGrid": "single",
+  "escDoubleMs": 600,
+  "idleResetUrls": true,
+  "control": {
+    "port": 8799,
+    "host": "127.0.0.1"
+  }
+}

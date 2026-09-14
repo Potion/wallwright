@@ -1,0 +1,867 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock: operations dashboard</title>
+    <style>
+      /* A busy corporate dashboard: KPI tiles, live charts, a table and a log,
+         all moving at once. This is the load an exhibit panel actually carries,
+         and it is deliberately harder on the screencast than a static page -
+         several independent regions repaint every frame, so nothing can be
+         deltaed away. Self-contained: no CDN, so it works with the network down. */
+      :root {
+        --ground: #0d1117;
+        --surface: #161b22;
+        --raised: #21262d;
+        --line: #30363d;
+        --text: #e6edf3;
+        --muted: #8b949e;
+        --accent: #f04e23;
+        --ok: #3fb950;
+        --warn: #d29922;
+        --alarm: #f85149;
+        --info: #4a86c8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--ground);
+        color: var(--text);
+        font:
+          13px/1.45 -apple-system,
+          BlinkMacSystemFont,
+          Segoe UI,
+          Helvetica,
+          Arial,
+          sans-serif;
+        overflow: hidden;
+      }
+      #app {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 10px 18px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+        flex: none;
+      }
+      header h1 {
+        font:
+          600 13px/1 ui-monospace,
+          Menlo,
+          Consolas,
+          monospace;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        margin: 0;
+      }
+      .pill {
+        font:
+          11px/1 ui-monospace,
+          monospace;
+        padding: 5px 9px;
+        border-radius: 20px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+      }
+      .pill.live {
+        color: var(--ok);
+        border-color: rgba(63, 185, 80, 0.4);
+      }
+      #clock {
+        margin-left: auto;
+        font:
+          12px/1 ui-monospace,
+          monospace;
+        color: var(--muted);
+      }
+      main {
+        flex: 1;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        grid-template-rows: auto 1fr 1fr;
+        gap: 10px;
+        padding: 10px;
+        min-height: 0;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px 12px;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .card h2 {
+        font:
+          600 10px/1 ui-monospace,
+          monospace;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0 0 8px;
+      }
+      .kpi .v {
+        font:
+          600 26px/1.1 ui-monospace,
+          monospace;
+      }
+      .kpi .d {
+        font:
+          11px/1.4 ui-monospace,
+          monospace;
+        margin-top: 3px;
+      }
+      .up {
+        color: var(--ok);
+      }
+      .down {
+        color: var(--alarm);
+      }
+      .flat {
+        color: var(--muted);
+      }
+      canvas {
+        width: 100%;
+        flex: 1;
+        min-height: 0;
+        display: block;
+      }
+      .wide {
+        grid-column: span 2;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font:
+          11px/1.5 ui-monospace,
+          monospace;
+      }
+      th {
+        text-align: left;
+        color: var(--muted);
+        font-weight: 600;
+        padding: 3px 6px;
+        border-bottom: 1px solid var(--line);
+      }
+      td {
+        padding: 3px 6px;
+        border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+      }
+      .scroll {
+        overflow: hidden;
+        flex: 1;
+        min-height: 0;
+      }
+      #log {
+        font:
+          11px/1.6 ui-monospace,
+          monospace;
+      }
+      #log div {
+        padding: 1px 0;
+        border-bottom: 1px solid rgba(48, 54, 61, 0.35);
+      }
+      .tag {
+        display: inline-block;
+        min-width: 44px;
+      }
+      /* Everything below is here to be pressed. A dashboard nobody can touch
+         tests half the control surface. */
+      .tabs {
+        display: flex;
+        gap: 6px;
+      }
+      .tabs button,
+      .zone button,
+      .ack {
+        font: inherit;
+        font-size: 11px;
+        padding: 5px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--raised);
+        color: var(--text);
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      .tabs button.on,
+      .zone button.on {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .ack {
+        padding: 2px 8px;
+        font-size: 10px;
+      }
+      .zone {
+        display: flex;
+        gap: 5px;
+        margin-bottom: 8px;
+      }
+      .filterwrap {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      /* 16px, or a tablet zooms the whole page when the field takes focus. */
+      #filter {
+        flex: 1;
+        min-width: 0;
+        font:
+          16px/1.3 ui-monospace,
+          Menlo,
+          Consolas,
+          monospace;
+        padding: 7px 10px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--ground);
+        color: var(--text);
+      }
+      #filter:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      #filter::placeholder {
+        color: var(--muted);
+      }
+      #count {
+        font:
+          11px/1 ui-monospace,
+          monospace;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      #count.filtered {
+        color: var(--accent);
+      }
+      mark {
+        background: rgba(240, 78, 35, 0.32);
+        color: var(--text);
+        border-radius: 2px;
+      }
+      th.sortable {
+        cursor: pointer;
+        user-select: none;
+      }
+      th.sortable:hover {
+        color: var(--text);
+      }
+      th .arrow {
+        color: var(--accent);
+      }
+      .rangewrap {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+        font:
+          11px/1 ui-monospace,
+          monospace;
+        color: var(--muted);
+      }
+      input[type='range'] {
+        flex: 1;
+        accent-color: var(--accent);
+        touch-action: none;
+      }
+      .scroll {
+        overflow-y: auto;
+      }
+      #hud {
+        position: fixed;
+        right: 14px;
+        top: 52px;
+        z-index: 9;
+        background: rgba(13, 17, 23, 0.9);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 11px;
+        font:
+          11px/1.6 ui-monospace,
+          monospace;
+        pointer-events: none;
+      }
+      #hud b {
+        color: var(--accent);
+      }
+      #ticker {
+        flex: none;
+        border-top: 1px solid var(--line);
+        background: var(--surface);
+        overflow: hidden;
+        white-space: nowrap;
+        padding: 7px 0;
+      }
+      #ticker span {
+        display: inline-block;
+        font:
+          12px/1 ui-monospace,
+          monospace;
+        padding-right: 44px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>Plant Operations</h1>
+        <span class="pill live">&#9679; live</span>
+        <span class="pill" id="site">SITE 04 &middot; BUILDING C</span>
+        <div class="tabs" id="tabs">
+          <button data-tab="ops" class="on">Operations</button>
+          <button data-tab="energy">Energy</button>
+          <button data-tab="alarms">Alarms</button>
+        </div>
+        <span id="clock">--:--:--</span>
+      </header>
+
+      <main>
+        <div class="card kpi">
+          <h2>Throughput</h2>
+          <div class="v" id="k1">0</div>
+          <div class="d" id="d1">&nbsp;</div>
+        </div>
+        <div class="card kpi">
+          <h2>Uptime</h2>
+          <div class="v" id="k2">0</div>
+          <div class="d" id="d2">&nbsp;</div>
+        </div>
+        <div class="card kpi">
+          <h2>Energy kW</h2>
+          <div class="v" id="k3">0</div>
+          <div class="d" id="d3">&nbsp;</div>
+        </div>
+        <div class="card kpi">
+          <h2>Open Alarms</h2>
+          <div class="v" id="k4">0</div>
+          <div class="d" id="d4">&nbsp;</div>
+        </div>
+
+        <div class="card wide">
+          <h2>Line throughput &middot; <span id="rangelabel">60s</span></h2>
+          <div class="rangewrap">
+            <span>window</span>
+            <input type="range" id="range" min="20" max="120" value="60" />
+            <span id="rangev">60s</span>
+          </div>
+          <canvas id="c1"></canvas>
+        </div>
+        <div class="card">
+          <h2>Zone load</h2>
+          <div class="zone" id="zones">
+            <button data-zone="all" class="on">All</button>
+            <button data-zone="1">Z1</button>
+            <button data-zone="2">Z2</button>
+            <button data-zone="3">Z3</button>
+          </div>
+          <canvas id="c2"></canvas>
+        </div>
+        <div class="card">
+          <h2>Pressure</h2>
+          <canvas id="c3"></canvas>
+        </div>
+
+        <div class="card wide">
+          <h2>Asset status</h2>
+          <div class="filterwrap">
+            <input
+              id="filter"
+              type="text"
+              placeholder="filter assets, zones or states&hellip;"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+            />
+            <button id="clearfilter">clear</button>
+            <span id="count">0 of 0</span>
+          </div>
+          <div class="scroll">
+            <table id="tbl">
+              <thead>
+                <tr>
+                  <th class="sortable" data-col="0">Asset<span class="arrow"></span></th>
+                  <th class="sortable" data-col="1">Zone<span class="arrow"></span></th>
+                  <th class="sortable" data-col="2">State<span class="arrow"></span></th>
+                  <th class="sortable" data-col="3">Load<span class="arrow"></span></th>
+                  <th class="sortable" data-col="4">Temp<span class="arrow"></span></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card wide">
+          <h2>Event log &middot; <span id="unacked">0</span> unacked</h2>
+          <div class="scroll" id="log"></div>
+        </div>
+      </main>
+
+      <div id="ticker"><span id="tick"></span></div>
+      <div id="hud">
+        taps <b id="htaps">0</b> &middot; drags <b id="hdrags">0</b> &middot; scrolls
+        <b id="hscrolls">0</b> &middot; keys <b id="hkeys">0</b><br />last
+        <b id="hlast">-</b>
+      </div>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const rnd = (a, b) => a + Math.random() * (b - a);
+
+      // ---- interaction ------------------------------------------------------
+      //
+      // Every control here exists to be pressed through the tablet surface. A
+      // dashboard that only animates exercises the stream and nothing else; the
+      // point of the control surface is the other direction.
+      //
+      // Each interaction changes something plainly visible, because the way you
+      // confirm a tap landed is by seeing the panel change at whatever frame rate
+      // the stream is managing - which on this content is a few per second.
+      let taps = 0,
+        drags = 0,
+        scrolls = 0,
+        keys = 0,
+        lastAction = '-';
+      function noteTap(what) {
+        taps++;
+        lastAction = what;
+        drawHud();
+      }
+      function drawHud() {
+        $('htaps').textContent = taps;
+        $('hdrags').textContent = drags;
+        $('hscrolls').textContent = scrolls;
+        $('hkeys').textContent = keys;
+        $('hlast').textContent = lastAction;
+      }
+
+      let tab = 'ops';
+      $('tabs').addEventListener('click', (e) => {
+        const b = e.target.closest('button[data-tab]');
+        if (!b) return;
+        tab = b.getAttribute('data-tab');
+        [...$('tabs').children].forEach((c) => c.classList.toggle('on', c === b));
+        noteTap('tab ' + tab);
+      });
+
+      let zone = 'all';
+      $('zones').addEventListener('click', (e) => {
+        const b = e.target.closest('button[data-zone]');
+        if (!b) return;
+        zone = b.getAttribute('data-zone');
+        [...$('zones').children].forEach((c) => c.classList.toggle('on', c === b));
+        noteTap('zone ' + zone);
+      });
+
+      // A slider is the one control that needs a real drag rather than a tap, so
+      // it is the one that proves pointermove is getting through.
+      let windowSecs = 60;
+      $('range').addEventListener('input', (e) => {
+        windowSecs = Number(e.target.value);
+        $('rangev').textContent = windowSecs + 's';
+        $('rangelabel').textContent = windowSecs + 's';
+        drags++;
+        lastAction = 'window ' + windowSecs + 's';
+        drawHud();
+      });
+
+      // Text filtering, which is here to exercise the keyboard path end to end:
+      // tap the field through the tablet to focus it, type, and watch the table
+      // shrink. Typing is the one input with no visible effect until the panel
+      // redraws, so a filter is the clearest thing to type into - the row count
+      // changes on every character, which stays legible even at two frames a
+      // second.
+      let query = '';
+      const filterEl = $('filter');
+      filterEl.addEventListener('input', () => {
+        query = filterEl.value.trim().toLowerCase();
+        keys++;
+        lastAction = query ? 'filter "' + query + '"' : 'filter cleared';
+        drawHud();
+        drawTable();
+      });
+      $('clearfilter').addEventListener('click', () => {
+        filterEl.value = '';
+        query = '';
+        noteTap('filter cleared');
+        drawTable();
+      });
+
+      let sortCol = null,
+        sortDir = 1;
+      $('tbl')
+        .querySelector('thead')
+        .addEventListener('click', (e) => {
+          const th = e.target.closest('th[data-col]');
+          if (!th) return;
+          const col = Number(th.getAttribute('data-col'));
+          sortDir = sortCol === col ? -sortDir : 1;
+          sortCol = col;
+          [...th.parentNode.children].forEach((h) => {
+            const a = h.querySelector('.arrow');
+            if (a) a.textContent = h === th ? (sortDir > 0 ? ' \u25B2' : ' \u25BC') : '';
+          });
+          drawTable();
+          noteTap('sort col ' + col);
+        });
+
+      // Scrolling the log is how wheel events get exercised on real furniture.
+      $('log').addEventListener('scroll', () => {
+        scrolls++;
+        lastAction = 'log scroll';
+        drawHud();
+      });
+
+      let unacked = 0;
+      $('log').addEventListener('click', (e) => {
+        const b = e.target.closest('button.ack');
+        if (!b) return;
+        const row = b.closest('div');
+        row.style.opacity = '0.45';
+        b.remove();
+        unacked = Math.max(0, unacked - 1);
+        $('unacked').textContent = unacked;
+        noteTap('ack');
+      });
+
+      // ---- KPI tiles --------------------------------------------------------
+      const kpis = [
+        {
+          el: 'k1',
+          d: 'd1',
+          v: 1284,
+          lo: 1100,
+          hi: 1500,
+          fmt: (v) => Math.round(v).toLocaleString(),
+        },
+        { el: 'k2', d: 'd2', v: 99.4, lo: 97, hi: 100, fmt: (v) => v.toFixed(2) + '%' },
+        {
+          el: 'k3',
+          d: 'd3',
+          v: 842,
+          lo: 700,
+          hi: 990,
+          fmt: (v) => Math.round(v).toLocaleString(),
+        },
+        { el: 'k4', d: 'd4', v: 3, lo: 0, hi: 9, fmt: (v) => String(Math.round(v)) },
+      ];
+
+      // ---- charts -----------------------------------------------------------
+      // Drawn on canvas rather than with a chart library, so this page works with
+      // the network down and stays honest about what it costs: every series
+      // redraws in full each frame.
+      function series(n, lo, hi) {
+        const a = [];
+        for (let i = 0; i < n; i++) a.push(rnd(lo, hi));
+        return a;
+      }
+      const s1 = series(120, 0.3, 0.9);
+      const s2 = series(14, 0.2, 1);
+      const s3 = series(90, 0.35, 0.75);
+
+      function fit(c) {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const w = Math.round(c.clientWidth * dpr);
+        const h = Math.round(c.clientHeight * dpr);
+        if (c.width !== w || c.height !== h) {
+          c.width = w;
+          c.height = h;
+        }
+        return c.getContext('2d');
+      }
+      function grid(x, w, h) {
+        x.strokeStyle = 'rgba(48,54,61,.8)';
+        x.lineWidth = 1;
+        for (let i = 1; i < 4; i++) {
+          const y = (h / 4) * i;
+          x.beginPath();
+          x.moveTo(0, y);
+          x.lineTo(w, y);
+          x.stroke();
+        }
+      }
+      function line(c, data, colour, fill) {
+        const x = fit(c),
+          w = c.width,
+          h = c.height;
+        x.clearRect(0, 0, w, h);
+        grid(x, w, h);
+        x.beginPath();
+        data.forEach((v, i) => {
+          const px = (i / (data.length - 1)) * w,
+            py = h - v * h * 0.92 - h * 0.04;
+          i ? x.lineTo(px, py) : x.moveTo(px, py);
+        });
+        x.strokeStyle = colour;
+        x.lineWidth = 2;
+        x.stroke();
+        if (fill) {
+          x.lineTo(w, h);
+          x.lineTo(0, h);
+          x.closePath();
+          const g = x.createLinearGradient(0, 0, 0, h);
+          g.addColorStop(0, fill);
+          g.addColorStop(1, 'rgba(0,0,0,0)');
+          x.fillStyle = g;
+          x.fill();
+        }
+      }
+      function bars(c, data, colour) {
+        const x = fit(c),
+          w = c.width,
+          h = c.height;
+        x.clearRect(0, 0, w, h);
+        grid(x, w, h);
+        const bw = w / data.length;
+        data.forEach((v, i) => {
+          const bh = v * h * 0.9;
+          x.fillStyle = v > 0.85 ? '#f85149' : colour;
+          x.fillRect(i * bw + bw * 0.18, h - bh, bw * 0.64, bh);
+        });
+      }
+
+      // ---- table ------------------------------------------------------------
+      const ASSETS = [
+        'AHU-01',
+        'AHU-02',
+        'CHW-11',
+        'CHW-12',
+        'PMP-03',
+        'PMP-04',
+        'VAV-21',
+        'VAV-22',
+        'GEN-01',
+        'BLR-02',
+      ];
+      const STATES = [
+        ['running', 'ok'],
+        ['idle', 'flat'],
+        ['fault', 'down'],
+        ['service', 'warn'],
+      ];
+      let rows = [];
+      function buildRows() {
+        rows = ASSETS.map((a, i) => {
+          const st =
+            STATES[Math.floor(Math.random() * (Math.random() < 0.85 ? 2 : STATES.length))];
+          return {
+            asset: a,
+            zone: 'Z' + (1 + (i % 4)),
+            state: st[0],
+            cls: st[1],
+            load: Math.round(rnd(20, 99)),
+            temp: rnd(18, 74),
+          };
+        });
+      }
+      function drawTable() {
+        const body = $('tbl').querySelector('tbody');
+        let view = rows.slice();
+        if (zone !== 'all') view = view.filter((r) => r.zone === 'Z' + zone);
+        if (query) {
+          view = view.filter(
+            (r) =>
+              r.asset.toLowerCase().indexOf(query) >= 0 ||
+              r.zone.toLowerCase().indexOf(query) >= 0 ||
+              r.state.toLowerCase().indexOf(query) >= 0
+          );
+        }
+        const countEl = $('count');
+        countEl.textContent = view.length + ' of ' + rows.length;
+        countEl.className = query || zone !== 'all' ? 'filtered' : '';
+        // The match is marked, so you can see WHY a row survived, not only that
+        // it did.
+        const mark = (text) => {
+          if (!query) return text;
+          const i = text.toLowerCase().indexOf(query);
+          if (i < 0) return text;
+          return (
+            text.slice(0, i) +
+            '<mark>' +
+            text.slice(i, i + query.length) +
+            '</mark>' +
+            text.slice(i + query.length)
+          );
+        };
+        if (sortCol !== null) {
+          const key = ['asset', 'zone', 'state', 'load', 'temp'][sortCol];
+          view.sort((x, y) => (x[key] > y[key] ? 1 : x[key] < y[key] ? -1 : 0) * sortDir);
+        }
+        body.innerHTML = view
+          .map((r) => {
+            const cls = r.cls === 'warn' ? 'flat' : r.cls;
+            return (
+              '<tr><td>' +
+              mark(r.asset) +
+              '</td><td>' +
+              mark(r.zone) +
+              '</td><td class="' +
+              cls +
+              '">' +
+              mark(r.state) +
+              '</td><td>' +
+              r.load +
+              '%</td><td>' +
+              r.temp.toFixed(1) +
+              '&deg;</td></tr>'
+            );
+          })
+          .join('');
+      }
+      // ---- log --------------------------------------------------------------
+      const EVENTS = [
+        ['INFO', 'setpoint applied to zone'],
+        ['INFO', 'schedule advanced'],
+        ['WARN', 'pressure above band'],
+        ['INFO', 'operator acknowledged'],
+        ['ALRM', 'sensor timeout'],
+        ['INFO', 'batch complete'],
+        ['INFO', 'telemetry flushed'],
+        ['WARN', 'filter differential rising'],
+      ];
+      const logLines = [];
+      function pushLog() {
+        const e = EVENTS[Math.floor(Math.random() * EVENTS.length)];
+        const cls = e[0] === 'ALRM' ? 'down' : e[0] === 'WARN' ? 'flat' : 'up';
+        const t = new Date().toLocaleTimeString('en-GB');
+        const needsAck = e[0] !== 'INFO';
+        if (needsAck) {
+          unacked++;
+          $('unacked').textContent = unacked;
+        }
+        logLines.unshift(
+          '<div><span class="tag ' +
+            cls +
+            '">' +
+            e[0] +
+            '</span> ' +
+            t +
+            '  ' +
+            e[1] +
+            ' ' +
+            Math.floor(rnd(1, 40)) +
+            (needsAck ? ' <button class="ack">ack</button>' : '') +
+            '</div>'
+        );
+        if (logLines.length > 40) logLines.pop();
+        $('log').innerHTML = logLines.join('');
+      }
+
+      // ---- ticker -----------------------------------------------------------
+      const TICK = [
+        'OEE 87.4%',
+        'SCRAP 1.2%',
+        'SHIFT B',
+        'WO-4821 OPEN',
+        'CO2 412ppm',
+        'STEAM 61psi',
+        'FEED 1284/h',
+        'AIR 7.1bar',
+        'RH 43%',
+        'GRID 842kW',
+      ];
+      let tickOffset = 0;
+      $('tick').innerHTML = TICK.concat(TICK)
+        .map((t) => '<span>' + t + '</span>')
+        .join('');
+
+      // ---- loop -------------------------------------------------------------
+      let frames = 0,
+        fpsAt = performance.now(),
+        fpsFrames = 0,
+        lastSlow = 0;
+
+      function frame(now) {
+        // Every series shifts every frame: this page is deliberately never still.
+        s1.push(Math.max(0.05, Math.min(1, s1[s1.length - 1] + rnd(-0.06, 0.06))));
+        s1.shift();
+        s3.push(Math.max(0.05, Math.min(1, s3[s3.length - 1] + rnd(-0.04, 0.04))));
+        s3.shift();
+        for (let i = 0; i < s2.length; i++)
+          s2[i] = Math.max(0.05, Math.min(1, s2[i] + rnd(-0.03, 0.03)));
+
+        // The slider actually changes what is drawn, so a drag is visible rather
+        // than merely counted.
+        line(
+          $('c1'),
+          s1.slice(-windowSecs),
+          tab === 'energy' ? '#4a86c8' : '#f04e23',
+          tab === 'energy' ? 'rgba(74,134,200,.30)' : 'rgba(240,78,35,.30)'
+        );
+        bars($('c2'), zone === 'all' ? s2 : s2.slice(0, 4 + Number(zone) * 2), '#4a86c8');
+        line($('c3'), s3, '#3fb950', 'rgba(63,185,80,.22)');
+
+        tickOffset = (tickOffset + 0.6) % 1400;
+        $('tick').style.transform = 'translateX(' + -tickOffset + 'px)';
+
+        kpis.forEach((k) => {
+          const next = Math.max(k.lo, Math.min(k.hi, k.v + rnd(-1, 1) * (k.hi - k.lo) * 0.012));
+          const dir = next > k.v ? 'up' : next < k.v ? 'down' : 'flat';
+          const arrow = dir === 'up' ? '▲' : dir === 'down' ? '▼' : '—';
+          k.v = next;
+          $(k.el).textContent = k.fmt(k.v);
+          const d = $(k.d);
+          d.className = 'd ' + dir;
+          d.textContent = arrow + ' ' + Math.abs(rnd(0.1, 2.4)).toFixed(2) + '% vs prev';
+        });
+
+        // The slower furniture, so the page has more than one cadence.
+        if (now - lastSlow > 1000) {
+          lastSlow = now;
+          $('clock').textContent = new Date().toLocaleTimeString('en-GB');
+          buildRows();
+          drawTable();
+          pushLog();
+        }
+
+        frames++;
+        fpsFrames++;
+        if (now - fpsAt >= 1000) {
+          const fps = Math.round((fpsFrames * 1000) / (now - fpsAt));
+          fpsAt = now;
+          fpsFrames = 0;
+          const params = new URLSearchParams(location.search);
+          if (params.get('fps')) {
+            fetch(
+              '/fps?id=' +
+                encodeURIComponent(params.get('id') || 'panel') +
+                '&frames=' +
+                frames +
+                '&fps=' +
+                fps +
+                '&taps=' +
+                taps +
+                '&drags=' +
+                drags +
+                '&scrolls=' +
+                scrolls +
+                '&keys=' +
+                keys
+            ).catch(() => {});
+          }
+        }
+        requestAnimationFrame(frame);
+      }
+      buildRows();
+      drawTable();
+      drawHud();
+      for (let i = 0; i < 12; i++) pushLog();
+      requestAnimationFrame(frame);
+    </script>
+  </body>
+</html>
