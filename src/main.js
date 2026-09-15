@@ -22,6 +22,7 @@ const {
   screen,
   ipcMain,
   globalShortcut,
+  powerSaveBlocker,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -3448,6 +3449,7 @@ function selfTest() {
 
 // ---- control surface --------------------------------------------------------
 
+let powerSaveBlockerId = null;
 let controlServer = null;
 
 // Everything an administrator can see about the wall without standing at it.
@@ -4099,6 +4101,20 @@ if (!app.requestSingleInstanceLock()) {
       }
     }
     openDiagLog();
+    // A wall that blanks is not a wall. Windows turns the display off on an idle
+    // timer and runs a screensaver over it, and neither one counts our panels as
+    // activity, because nobody is touching the keyboard in front of an exhibit.
+    // prevent-display-sleep suppresses both for as long as the app is up, so the
+    // machine needs no power-plan surgery before a show and cannot drift back
+    // after one. It is also why "a locked or blanked screen" could invalidate a
+    // soak: the app was not defending against the thing it was being measured
+    // through.
+    try {
+      powerSaveBlockerId = powerSaveBlocker.start('prevent-display-sleep');
+      log(`holding the display awake (power save blocker ${powerSaveBlockerId})`);
+    } catch (e) {
+      warn(`could not hold the display awake: ${e.message}`);
+    }
     try {
       configPath = resolveConfigPath();
       config = loadConfig(configPath, { onWarn: warn });
@@ -4170,6 +4186,16 @@ if (!app.requestSingleInstanceLock()) {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  // Released explicitly rather than left to process exit, so a run that ends
+  // hands the display timer back to whoever owns the machine next.
+  if (powerSaveBlockerId !== null) {
+    try {
+      powerSaveBlocker.stop(powerSaveBlockerId);
+    } catch (e) {
+      warn(`could not release the display: ${e.message}`);
+    }
+    powerSaveBlockerId = null;
+  }
   if (controlServer) controlServer.close();
   // A run that ends must say whether it ended on purpose. Silence at the end of
   // a soak log is otherwise indistinguishable from a kill.
