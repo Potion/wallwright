@@ -151,6 +151,43 @@ difference matters: a reload keeps `sessionStorage` and a rebuild does not, so
 `/api/recycle` is also how you find out whether a given dashboard survives being
 recycled before turning `recycleMs` on for it.
 
+### Driving a panel from a tablet
+
+`GET /touch` serves a page built for a tablet rather than a laptop: a picker
+across the top, one panel filling the rest, and touch that reaches the page.
+Pick a panel, and taps, drags, scrolling, pinch-zoom and typing all go through to
+it. `/touch?id=view-2` opens straight onto one.
+
+This is **not** screen mirroring. Each panel is captured through its own
+`webContents` and downscaled in the main process, so the wall's own output is
+untouched and only the panel being watched costs anything. Measured against a
+WebGL globe and a busy dashboard, a watching tablet costs the wall nothing
+detectable; `npm run stream-cost` is the measurement, and
+`docs/tablet-control-surface-plan.md` has the numbers.
+
+One panel streams at a time, app-wide, because encoding several at once would
+compete with the wall for the GPU. A second viewer falls back to polling single
+frames and still works.
+
+The view control pairs quality with frame width - smooth, normal, sharp - because
+the two are not independent: on animation-heavy content, narrowing buys frame
+rate and bandwidth together where quality only buys bandwidth. Smooth is the
+right default for anything a person is actually driving; sharp is for reading a
+number off a panel.
+
+If the app restarts underneath it, the page notices and re-attaches on its own.
+
+The routes behind it: `GET /api/stream` streams one panel as MJPEG,
+`GET /api/frame` returns a single JPEG for browsers whose multipart decoder does
+not work, and `POST /api/input` injects pointer, wheel, text, key, clipboard and
+paste events. Both image routes take `q` (quality) and `w` (width).
+
+Typing exists because logins need it, which raises the stakes of the warning
+above. The page forwards and cancels every keystroke, so no password is ever held
+by the tablet - but the wire is plain HTTP on an unauthenticated surface. A
+non-loopback bind wants a token and TLS or a tunnel in front of it before
+anything is typed into it in a building you do not control.
+
 ## Starting on its own
 
 An exhibit wall has to come back without anyone driving it, and there are two
@@ -239,13 +276,19 @@ npm run dev
 npm start
 WALLWRIGHT_CONFIG=./config/local-demo.json npm start
 
-npm test      # 270 tests: config, layout, upkeep, counters, diag log, control
+# Four interactive demos - a globe, an ops dashboard, a floor plan, an energy
+# explorer - for exercising the tablet control surface against content that
+# behaves like the exhibit rather than like a test fixture.
+WALLWRIGHT_CONFIG=./config/demos.json npm run dev
+
+npm test      # config, layout, upkeep, counters, diag log, control, input
 npm run coverage # the same, with a coverage report
 npm run selftest # drives the real app over IPC; needs a display, exits non-zero on failure
 npm run lint
 npm run probe # check the Electron view APIs on this platform
 npm run probe:fs # check which fullscreen path covers the display
 npm run probe:session # check what a reload actually costs a logged-in panel
+npm run stream-cost # what a watching tablet costs the wall's own frame rate
 ```
 
 In dev, `Cmd/Ctrl+Shift+I` opens devtools for the active panel and
@@ -459,7 +502,11 @@ and each uploads its own artifacts.
   GUI-subsystem process has nowhere to write stdout, so on the show PC this is
   the only record. Never throws, whatever the filesystem does.
 - `src/control-server.js` / `src/control-page.js` - the optional HTTP control
-  surface and its status page. Unauthenticated by design and bound to loopback.
+  surface, its status page, and the tablet page at `/touch`. Unauthenticated by
+  design and bound to loopback.
+- `src/panel-input.js` - turns what a tablet sends into what `sendInputEvent`
+  takes: pointer, wheel, text, named keys, clipboard commands. Electron-free, and
+  the place the coordinate and wheel-direction measurements are written down.
 - `src/preload.js` - the overlay's bridge: promote a panel, go back, edit the
   layout, receive state.
 - `src/content-preload.js` - injected into each page only to report user
@@ -469,13 +516,24 @@ and each uploads its own artifacts.
 - `src/dev/` - dev-only, never shipped: `dev.js` launcher, `mock-server.js` and
   the mock dashboards under `mock/`, `probe.js`, `fsprobe.js`,
   `session-probe.js` and `activity-probe.js` for checking Electron behaviour,
-  `soak.js` and `soak-stats.js` for the long unattended runs, `selftest-run.js`,
-  `capture.js`, `make-icon.js`, and `reports.js`.
+  `soak.js` and `soak-stats.js` for the long unattended runs, `stream-cost.js`
+  for what a watching tablet costs the wall, `selftest-run.js`, `capture.js`,
+  `make-icon.js`, and `reports.js`. The mock dashboards include four interactive
+  demos - `globe.html`, `dash-ops.html`, `dash-building.html`, `dash-energy.html`
+  - wired up by `config/demos.json`.
 - `test/` - unit tests for every electron-free module (`npm test`). What they do
   not reach is listed in `docs/validation.md` under "Test coverage, measured".
-- `config/wall.json` - layout and content config.
+- `config/wall.json` - layout and content config. `config/demos.json` points the
+  four panels at the interactive demos instead, for exercising the tablet
+  surface.
 - `electron-builder.yml` - packaging. `build/icon.png` is the source image.
 - `docs/validation.md` - what has been observed running, and what has not.
+- `docs/tablet-control-surface-plan.md` - the tablet surface: how it works, what
+  it costs the wall, the seven assumptions that turned out to be wrong, and what
+  is deliberately not built.
+- `docs/report/` - short PDFs for people without the repo, rendered from HTML by
+  `src/dev/make-pdf.js`. `wallwright-overview.pdf` is the two-page,
+  non-technical summary of what the whole thing does.
 - `docs/identity.md` - the name, the mark, the palette, and where branding is
   allowed to appear. `npm run icon` regenerates `build/icon.png` from
   `src/dev/make-icon.js`.

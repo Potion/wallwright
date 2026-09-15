@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock: energy explorer</title>
+    <style>
+      :root {
+        --ground: #0d1117;
+        --surface: #161b22;
+        --raised: #21262d;
+        --line: #30363d;
+        --text: #e6edf3;
+        --muted: #8b949e;
+        --accent: #f04e23;
+        --ok: #3fb950;
+        --warn: #d29922;
+        --alarm: #f85149;
+        --info: #4a86c8;
+        --violet: #a371f7;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: var(--ground);
+        color: var(--text);
+        font:
+          13px/1.45 -apple-system,
+          BlinkMacSystemFont,
+          Segoe UI,
+          Helvetica,
+          Arial,
+          sans-serif;
+        overflow: hidden;
+      }
+      #app {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 18px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+        flex: none;
+        flex-wrap: wrap;
+      }
+      h1 {
+        font:
+          600 13px/1 ui-monospace,
+          Menlo,
+          Consolas,
+          monospace;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        margin: 0 10px 0 0;
+      }
+      button {
+        font: inherit;
+        font-size: 11px;
+        padding: 6px 11px;
+        border-radius: 6px;
+        border: 1px solid var(--line);
+        background: var(--raised);
+        color: var(--text);
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+      button.on {
+        border-color: currentColor;
+      }
+      #clock {
+        margin-left: auto;
+        font:
+          12px/1 ui-monospace,
+          monospace;
+        color: var(--muted);
+      }
+      main {
+        flex: 1;
+        display: grid;
+        grid-template-rows: 1fr auto auto;
+        gap: 10px;
+        padding: 10px 12px;
+        min-height: 0;
+      }
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .card h2 {
+        font:
+          600 10px/1 ui-monospace,
+          monospace;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin: 0 0 8px;
+        display: flex;
+        justify-content: space-between;
+      }
+      canvas {
+        width: 100%;
+        display: block;
+      }
+      #main {
+        flex: 1;
+        min-height: 0;
+      }
+      #brush {
+        height: 78px;
+        touch-action: none;
+        cursor: ew-resize;
+      }
+      .gauges {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 10px;
+      }
+      .g {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 9px 11px;
+      }
+      .g .n {
+        font:
+          600 10px/1 ui-monospace,
+          monospace;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .g .v {
+        font:
+          600 22px/1.2 ui-monospace,
+          monospace;
+        margin-top: 4px;
+      }
+      .bar {
+        height: 5px;
+        background: var(--raised);
+        border-radius: 3px;
+        margin-top: 7px;
+        overflow: hidden;
+      }
+      .bar i {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+      }
+      #hud {
+        font:
+          11px/1.6 ui-monospace,
+          monospace;
+        color: var(--muted);
+      }
+      #hud b {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>Energy Explorer</h1>
+        <button data-s="0" class="on" style="color: #f04e23">Electricity</button>
+        <button data-s="1" class="on" style="color: #4a86c8">Gas</button>
+        <button data-s="2" class="on" style="color: #3fb950">Solar</button>
+        <button data-s="3" style="color: #a371f7">Steam</button>
+        <button id="reset">Reset range</button>
+        <span id="clock">--:--:--</span>
+      </header>
+
+      <main>
+        <div class="card">
+          <h2>
+            <span>Consumption &middot; <span id="rangetxt">full range</span></span>
+            <span id="hud">taps <b id="htaps">0</b> &middot; drags <b id="hdrags">0</b></span>
+          </h2>
+          <canvas id="main"></canvas>
+        </div>
+
+        <div class="card">
+          <h2><span>Drag across to select a window</span><span id="sel">all</span></h2>
+          <canvas id="brush"></canvas>
+        </div>
+
+        <div class="gauges">
+          <div class="g">
+            <div class="n">Demand</div>
+            <div class="v" id="g0">0</div>
+            <div class="bar"><i id="b0" style="width: 0%"></i></div>
+          </div>
+          <div class="g">
+            <div class="n">Peak</div>
+            <div class="v" id="g1">0</div>
+            <div class="bar"><i id="b1" style="width: 0%; background: #f85149"></i></div>
+          </div>
+          <div class="g">
+            <div class="n">Cost /h</div>
+            <div class="v" id="g2">0</div>
+            <div class="bar"><i id="b2" style="width: 0%; background: #d29922"></i></div>
+          </div>
+          <div class="g">
+            <div class="n">Carbon</div>
+            <div class="v" id="g3">0</div>
+            <div class="bar"><i id="b3" style="width: 0%; background: #3fb950"></i></div>
+          </div>
+          <div class="g">
+            <div class="n">Renewable</div>
+            <div class="v" id="g4">0</div>
+            <div class="bar"><i id="b4" style="width: 0%; background: #4a86c8"></i></div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      // A time-series explorer with a brush. The interaction that matters here is
+      // the drag across the lower chart: it is a sustained pointermove whose
+      // result is visible immediately above it, which makes it the clearest way
+      // to judge whether a drag through the tablet surface feels connected.
+      const $ = (id) => document.getElementById(id);
+      const rnd = (a, b) => a + Math.random() * (b - a);
+
+      const COLOURS = ['#f04e23', '#4a86c8', '#3fb950', '#a371f7'];
+      const NAMES = ['Electricity', 'Gas', 'Solar', 'Steam'];
+      const N = 480;
+      const on = [true, true, true, false];
+      const data = COLOURS.map((_, s) => {
+        const a = [];
+        let v = rnd(0.3, 0.7);
+        for (let i = 0; i < N; i++) {
+          v = Math.max(
+            0.05,
+            Math.min(
+              0.98,
+              v + rnd(-0.035, 0.035) + Math.sin((i / N) * Math.PI * (2 + s)) * 0.006
+            )
+          );
+          a.push(v);
+        }
+        return a;
+      });
+
+      let lo = 0,
+        hi = 1; // selected window, as fractions
+      let taps = 0,
+        drags = 0;
+      let brushing = false,
+        brushStart = null;
+
+      function fit(c, cssH) {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        if (cssH) c.style.height = cssH + 'px';
+        const w = Math.round(c.clientWidth * dpr);
+        const h = Math.round(c.clientHeight * dpr);
+        if (c.width !== w || c.height !== h) {
+          c.width = w;
+          c.height = h;
+        }
+        return c.getContext('2d');
+      }
+
+      function plot(c, from, to, thick) {
+        const x = fit(c),
+          w = c.width,
+          h = c.height;
+        x.clearRect(0, 0, w, h);
+        x.strokeStyle = 'rgba(48,54,61,.85)';
+        x.lineWidth = 1;
+        for (let i = 1; i < 4; i++) {
+          const y = (h / 4) * i;
+          x.beginPath();
+          x.moveTo(0, y);
+          x.lineTo(w, y);
+          x.stroke();
+        }
+        const a = Math.floor(from * (N - 1));
+        const b = Math.max(a + 2, Math.floor(to * (N - 1)));
+        data.forEach((series, s) => {
+          if (!on[s]) return;
+          x.beginPath();
+          for (let i = a; i <= b; i++) {
+            const px = ((i - a) / (b - a)) * w;
+            const py = h - series[i] * h * 0.9 - h * 0.05;
+            i === a ? x.moveTo(px, py) : x.lineTo(px, py);
+          }
+          x.strokeStyle = COLOURS[s];
+          x.lineWidth = thick;
+          x.stroke();
+        });
+      }
+
+      function drawBrush() {
+        plot($('brush'), 0, 1, 1.5);
+        const c = $('brush'),
+          x = c.getContext('2d'),
+          w = c.width,
+          h = c.height;
+        x.fillStyle = 'rgba(13,17,23,.68)';
+        x.fillRect(0, 0, lo * w, h);
+        x.fillRect(hi * w, 0, w - hi * w, h);
+        x.strokeStyle = '#f04e23';
+        x.lineWidth = 2;
+        x.strokeRect(lo * w, 1, (hi - lo) * w, h - 2);
+      }
+
+      function frac(e) {
+        const r = $('brush').getBoundingClientRect();
+        return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+      }
+
+      const brush = $('brush');
+      brush.addEventListener('pointerdown', (e) => {
+        brushing = true;
+        brushStart = frac(e);
+        lo = hi = brushStart;
+        try {
+          brush.setPointerCapture(e.pointerId);
+        } catch (err) {
+          /* fine */
+        }
+        e.preventDefault();
+      });
+      brush.addEventListener('pointermove', (e) => {
+        if (!brushing) return;
+        const f = frac(e);
+        lo = Math.min(brushStart, f);
+        hi = Math.max(brushStart, f);
+        drags++;
+        hud();
+        paint();
+      });
+      const endBrush = () => {
+        if (!brushing) return;
+        brushing = false;
+        // A stab rather than a drag means "show me everything again".
+        if (hi - lo < 0.02) {
+          lo = 0;
+          hi = 1;
+          taps++;
+        }
+        hud();
+        paint();
+      };
+      brush.addEventListener('pointerup', endBrush);
+      brush.addEventListener('pointercancel', endBrush);
+
+      document.querySelectorAll('header button[data-s]').forEach((b) => {
+        b.addEventListener('click', () => {
+          const s = Number(b.getAttribute('data-s'));
+          on[s] = !on[s];
+          b.classList.toggle('on', on[s]);
+          taps++;
+          hud();
+          paint();
+        });
+      });
+      $('reset').addEventListener('click', () => {
+        lo = 0;
+        hi = 1;
+        taps++;
+        hud();
+        paint();
+      });
+
+      function hud() {
+        $('htaps').textContent = taps;
+        $('hdrags').textContent = drags;
+        const span = Math.round((hi - lo) * 100);
+        $('sel').textContent = lo === 0 && hi === 1 ? 'all' : span + '% selected';
+        $('rangetxt').textContent =
+          lo === 0 && hi === 1
+            ? 'full range'
+            : Math.round(lo * 100) + '% to ' + Math.round(hi * 100) + '%';
+      }
+
+      function paint() {
+        plot($('main'), lo, hi, 2.2);
+        drawBrush();
+      }
+
+      // ---- live -------------------------------------------------------------
+      let frames = 0,
+        fpsAt = performance.now(),
+        fpsFrames = 0,
+        lastTick = 0;
+      const GA = ['g0', 'g1', 'g2', 'g3', 'g4'],
+        BA = ['b0', 'b1', 'b2', 'b3', 'b4'];
+      const gv = [842, 1190, 96, 412, 38];
+
+      function loop(now) {
+        // Every series advances every frame, so the panel is never still.
+        data.forEach((a, s) => {
+          a.push(Math.max(0.05, Math.min(0.98, a[a.length - 1] + rnd(-0.03, 0.03))));
+          a.shift();
+        });
+        paint();
+
+        if (now - lastTick > 700) {
+          lastTick = now;
+          $('clock').textContent = new Date().toLocaleTimeString('en-GB');
+          gv.forEach((v, i) => {
+            gv[i] = Math.max(1, v + rnd(-v * 0.02, v * 0.02));
+            $(GA[i]).textContent =
+              i === 2
+                ? '£' + Math.round(gv[i])
+                : i === 4
+                  ? Math.round(gv[i]) + '%'
+                  : Math.round(gv[i]).toLocaleString();
+            $(BA[i]).style.width =
+              Math.min(100, (gv[i] / (i === 1 ? 1500 : i === 4 ? 100 : 1000)) * 100) + '%';
+          });
+        }
+
+        frames++;
+        fpsFrames++;
+        if (now - fpsAt >= 1000) {
+          const fps = Math.round((fpsFrames * 1000) / (now - fpsAt));
+          fpsAt = now;
+          fpsFrames = 0;
+          const p = new URLSearchParams(location.search);
+          if (p.get('fps')) {
+            fetch(
+              '/fps?id=' +
+                encodeURIComponent(p.get('id') || 'panel') +
+                '&frames=' +
+                frames +
+                '&fps=' +
+                fps +
+                '&taps=' +
+                taps +
+                '&drags=' +
+                drags
+            ).catch(() => {});
+          }
+        }
+        requestAnimationFrame(loop);
+      }
+      $('brush').style.height = '78px';
+      hud();
+      requestAnimationFrame(loop);
+    </script>
+  </body>
+</html>

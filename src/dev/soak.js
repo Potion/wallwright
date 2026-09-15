@@ -58,6 +58,14 @@ const COLUMNS = [
   'appUptimeSec',
   'mode',
   'panelCount',
+  // Geometry, in the series rather than only in the app log. The 72-hour baseline
+  // walked away from a passing geometry check and a screen grab knocked the window
+  // to 1920x1079 at scale 0.999 twelve seconds later, where it sat for 28.4 hours
+  // before anyone noticed. The app logs layout only on change, so nothing periodic
+  // was watching. Now a geometry change shows up as a step in these three columns.
+  'wallWidth',
+  'wallHeight',
+  'wallScale',
   'memoryMb',
   'memoryPeakMb',
   'mem_Browser',
@@ -218,6 +226,9 @@ function main() {
         appUptimeSec: s.uptimeSec,
         mode: s.mode,
         panelCount: panels.length,
+        wallWidth: s.wall ? s.wall.width : '',
+        wallHeight: s.wall ? s.wall.height : '',
+        wallScale: s.wall ? s.wall.scale : '',
         memoryMb: s.memoryMb,
         memoryPeakMb: s.memoryPeakMb,
         mem_Browser: byType.Browser ?? '',

@@ -1,6 +1,7 @@
 {
   "name": "wallwright",
   "productName": "Wallwright",
+  "productName": "Wallwright",
   "version": "0.1.2",
   "private": true,
   "author": "Jeff Crouse <jeff.crouse@hyperquake.com>",
@@ -28,6 +29,7 @@
     "selftest": "node src/dev/selftest-run.js",
     "check:asar": "node src/dev/asar-check.js",
     "soak": "node src/dev/soak.js",
+    "stream-cost": "node src/dev/stream-cost.js",
     "report": "node src/dev/reports.js"
   },
   "engines": {

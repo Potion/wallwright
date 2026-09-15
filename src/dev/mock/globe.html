@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Mock: interactive globe</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #05080d;
+        color: #e6edf3;
+        font:
+          13px/1.6 ui-monospace,
+          Menlo,
+          Consolas,
+          monospace;
+      }
+      #viz {
+        position: fixed;
+        inset: 0;
+        touch-action: none;
+      }
+      #hud {
+        position: fixed;
+        left: 16px;
+        top: 16px;
+        z-index: 5;
+        background: rgba(13, 17, 23, 0.82);
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 10px 14px;
+        pointer-events: none;
+      }
+      #hud b {
+        color: #f04e23;
+        font-weight: 600;
+      }
+      #hint {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        z-index: 5;
+        color: #8b949e;
+        pointer-events: none;
+      }
+      #fail {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 40px;
+        color: #f85149;
+        font-size: 15px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="viz"></div>
+    <div id="hud">
+      <div>fps <b id="fps">0</b> &middot; frame <b id="frames">0</b></div>
+      <div>drags <b id="drags">0</b> &middot; moves <b id="moves">0</b></div>
+      <div>last gap <b id="gap">0</b>ms &middot; worst <b id="worstgap">0</b>ms</div>
+    </div>
+    <div id="hint">drag to spin &middot; wheel to zoom</div>
+    <div id="fail">
+      globe.gl did not load.<br />This page pulls it from a CDN, so it needs the network.
+    </div>
+
+    <!-- globe.gl, the library real demos of this kind are built with. Pulled
+         from a CDN on purpose: the exhibit's own content loads from the web, so
+         a mock that does the same is the more faithful test. src/dev is excluded
+         from the build, so nothing here ships. -->
+    <script src="https://unpkg.com/three@0.157.0/build/three.min.js"></script>
+    <script src="https://unpkg.com/globe.gl@2.32.0/dist/globe.gl.min.js"></script>
+    <script>
+      const $ = (id) => document.getElementById(id);
+
+      // Interaction counters. globe.gl owns the camera, so these are read off the
+      // container rather than from the library: what matters is how the drag
+      // ARRIVED, which is a property of the transport, not of the renderer.
+      let drags = 0,
+        moves = 0,
+        lastMoveAt = 0,
+        lastGap = 0,
+        worstGap = 0,
+        dragging = false;
+      const viz = $('viz');
+      viz.addEventListener(
+        'pointerdown',
+        () => {
+          dragging = true;
+          drags++;
+          lastMoveAt = performance.now();
+        },
+        true
+      );
+      viz.addEventListener(
+        'pointermove',
+        () => {
+          if (!dragging) return;
+          const now = performance.now();
+          // The gap between moves is the honest measure of how a drag arrived.
+          // Injected input is coalesced and travels over HTTP, so a drag that was
+          // smooth on the tablet shows up here as a handful of jumps.
+          lastGap = Math.round(now - lastMoveAt);
+          if (lastGap > worstGap) worstGap = lastGap;
+          lastMoveAt = now;
+          moves++;
+        },
+        true
+      );
+      const release = () => {
+        dragging = false;
+      };
+      viz.addEventListener('pointerup', release, true);
+      viz.addEventListener('pointercancel', release, true);
+
+      function boot() {
+        if (typeof Globe !== 'function') {
+          $('fail').style.display = 'flex';
+          return;
+        }
+
+        // Enough arcs and points to keep every frame busy, which is the load the
+        // real exhibit puts on a panel.
+        const PLACES = [
+          [51.5, -0.12],
+          [40.7, -74.0],
+          [35.7, 139.7],
+          [-33.9, 151.2],
+          [1.35, 103.8],
+          [52.5, 13.4],
+          [37.8, -122.4],
+          [19.1, 72.9],
+          [-23.5, -46.6],
+          [25.2, 55.3],
+          [55.8, 37.6],
+          [-26.2, 28.0],
+          [43.7, -79.4],
+          [31.2, 121.5],
+          [48.9, 2.35],
+          [41.9, 12.5],
+          [59.3, 18.1],
+          [-34.6, -58.4],
+          [22.3, 114.2],
+          [30.0, 31.2],
+        ];
+        const arcs = [];
+        for (let i = 0; i < 120; i++) {
+          const a = PLACES[Math.floor(Math.random() * PLACES.length)];
+          const b = PLACES[Math.floor(Math.random() * PLACES.length)];
+          if (a === b) continue;
+          arcs.push({ startLat: a[0], startLng: a[1], endLat: b[0], endLng: b[1] });
+        }
+        const points = PLACES.map((p) => ({
+          lat: p[0],
+          lng: p[1],
+          size: 0.4 + Math.random() * 0.9,
+        }));
+
+        const world = Globe()(viz)
+          .backgroundColor('#05080d')
+          .showAtmosphere(true)
+          .atmosphereColor('#4a86c8')
+          .globeImageUrl('https://unpkg.com/three-globe@2.30.0/example/img/earth-night.jpg')
+          .bumpImageUrl('https://unpkg.com/three-globe@2.30.0/example/img/earth-topology.png')
+          .arcsData(arcs)
+          .arcColor(() => ['rgba(240,78,35,0.85)', 'rgba(74,134,200,0.85)'])
+          .arcDashLength(0.4)
+          .arcDashGap(0.2)
+          .arcDashAnimateTime(1800)
+          .arcStroke(0.35)
+          .pointsData(points)
+          .pointColor(() => '#f04e23')
+          .pointAltitude(0.02)
+          .pointRadius('size');
+
+        world.controls().autoRotate = true;
+        world.controls().autoRotateSpeed = 0.5;
+
+        // ---- reporting ------------------------------------------------------
+        let frames = 0,
+          fpsAt = performance.now(),
+          fpsFrames = 0,
+          lastFps = 0;
+        (function tick() {
+          frames++;
+          fpsFrames++;
+          const now = performance.now();
+          if (now - fpsAt >= 500) {
+            lastFps = Math.round((fpsFrames * 1000) / (now - fpsAt));
+            $('fps').textContent = lastFps;
+            fpsAt = now;
+            fpsFrames = 0;
+            $('frames').textContent = frames;
+            $('drags').textContent = drags;
+            $('moves').textContent = moves;
+            $('gap').textContent = lastGap;
+            $('worstgap').textContent = worstGap;
+          }
+          requestAnimationFrame(tick);
+        })();
+
+        const params = new URLSearchParams(location.search);
+        if (params.get('fps')) {
+          const who = params.get('id') || 'panel';
+          setInterval(() => {
+            fetch(
+              '/fps?id=' +
+                encodeURIComponent(who) +
+                '&frames=' +
+                frames +
+                '&fps=' +
+                lastFps +
+                '&taps=' +
+                drags +
+                '&drags=' +
+                drags +
+                '&moves=' +
+                moves +
+                '&worstgap=' +
+                worstGap
+            ).catch(() => {});
+          }, 1000);
+        }
+      }
+      window.addEventListener('load', boot);
+    </script>
+  </body>
+</html>

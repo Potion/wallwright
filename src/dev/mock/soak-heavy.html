@@ -234,6 +234,17 @@
           })
           .catch(() => {});
       }, 5000);
+
+      // Opt-in frame reporting, for measuring what the wall is actually managing
+      // while something else competes for the GPU. Off unless ?fps=1, so the 72h
+      // soak keeps measuring exactly the page it always measured.
+      const fpsParams = new URLSearchParams(location.search);
+      if (fpsParams.get('fps')) {
+        const who = fpsParams.get('id') || 'panel';
+        setInterval(() => {
+          fetch('/fps?id=' + encodeURIComponent(who) + '&frames=' + frames).catch(() => {});
+        }, 1000);
+      }
     </script>
   </body>
 </html>

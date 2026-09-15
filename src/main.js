@@ -22,6 +22,7 @@ const {
   screen,
   ipcMain,
   globalShortcut,
+  powerSaveBlocker,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -53,7 +54,8 @@ const {
 } = require('./watchdog');
 const autostart = require('./autostart');
 const { createControlServer } = require('./control-server');
-const { statusPage } = require('./control-page');
+const { statusPage, touchPage } = require('./control-page');
+const { inputEvents } = require('./panel-input');
 const { createDiagLog } = require('./diag-log');
 const { createCounters } = require('./counters');
 const {
@@ -1524,6 +1526,35 @@ function isFullscreenNow() {
   if (!win) return false;
   if (process.platform === 'darwin') return win.isSimpleFullScreen();
   return win.isFullScreen() || win.isKiosk();
+}
+
+// An exhibit has no menu bar, and on Windows and Linux passing null removes it.
+// macOS is different: it always shows one, so null leaves Electron's own default
+// in place. That default is named after the running bundle, which reads
+// "Electron" in a checkout, and it carries two fullscreen items - its own View >
+// Toggle Full Screen and the Enter Full Screen macOS adds for any fullscreenable
+// window. Both drive the NATIVE fullscreen path, which this app deliberately does
+// not use on darwin (see applyFullscreen), so both appeared to do nothing.
+//
+// One menu, correctly named, with no fullscreen item at all. Cmd+F still works:
+// it is handled in hardenView's before-input-event, not by an accelerator, so it
+// never needed the menu.
+function applicationMenu() {
+  if (process.platform !== 'darwin') return null;
+  return Menu.buildFromTemplate([
+    {
+      label: app.getName(),
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+  ]);
 }
 
 function applyFullscreen(on) {
@@ -3418,6 +3449,7 @@ function selfTest() {
 
 // ---- control surface --------------------------------------------------------
 
+let powerSaveBlockerId = null;
 let controlServer = null;
 
 // Everything an administrator can see about the wall without standing at it.
@@ -3488,6 +3520,11 @@ function wallStatus() {
         // that has been navigated away shows it here.
         currentUrl: wc && !wc.isDestroyed() ? wc.getURL() : null,
         grid: v.grid,
+        // Where the panel is in window pixels, as opposed to grid, which is in
+        // wall units. A tablet driving this panel maps a touch through this, and
+        // it changes on promotion, so it has to come from the live status rather
+        // than be read once.
+        rect: panelRect(i),
         zoom: round3(v.zoom),
         partition: v.partition,
         loading: wc && !wc.isDestroyed() ? wc.isLoading() : null,
@@ -3528,9 +3565,294 @@ function wallStatus() {
   };
 }
 
+// ---- panel streaming --------------------------------------------------------
+//
+// A live view of one panel, served to a tablet as MJPEG by src/control-server.js.
+// See docs/tablet-control-surface-plan.md.
+//
+// Frames come from the CDP screencast rather than a capturePage poll. The
+// difference is not throughput, it is idleness: the screencast is event driven,
+// so a panel showing a clock costs one frame a second and a panel showing a
+// static dashboard costs nothing at all. The poll it replaced re-encoded and
+// re-sent an identical 21 KB frame twice a second forever, measured against
+// dash-2 during milestone 1.
+//
+// The debugger is attached in process. That is the whole reason this does not
+// need --remote-debugging-port, which would put a CDP endpoint on the network
+// that anyone who can reach it can drive.
+//
+// One stream at a time, app-wide. Encoding several panels at once would compete
+// with the wall for the GPU, and the wall is the thing that must not stutter.
+
+const STREAM_MAX_WIDTH = 1600;
+// Narrower is the strongest lever there is on a panel whose every pixel changes
+// every frame: quality trades detail, width trades pixels, and pixels dominate.
+// Floored at 320, below which a dashboard stops being readable at all.
+const STREAM_MIN_WIDTH = 320;
+
+function clampWidth(w) {
+  if (!Number.isFinite(w)) return STREAM_MAX_WIDTH;
+  return Math.min(STREAM_MAX_WIDTH, Math.max(STREAM_MIN_WIDTH, Math.round(w)));
+}
+const STREAM_MAX_HEIGHT = 1200;
+const STREAM_QUALITY = 70;
+// The range the control surface may ask for. Below about 30 text stops being
+// readable, which defeats the point; above about 90 the bytes climb steeply for
+// detail a tablet cannot show anyway.
+const STREAM_QUALITY_MIN = 30;
+const STREAM_QUALITY_MAX = 90;
+
+// Clamped rather than refused: a quality is a preference, not an instruction,
+// and a tablet asking for something silly should get a picture rather than an
+// error.
+function clampQuality(q) {
+  if (!Number.isFinite(q)) return STREAM_QUALITY;
+  return Math.min(STREAM_QUALITY_MAX, Math.max(STREAM_QUALITY_MIN, Math.round(q)));
+}
+// Counted in compositor frames, so 4 is every fourth frame of a 60Hz display:
+// about 15fps. Left at 1 an animated panel measured 64fps and 3.7Mbps, which is
+// 64 JPEG encodes a second taken off the wall's GPU so that a tablet can show
+// motion no operator is watching for. Fifteen is past the rate at which a cursor
+// and a scroll read as live, and it costs a quarter as much.
+const STREAM_EVERY_NTH_FRAME = 4;
+// How long a stream may go without sending anything before it captures a frame
+// itself. Two separate reasons, both measured rather than assumed:
+//
+// Chrome will not render a multipart part until another part follows it. A
+// stream carrying a single frame leaves naturalWidth at 0 and fires neither load
+// nor error - it was still 0 after eight seconds - so a still dashboard would
+// show the tablet nothing at all.
+//
+// And a panel that has stopped painting would otherwise leave the tablet looking
+// at an image of unknown age with no way to tell.
+const STREAM_IDLE_MS = 800;
+
+let panelStream = null; // { id, stop } while a tablet is watching
+
+function startPanelStream(id, onFrame, quality, width) {
+  const i = indexOfId(id);
+  if (i < 0) return { notFound: true };
+  const wc = contentViews[i] && contentViews[i].webContents;
+  if (!wc || wc.isDestroyed()) return { ok: false, reason: 'panel has no live view' };
+  if (panelStream) {
+    return { ok: false, reason: `already streaming ${panelStream.id}, one at a time` };
+  }
+
+  const dbg = wc.debugger;
+  try {
+    if (!dbg.isAttached()) dbg.attach('1.3');
+  } catch (e) {
+    // DevTools holding the panel is the expected cause: Chromium allows one
+    // client at a time and refuses the second. Answered as a reason rather than
+    // swallowed, so the tablet says why instead of showing an empty rectangle.
+    return { ok: false, reason: `could not attach to the panel: ${e.message}` };
+  }
+
+  const q = clampQuality(quality);
+  const w = clampWidth(width);
+  let stopped = false;
+  // Two counters, because they answer different questions. screencastFrames
+  // gates the priming capture: it must only fire while the screencast itself has
+  // produced nothing. delivered is what the log reports, and it has to include
+  // the primed and keepalive frames or a stream that worked perfectly well on a
+  // static panel reads as "0 frames" in the log.
+  let screencastFrames = 0;
+  let delivered = 0;
+  let idleTimer = null;
+
+  // sendCommand rejects rather than throws, and it always rejects once the
+  // debugger is detached. A rejection during teardown is the normal shape of
+  // shutting down, so only a live one is worth a line in the log.
+  const send = (method, params) =>
+    dbg.sendCommand(method, params).catch((e) => {
+      if (!stopped) warn(`stream ${method} failed for ${id}: ${e.message}`);
+    });
+
+  // Everything that sends a frame goes through here, so the idle clock cannot be
+  // fooled by a path that forgot to wind it.
+  let lastFrameAt = 0;
+  const deliver = (jpeg) => {
+    lastFrameAt = Date.now();
+    delivered++;
+    onFrame(jpeg);
+  };
+
+  const onMessage = (_event, method, params) => {
+    if (method !== 'Page.screencastFrame' || stopped) return;
+    screencastFrames++;
+    try {
+      const jpeg = Buffer.from(params.data, 'base64');
+      if (jpeg.length) deliver(jpeg);
+    } catch (e) {
+      warn(`stream frame failed for ${id}: ${e.message}`);
+    }
+    // Unconditional, and after delivery rather than instead of it. Chromium
+    // sends no further frames until the current one is acked and never says so:
+    // a missed ack is a stream that simply stops, which is the single most
+    // common way this breaks. A frame the socket was too busy to take still has
+    // to be acked.
+    send('Page.screencastFrameAck', { sessionId: params.sessionId });
+  };
+
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    if (idleTimer) clearInterval(idleTimer);
+    if (panelStream && panelStream.stop === stop) panelStream = null;
+    dbg.removeListener('message', onMessage);
+    try {
+      wc.removeListener('destroyed', stop);
+      if (!wc.isDestroyed()) {
+        send('Page.stopScreencast');
+        if (dbg.isAttached()) dbg.detach();
+      }
+    } catch (e) {
+      // A panel torn down underneath us takes its debugger with it. Nothing here
+      // is worth failing the teardown over.
+      warn(`stream teardown for ${id}: ${e.message}`);
+    }
+    log(`stream stopped for ${id} after ${delivered} frames`);
+  };
+
+  dbg.on('message', onMessage);
+  // A recycle or a crash closes the webContents and would otherwise leave this
+  // holding the one stream slot with nothing on the other end.
+  wc.once('destroyed', stop);
+
+  // Registered before the first frame can arrive. stop() clears this slot by
+  // identity, so a stream that gives up immediately must not be overwritten by
+  // an assignment behind it, leaving a dead stream holding the slot and every
+  // later request refused as "already streaming".
+  panelStream = { id, stop };
+
+  // Prime the stream with one still.
+  //
+  // Page.startScreencast emits nothing until the page next paints, and a
+  // dashboard that is not animating may never paint again. Measured on the mock
+  // pages: a static panel produced zero frames over 2.5 seconds and an animating
+  // one produced 62, and a static panel that had just been reloaded still
+  // produced zero, because its repaints happened before the screencast attached.
+  // Without this a tablet attaching to a still dashboard shows an empty
+  // rectangle for as long as somebody leaves it there.
+  capturePanelFrame(id, q, w).then((shot) => {
+    // Only while the screencast has produced nothing. On a panel that is
+    // painting, its frames are newer than this capture and handing this one over
+    // late would step the picture backwards.
+    if (!stopped && screencastFrames === 0 && shot.ok) deliver(shot.jpeg);
+  });
+
+  // capturePage is async and can outlast the tick that asked for it, so a slow
+  // capture must not stack up behind itself.
+  let capturingIdle = false;
+  idleTimer = setInterval(
+    () => {
+      if (stopped || capturingIdle || Date.now() - lastFrameAt < STREAM_IDLE_MS) return;
+      capturingIdle = true;
+      capturePanelFrame(id, q, w)
+        .then((shot) => {
+          if (!stopped && shot.ok) deliver(shot.jpeg);
+        })
+        .finally(() => {
+          capturingIdle = false;
+        });
+    },
+    Math.round(STREAM_IDLE_MS / 2)
+  );
+
+  send('Page.enable');
+  send('Page.startScreencast', {
+    format: 'jpeg',
+    quality: q,
+    // Downscaling happens here, before encoding, so a 4K panel never crosses the
+    // wire at full size and never costs a full-size JPEG encode either.
+    maxWidth: w,
+    maxHeight: Math.round((w * STREAM_MAX_HEIGHT) / STREAM_MAX_WIDTH),
+    everyNthFrame: STREAM_EVERY_NTH_FRAME,
+  });
+  log(`stream started for ${id} at quality ${q}, width ${w}`);
+  return { ok: true, stop };
+}
+
+// One frame, as an ordinary JPEG. The fallback transport for a browser whose
+// multipart decoder does not work, and the thing to curl when the question is
+// simply "what is this panel showing".
+//
+// capturePage rather than the screencast, deliberately and unlike the stream.
+// It needs no debugger session, so a still costs nothing against the one stream
+// slot: a tablet can poll this panel while another panel is being streamed, and
+// DevTools being open on it does not block a still the way it blocks a stream.
+async function capturePanelFrame(id, quality, width) {
+  const i = indexOfId(id);
+  if (i < 0) return { notFound: true };
+  const wc = contentViews[i] && contentViews[i].webContents;
+  if (!wc || wc.isDestroyed()) return { ok: false, reason: 'panel has no live view' };
+  try {
+    const shot = await wc.capturePage();
+    const cap = clampWidth(width);
+    const wide = shot.getSize().width > cap;
+    const jpeg = (wide ? shot.resize({ width: cap }) : shot).toJPEG(clampQuality(quality));
+    // What a panel that has not composited yet returns. A zero-byte image is not
+    // a JPEG, so answering with it would be worse than saying why.
+    if (!jpeg.length) return { ok: false, reason: 'the panel has not composited a frame yet' };
+    return { ok: true, jpeg };
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
+}
+
+// Injected input, from a tablet.
+//
+// sendInputEvent rather than the debugger's Input.dispatchMouseEvent: it needs
+// no debugger session, so it does not compete with the screencast and it still
+// works on a panel that has DevTools open. Pages cannot tell these from real
+// input.
+//
+// It also bypasses OS hit testing entirely, which has a consequence worth
+// knowing: the overlay is not in the way. On the wall a WebContentsView consumes
+// every event that lands on it, which is why the overlay has to be hidden for
+// panels to be interactive and why promotion exists at all. A tablet is not
+// subject to that, so it can drive a panel in grid mode without changing what
+// the wall is showing.
+function sendPanelInput(id, events) {
+  const i = indexOfId(id);
+  if (i < 0) return { notFound: true };
+  const wc = contentViews[i] && contentViews[i].webContents;
+  if (!wc || wc.isDestroyed()) return { ok: false, reason: 'panel has no live view' };
+
+  const built = inputEvents(events);
+  if (!built.ok) return built;
+
+  try {
+    built.events.forEach((e) => {
+      // Two of these are not input events at all. The clipboard and the
+      // selection live on webContents as commands, and key injection cannot
+      // reach them: an injected Cmd+V arrives at the page as a keydown and
+      // pastes nothing. panel-input.js has the measurement.
+      if (e.type === 'edit') wc[e.command]();
+      else if (e.type === 'insertText') wc.insertText(e.text);
+      else wc.sendInputEvent(e);
+    });
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
+  // Counts as use, the same as somebody at the wall: upkeep leaves an in-use
+  // panel alone, and a tablet operator working a dashboard is exactly the case
+  // that should not have the page reloaded out from under them.
+  touched.set(id, Date.now());
+  return { ok: true };
+}
+
 const controlActions = {
   status: wallStatus,
   page: () => statusPage(),
+  touchPage: () => touchPage(),
+  // Long-lived: answers with a stop() the control server calls when the tablet
+  // disconnects. See startPanelStream above.
+  startPanelStream,
+  // Async, unlike every other action: the control server awaits it. See
+  // capturePanelFrame above for why this does not use the screencast.
+  capturePanelFrame,
+  sendPanelInput,
   applyPreset: (id) => {
     if (!findPreset(id)) return false;
     applyPreset(id);
@@ -3768,7 +4090,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
-    Menu.setApplicationMenu(null);
+    Menu.setApplicationMenu(applicationMenu());
     // Same reason as the window icon above: in development the Dock shows
     // Electron's icon, because the app is running inside Electron's own bundle.
     if (!app.isPackaged && app.dock && fs.existsSync(DEV_ICON)) {
@@ -3779,6 +4101,20 @@ if (!app.requestSingleInstanceLock()) {
       }
     }
     openDiagLog();
+    // A wall that blanks is not a wall. Windows turns the display off on an idle
+    // timer and runs a screensaver over it, and neither one counts our panels as
+    // activity, because nobody is touching the keyboard in front of an exhibit.
+    // prevent-display-sleep suppresses both for as long as the app is up, so the
+    // machine needs no power-plan surgery before a show and cannot drift back
+    // after one. It is also why "a locked or blanked screen" could invalidate a
+    // soak: the app was not defending against the thing it was being measured
+    // through.
+    try {
+      powerSaveBlockerId = powerSaveBlocker.start('prevent-display-sleep');
+      log(`holding the display awake (power save blocker ${powerSaveBlockerId})`);
+    } catch (e) {
+      warn(`could not hold the display awake: ${e.message}`);
+    }
     try {
       configPath = resolveConfigPath();
       config = loadConfig(configPath, { onWarn: warn });
@@ -3850,6 +4186,16 @@ if (!app.requestSingleInstanceLock()) {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  // Released explicitly rather than left to process exit, so a run that ends
+  // hands the display timer back to whoever owns the machine next.
+  if (powerSaveBlockerId !== null) {
+    try {
+      powerSaveBlocker.stop(powerSaveBlockerId);
+    } catch (e) {
+      warn(`could not release the display: ${e.message}`);
+    }
+    powerSaveBlockerId = null;
+  }
   if (controlServer) controlServer.close();
   // A run that ends must say whether it ended on purpose. Silence at the end of
   // a soak log is otherwise indistinguishable from a kill.

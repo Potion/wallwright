@@ -69,8 +69,84 @@ function fakeWall() {
         calls.push(['recycle', id]);
         return id === null || state.panels.includes(id);
       },
+      touchPage: () => '<!doctype html><title>touch stub</title>',
+      sendPanelInput: (id, events) => {
+        calls.push(['sendPanelInput', id, events]);
+        if (!state.panels.includes(id)) return { notFound: true };
+        if (!Array.isArray(events) || !events.length) {
+          return { ok: false, reason: 'events must be a non-empty array' };
+        }
+        return { ok: true };
+      },
+      // Async, like the real one, so the route has to await it.
+      capturePanelFrame: async (id, q, w) => {
+        calls.push(['capturePanelFrame', id, q, w]);
+        if (!state.panels.includes(id)) return { notFound: true };
+        if (state.captureRefusal) return { ok: false, reason: state.captureRefusal };
+        return { ok: true, jpeg: Buffer.from('JPEGBYTES', 'latin1') };
+      },
+      // Mirrors the real action: a verdict, and on success a stop() the server
+      // owns. `emit` lets a test push frames at the moment it chooses, which is
+      // the only way to test framing without waiting on a real capture.
+      startPanelStream: (id, onFrame, q, w) => {
+        calls.push(['startPanelStream', id, q, w]);
+        if (!state.panels.includes(id)) return { notFound: true };
+        if (state.streamRefusal) return { ok: false, reason: state.streamRefusal };
+        state.emit = onFrame;
+        state.stops = state.stops || [];
+        const stop = () => state.stops.push(id);
+        return { ok: true, stop };
+      },
     },
   };
+}
+
+// Frames sent, counted off the wire. One boundary opens the stream and every
+// frame supplies the one that closes it, so the frame count is one less than the
+// number of boundaries.
+const frameCount = (body) => body.split('--wallwrightframe').length - 2;
+
+// A JPEG only in so far as anything downstream cares: the server writes the
+// bytes it is handed and never looks inside them.
+const jpegOf = (text) => Buffer.from(text, 'latin1');
+
+// request() buffers to completion, which never happens on a stream. This one
+// hands back the response as soon as the head arrives, plus the chunks as they
+// land and a way to hang up like a tablet walking out of range.
+function openStream(base, path) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(base + path);
+    const req = http.request(
+      {
+        method: 'GET',
+        hostname: url.hostname,
+        port: url.port,
+        path: url.pathname + url.search,
+      },
+      (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        resolve({
+          res,
+          status: res.statusCode,
+          type: res.headers['content-type'],
+          body: () => Buffer.concat(chunks).toString('latin1'),
+          hangUp: () => req.destroy(),
+        });
+      }
+    );
+    req.on('error', (e) => {
+      // Expected once the test hangs up; anything before that is a real failure.
+      if (e.code !== 'ECONNRESET') reject(e);
+    });
+    req.end();
+  });
+}
+
+// The server writes each frame in one go, but TCP is free to split it, so a test
+// that wants to count parts has to wait for the bytes rather than assume them.
+function settle(ms = 50) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 // Start on port 0 so tests never collide with anything already listening, which
@@ -97,7 +173,7 @@ function request(base, method, path, body) {
     const url = new URL(base + path);
     const payload = body === undefined ? null : body;
     const req = http.request(
-      { method, hostname: url.hostname, port: url.port, path: url.pathname },
+      { method, hostname: url.hostname, port: url.port, path: url.pathname + url.search },
       (res) => {
         let raw = '';
         res.on('data', (c) => (raw += c));
@@ -400,5 +476,404 @@ test('an unapplicable field on a missing panel is still a 404', async () => {
       patch: { allowedOrigins: [] },
     });
     assert.equal(r.status, 404);
+  });
+});
+
+// ---- panel stream -----------------------------------------------------------
+//
+// The one long-lived response on this server, and the only one that writes bytes
+// rather than JSON. What these check is the framing and the handover to the
+// wall: the server never looks inside a frame, so the fake's "JPEGs" are text.
+
+test('GET /api/stream answers multipart and frames the bytes it is handed', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const s = await openStream(base, '/api/stream?id=a');
+    assert.strictEqual(s.status, 200);
+    assert.match(s.type, /multipart\/x-mixed-replace; boundary=wallwrightframe/);
+    assert.deepStrictEqual(w.calls[0], ['startPanelStream', 'a', undefined, undefined]);
+
+    w.state.emit(jpegOf('FIRSTFRAME'));
+    w.state.emit(jpegOf('SECOND'));
+    await settle();
+
+    const body = s.body();
+    // One boundary opens the stream and each frame is closed by its own, so two
+    // frames means three boundaries.
+    assert.strictEqual(frameCount(body), 2);
+    assert.ok(body.startsWith('--wallwrightframe\r\n'), 'the stream opens with a boundary');
+    // The last frame must be terminated, or a decoder holds it and renders
+    // nothing. This is the whole reason the boundary trails rather than leads.
+    assert.ok(body.endsWith('\r\n--wallwrightframe\r\n'), 'the last frame is closed');
+    assert.match(body, /Content-Type: image\/jpeg\r\nContent-Length: 10\r\n\r\nFIRSTFRAME\r\n/);
+    assert.match(body, /Content-Length: 6\r\n\r\nSECOND\r\n/);
+    s.hangUp();
+  });
+});
+
+// The whole of the cleanup contract: the wall keeps capturing until the server
+// says otherwise, and the only signal that a tablet has gone is the socket.
+test('the wall is told to stop when the client hangs up', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const s = await openStream(base, '/api/stream?id=a');
+    w.state.emit(jpegOf('x'));
+    await settle();
+    assert.deepStrictEqual(w.state.stops, []);
+    s.hangUp();
+    await settle();
+    assert.deepStrictEqual(w.state.stops, ['a']);
+  });
+});
+
+test('a stream for a panel that does not exist is a 404, not an empty stream', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const r = await request(base, 'GET', '/api/stream?id=nope');
+    assert.strictEqual(r.status, 404);
+    assert.match(r.type, /application\/json/);
+    assert.match(json(r).error, /no such panel/);
+  });
+});
+
+// The distinction the POST routes already draw, held here too: 404 is "there is
+// no such panel", 400 is "there is, and I will not". DevTools being attached to
+// the panel is the refusal this exists for.
+test('a refused stream is a 400 carrying the reason', async () => {
+  const w = fakeWall();
+  w.state.streamRefusal = 'DevTools is open on this panel';
+  await withServer(w.actions, async (base) => {
+    const r = await request(base, 'GET', '/api/stream?id=a');
+    assert.strictEqual(r.status, 400);
+    assert.match(json(r).error, /DevTools is open/);
+  });
+});
+
+test('a stream with no id is a 400 and never reaches the wall', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const r = await request(base, 'GET', '/api/stream');
+    assert.strictEqual(r.status, 400);
+    assert.match(json(r).error, /id is required/);
+    assert.strictEqual(w.calls.length, 0);
+  });
+});
+
+// A wall that hands over a frame from inside startPanelStream, before the server
+// has written a status line. Node would answer that write with an implicit 200
+// and no content type, and the tablet would render nothing at all. The frame is
+// dropped and the stream carries on.
+test('a frame emitted before the head is dropped, not written ahead of it', async () => {
+  const w = fakeWall();
+  w.actions.startPanelStream = (id, onFrame) => {
+    onFrame(jpegOf('TOOEARLY'));
+    w.state.emit = onFrame;
+    return { ok: true, stop: () => {} };
+  };
+  await withServer(w.actions, async (base) => {
+    const s = await openStream(base, '/api/stream?id=a');
+    assert.match(s.type, /multipart\/x-mixed-replace/);
+    w.state.emit(jpegOf('INTIME'));
+    await settle();
+    const body = s.body();
+    assert.ok(!body.includes('TOOEARLY'), 'the early frame should have been dropped');
+    assert.match(body, /INTIME/);
+    s.hangUp();
+  });
+});
+
+// Frames keep arriving after the client has gone, because the wall only learns
+// to stop on the next tick. Writing them must not throw.
+test('frames after a hang-up are swallowed, and the server survives', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const s = await openStream(base, '/api/stream?id=a');
+    s.hangUp();
+    await settle();
+    w.state.emit(jpegOf('late'));
+    w.state.emit(jpegOf('later'));
+    assert.strictEqual((await request(base, 'GET', '/api/status')).status, 200);
+  });
+});
+
+// A wall action that throws on the way in is a 500 like any other, because the
+// head has not gone out yet and there is still a status line to spend.
+test('a throwing startPanelStream is a 500, and the server survives', async () => {
+  const w = fakeWall();
+  w.actions.startPanelStream = () => {
+    throw new Error('boom');
+  };
+  await withServer(w.actions, async (base) => {
+    const r = await request(base, 'GET', '/api/stream?id=a');
+    assert.strictEqual(r.status, 500);
+    assert.match(json(r).error, /boom/);
+    assert.strictEqual((await request(base, 'GET', '/api/status')).status, 200);
+  });
+});
+
+// Contrived on purpose: nothing in the wall throws from a property read today.
+// The guard it exercises is not contrived, because once the head is out the
+// catch-all has no status line left to write and trying anyway throws
+// ERR_HTTP_HEADERS_SENT from inside the handler that is already reporting an
+// error. That second throw is unhandled and takes the control surface down.
+test('an error after the head drops the socket instead of the server', async () => {
+  const w = fakeWall();
+  w.actions.startPanelStream = () => ({
+    ok: true,
+    get stop() {
+      throw new Error('after the head');
+    },
+  });
+  await withServer(w.actions, async (base) => {
+    const s = await openStream(base, '/api/stream?id=a');
+    assert.strictEqual(s.status, 200);
+    s.hangUp();
+    await settle();
+    // The surface is still answering, which is the whole point of the guard.
+    assert.strictEqual((await request(base, 'GET', '/api/status')).status, 200);
+  });
+});
+
+// The decision the stream rests on. A tablet that cannot keep up must fall
+// behind by dropping frames, never by queueing them: a queue means the wall and
+// the tablet drift apart without bound, and every frame in it is stale by the
+// time it is drawn. Pausing the response is a client that has stopped reading.
+test('frames are dropped, not queued, when the socket backs up', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const s = await openStream(base, '/api/stream?id=a');
+    s.res.pause();
+
+    const big = jpegOf('x'.repeat(1e6));
+    for (let i = 0; i < 8; i++) w.state.emit(big);
+    await settle();
+
+    s.res.resume();
+    await settle(150);
+    const parts = frameCount(s.body());
+    assert.ok(parts < 8, `expected frames to be dropped, got all ${parts} of them`);
+
+    // And the stream recovers: once the socket drains, the next frame is written
+    // rather than the stream being wedged shut by the first drop.
+    w.state.emit(jpegOf('AFTERDRAIN'));
+    await settle(150);
+    assert.match(s.body(), /AFTERDRAIN/);
+    s.hangUp();
+  });
+});
+
+test('the stream is a GET route only', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    assert.strictEqual((await request(base, 'POST', '/api/stream', { id: 'a' })).status, 404);
+    assert.strictEqual(w.calls.length, 0);
+  });
+});
+
+// ---- single frame and the touch page ----------------------------------------
+//
+// The fallback transport. A browser that cannot decode multipart can still ask
+// for one ordinary image at a time, so this route has to behave like an image
+// endpoint and not like the stream.
+
+test('GET /api/frame answers one JPEG with a real content length', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const r = await request(base, 'GET', '/api/frame?id=a');
+    assert.strictEqual(r.status, 200);
+    assert.match(r.type, /image\/jpeg/);
+    assert.strictEqual(r.raw, 'JPEGBYTES');
+    assert.deepStrictEqual(w.calls[0], ['capturePanelFrame', 'a', undefined, undefined]);
+  });
+});
+
+// It must not go near the stream: a tablet polling stills while somebody else
+// streams a different panel is the case this exists to allow.
+test('a still does not take the stream slot', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const s = await openStream(base, '/api/stream?id=a');
+    assert.strictEqual(s.status, 200);
+    const r = await request(base, 'GET', '/api/frame?id=b');
+    assert.strictEqual(r.status, 200);
+    assert.match(r.type, /image\/jpeg/);
+    s.hangUp();
+  });
+});
+
+test('a still for a panel that does not exist is a 404', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const r = await request(base, 'GET', '/api/frame?id=nope');
+    assert.strictEqual(r.status, 404);
+    assert.match(json(r).error, /no such panel/);
+  });
+});
+
+test('a refused still is a 400 carrying the reason', async () => {
+  const w = fakeWall();
+  w.state.captureRefusal = 'the panel has not composited a frame yet';
+  await withServer(w.actions, async (base) => {
+    const r = await request(base, 'GET', '/api/frame?id=a');
+    assert.strictEqual(r.status, 400);
+    assert.match(json(r).error, /composited/);
+  });
+});
+
+test('a still with no id is a 400 and never reaches the wall', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const r = await request(base, 'GET', '/api/frame');
+    assert.strictEqual(r.status, 400);
+    assert.strictEqual(w.calls.length, 0);
+  });
+});
+
+// The action is async and the route awaits it. A rejection has to land in the
+// catch-all as a 500 rather than an unhandled rejection that takes the surface
+// down.
+test('a rejecting capture is a 500, and the server survives', async () => {
+  const w = fakeWall();
+  w.actions.capturePanelFrame = async () => {
+    throw new Error('capture exploded');
+  };
+  await withServer(w.actions, async (base) => {
+    const r = await request(base, 'GET', '/api/frame?id=a');
+    assert.strictEqual(r.status, 500);
+    assert.match(json(r).error, /capture exploded/);
+    assert.strictEqual((await request(base, 'GET', '/api/status')).status, 200);
+  });
+});
+
+test('GET /touch serves the tablet page as html', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const r = await request(base, 'GET', '/touch');
+    assert.strictEqual(r.status, 200);
+    assert.match(r.type, /text\/html/);
+    assert.match(r.raw, /touch stub/);
+  });
+});
+
+// A single frame on a panel that never paints again is the ordinary case on a
+// wall: most dashboards are still. The part has to be complete on arrival, not
+// when a second frame eventually turns up, or the tablet shows nothing at all.
+test('one frame is complete on its own, not waiting on the next', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const s = await openStream(base, '/api/stream?id=a');
+    w.state.emit(jpegOf('ONLYFRAME'));
+    await settle();
+    const body = s.body();
+    assert.strictEqual(frameCount(body), 1);
+    assert.match(body, /Content-Length: 9\r\n\r\nONLYFRAME\r\n--wallwrightframe\r\n$/);
+    s.hangUp();
+  });
+});
+
+// ---- injected input ---------------------------------------------------------
+
+test('POST /api/input passes the batch through untouched', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const events = [
+      { kind: 'move', x: 10, y: 20 },
+      { kind: 'down', x: 10, y: 20 },
+    ];
+    const r = await request(base, 'POST', '/api/input', { id: 'a', events });
+    assert.strictEqual(r.status, 200);
+    assert.deepStrictEqual(w.calls[0], ['sendPanelInput', 'a', events]);
+  });
+});
+
+test('input for a panel that does not exist is a 404', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const r = await request(base, 'POST', '/api/input', {
+      id: 'nope',
+      events: [{ kind: 'move', x: 1, y: 1 }],
+    });
+    assert.strictEqual(r.status, 404);
+  });
+});
+
+// The distinction every other route draws, held here too.
+test('a refused batch is a 400 carrying the reason', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const r = await request(base, 'POST', '/api/input', { id: 'a', events: [] });
+    assert.strictEqual(r.status, 400);
+    assert.match(json(r).error, /non-empty array/);
+  });
+});
+
+test('input with no id is a 400 and never reaches the wall', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    assert.strictEqual((await request(base, 'POST', '/api/input', {})).status, 400);
+    assert.strictEqual(w.calls.length, 0);
+  });
+});
+
+test('input is a POST route only', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    assert.strictEqual((await request(base, 'GET', '/api/input')).status, 404);
+    assert.strictEqual(w.calls.length, 0);
+  });
+});
+
+// ---- quality ----------------------------------------------------------------
+//
+// A preference, not an instruction: the server passes it through and the wall
+// clamps it. Nothing here should refuse a picture over a silly number.
+
+test('a quality on the stream url reaches the wall', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const s = await openStream(base, '/api/stream?id=a&q=40');
+    assert.strictEqual(s.status, 200);
+    assert.deepStrictEqual(w.calls[0], ['startPanelStream', 'a', 40, undefined]);
+    s.hangUp();
+  });
+});
+
+test('a quality on the still url reaches the wall', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    await request(base, 'GET', '/api/frame?id=a&q=90');
+    assert.deepStrictEqual(w.calls[0], ['capturePanelFrame', 'a', 90, undefined]);
+  });
+});
+
+// Absent and unparseable are the same thing: the wall picks its default.
+test('a missing or nonsense quality is passed as undefined', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    await request(base, 'GET', '/api/frame?id=a');
+    await request(base, 'GET', '/api/frame?id=a&q=lots');
+    assert.strictEqual(w.calls[0][2], undefined);
+    assert.strictEqual(w.calls[1][2], undefined);
+  });
+});
+
+test('an out-of-range quality is still passed through, for the wall to clamp', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    await request(base, 'GET', '/api/frame?id=a&q=1000');
+    assert.strictEqual(w.calls[0][2], 1000);
+  });
+});
+
+// Width is the stronger of the two levers on animation-heavy content, so it
+// travels the same way quality does: passed through, clamped by the wall.
+test('a width on either url reaches the wall', async () => {
+  const w = fakeWall();
+  await withServer(w.actions, async (base) => {
+    const s = await openStream(base, '/api/stream?id=a&q=40&w=640');
+    assert.deepStrictEqual(w.calls[0], ['startPanelStream', 'a', 40, 640]);
+    s.hangUp();
+    await request(base, 'GET', '/api/frame?id=a&w=960');
+    assert.deepStrictEqual(w.calls[1], ['capturePanelFrame', 'a', undefined, 960]);
   });
 });
